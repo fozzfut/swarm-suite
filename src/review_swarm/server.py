@@ -1,8 +1,8 @@
-"""MCP Server with 24 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
-
-from __future__ import annotations
+"""MCP Server with 26 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
 
 from dataclasses import dataclass, field
+from typing import Optional
+
 from .config import Config
 from .rate_limiter import RateLimiter
 from .session_manager import SessionManager
