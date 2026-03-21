@@ -35,6 +35,8 @@ def sample_session_dir(tmp_storage):
     (sess_dir / "findings.jsonl").write_text("")
     (sess_dir / "claims.json").write_text("[]")
     (sess_dir / "reactions.jsonl").write_text("")
+    (sess_dir / "events.jsonl").write_text("")
+    (sess_dir / "messages.jsonl").write_text("")
     return sess_dir
 
 

@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import Config
+from .event_bus import SessionEventBus
 from .finding_store import FindingStore
 from .claim_registry import ClaimRegistry
+from .message_bus import MessageBus
 from .reaction_engine import ReactionEngine
 from .models import now_iso
 
@@ -22,6 +24,8 @@ class SessionManager:
         self._stores: dict[str, FindingStore] = {}
         self._claims: dict[str, ClaimRegistry] = {}
         self._engines: dict[str, ReactionEngine] = {}
+        self._event_buses: dict[str, SessionEventBus] = {}
+        self._message_buses: dict[str, MessageBus] = {}
         self._lock = threading.Lock()
 
     def start_session(self, project_path: str, name: str | None = None) -> str:
@@ -47,6 +51,8 @@ class SessionManager:
             (sess_dir / "findings.jsonl").write_text("", encoding="utf-8")
             (sess_dir / "claims.json").write_text("[]", encoding="utf-8")
             (sess_dir / "reactions.jsonl").write_text("", encoding="utf-8")
+            (sess_dir / "events.jsonl").write_text("", encoding="utf-8")
+            (sess_dir / "messages.jsonl").write_text("", encoding="utf-8")
 
             # Auto-suggest experts if configured (spec requirement)
             if self._expert_profiler and self._config.experts.auto_suggest:
@@ -94,6 +100,8 @@ class SessionManager:
             self._stores.pop(session_id, None)
             self._claims.pop(session_id, None)
             self._engines.pop(session_id, None)
+            self._event_buses.pop(session_id, None)
+            self._message_buses.pop(session_id, None)
 
             return result
 
@@ -121,8 +129,29 @@ class SessionManager:
             if not meta_file.exists():
                 continue
             meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            # Auto-expire stale active sessions
+            if meta.get("status") == "active":
+                self._auto_expire_if_stale(sess_dir, meta)
             sessions.append(meta)
         return sessions
+
+    def _auto_expire_if_stale(self, sess_dir: Path, meta: dict) -> None:
+        """Mark session as expired if it exceeds session_timeout_hours."""
+        created = meta.get("created_at", "")
+        if not created:
+            return
+        try:
+            created_dt = datetime.fromisoformat(created)
+        except ValueError:
+            return
+        from datetime import timedelta
+        timeout = timedelta(hours=self._config.session_timeout_hours)
+        if datetime.now(timezone.utc) - created_dt > timeout:
+            meta["status"] = "expired"
+            meta["expired_at"] = now_iso()
+            (sess_dir / "meta.json").write_text(
+                json.dumps(meta, indent=2), encoding="utf-8"
+            )
 
     def get_finding_store(self, session_id: str) -> FindingStore:
         if session_id not in self._stores:
@@ -149,6 +178,22 @@ class SessionManager:
                 confirm_threshold=self._config.consensus.confirm_threshold,
             )
         return self._engines[session_id]
+
+    def get_message_bus(self, session_id: str) -> MessageBus:
+        if session_id not in self._message_buses:
+            sess_dir = self._session_dir(session_id)
+            self._message_buses[session_id] = MessageBus(
+                session_id, sess_dir / "messages.jsonl",
+            )
+        return self._message_buses[session_id]
+
+    def get_event_bus(self, session_id: str) -> SessionEventBus:
+        if session_id not in self._event_buses:
+            sess_dir = self._session_dir(session_id)
+            self._event_buses[session_id] = SessionEventBus(
+                session_id, sess_dir / "events.jsonl",
+            )
+        return self._event_buses[session_id]
 
     def get_project_path(self, session_id: str) -> str:
         sess_dir = self._session_dir(session_id)
@@ -186,3 +231,5 @@ class SessionManager:
                 self._stores.pop(sid, None)
                 self._claims.pop(sid, None)
                 self._engines.pop(sid, None)
+                self._event_buses.pop(sid, None)
+                self._message_buses.pop(sid, None)

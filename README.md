@@ -1,37 +1,96 @@
-# ReviewSwarm
+<p align="center">
+  <img src="https://img.shields.io/badge/ReviewSwarm-v0.2.0-blueviolet?style=for-the-badge" alt="Version" />
+</p>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-98%20passing-brightgreen.svg)]()
-[![Version](https://img.shields.io/badge/version-0.1.1-orange.svg)](pyproject.toml)
+<h1 align="center">ReviewSwarm</h1>
 
-Collaborative AI code review via MCP. Multiple specialized agents review your code simultaneously, coordinate through a shared whiteboard, and reach consensus on findings.
+<p align="center">
+  <strong>Collaborative AI Code Review via MCP</strong><br>
+  Multiple specialized AI agents review your code simultaneously,<br>
+  coordinate through a shared whiteboard, and reach consensus on findings.
+</p>
 
-ReviewSwarm is **not** an LLM -- it's infrastructure. It provides 12 MCP tools that AI agents use to post findings, claim files, react to each other's work, and generate reports. You spawn the agents; ReviewSwarm coordinates them.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python 3.10+" /></a>
+  <img src="https://img.shields.io/badge/tests-215%20passing-brightgreen.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/experts-13-orange.svg" alt="Experts" />
+  <img src="https://img.shields.io/badge/MCP_tools-23-blue.svg" alt="MCP Tools" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg" alt="Platform" />
+</p>
+
+---
+
+## One Command Review
+
+```bash
+review-swarm review . --scope src/ --task "security audit"
+```
+
+Or via MCP:
+
+```
+orchestrate_review(project_path=".", scope="src/", task="security audit")
+```
+
+ReviewSwarm creates a session, selects experts, assigns files, and returns a step-by-step plan. The LLM agent follows the plan — you get a complete multi-expert review report.
+
+```
+You: "Review src/ for security"
+  │
+  ▼
+ReviewSwarm Orchestrator
+  ├─ Creates session sess-2026-03-22-001
+  ├─ Scans 47 source files in src/
+  ├─ Selects: security-surface, error-handling, api-signatures
+  ├─ Assigns files to experts
+  └─ Returns 3-phase execution plan
+       │
+       ▼
+  Phase 1: Review ─── each expert reviews files, posts findings
+  Phase 2: Cross-check ─── experts confirm/dispute each other
+  Phase 3: Report ─── aggregated report with consensus
+```
+
+**Task keywords** (EN/RU): security, performance, concurrency, quality, pre-release, bug, type, log, dependency, test, doc — the orchestrator auto-selects relevant experts.
+
+---
+
+## What is ReviewSwarm?
+
+ReviewSwarm is **not** an LLM — it's **infrastructure**. It provides **23 MCP tools** that AI agents use to:
+
+- **Post findings** with structured evidence (actual + expected + source_ref)
+- **Claim files** for review (advisory locks with TTL)
+- **React** to each other's work (confirm, dispute, extend, duplicate)
+- **Message each other** — direct, broadcast, query/response (star topology)
+- **Reach consensus** automatically (2+ confirms = confirmed)
+- **Generate reports** in Markdown, JSON, or SARIF
+
+**Key principle:** agents form a **REVIEW** — they produce a recommendation report, not code changes. Agents never modify project files.
+
+---
 
 ## Install
 
 ```bash
 pip install review-swarm
-
-# or from source
-cd review-swarm
-pip install -e ".[dev]"
 ```
 
-## Quick Start
-
-### 1. Initialize
+From source:
 
 ```bash
-review-swarm init
+git clone https://github.com/fozzfut/review-swarm.git
+cd review-swarm && pip install -e ".[dev]"
 ```
 
-Creates `~/.review-swarm/config.yaml` with default settings.
+---
 
-### 2. Add to Claude Code
+## IDE Setup
 
-Add to your `~/.claude/settings.json` (or project `.mcp.json`):
+### Claude Code
+
+Add to `~/.claude/settings.json` or project `.mcp.json`:
 
 ```json
 {
@@ -44,7 +103,9 @@ Add to your `~/.claude/settings.json` (or project `.mcp.json`):
 }
 ```
 
-Or with SSE transport (for multi-client like Cursor/Windsurf):
+### Cursor / Windsurf / Cline (SSE)
+
+Start server first: `review-swarm serve --port 8787`
 
 ```json
 {
@@ -56,243 +117,253 @@ Or with SSE transport (for multi-client like Cursor/Windsurf):
 }
 ```
 
-Start the server first: `review-swarm serve --port 8787`
-
-### 3. Run a Review
-
-Tell your AI assistant:
-
-> "Start a ReviewSwarm session for this project. Use the threading-safety, api-signatures, and consistency experts. Review all Python files in src/."
-
-The agent will:
-1. Call `start_session` with your project path
-2. Call `suggest_experts` to see recommended experts
-3. Call `claim_file` for each file it reviews
-4. Call `post_finding` for each issue found (with evidence)
-5. Call `get_findings` to see what other experts found
-6. Call `react` to confirm/dispute other findings
-7. Call `get_summary` for the final report
-
-### 4. Multi-Agent Review (the real power)
-
-Launch 3 parallel agents, each with a different expert role:
-
-```
-Agent A (threading-safety): "You are a Threading Safety Expert reviewing this project.
-  Use the ReviewSwarm MCP tools. Session ID: sess-2026-03-21-001.
-  Claim files before reviewing. Post findings with evidence.
-  Check other experts' findings and react to them."
-
-Agent B (api-signatures): same prompt, different role
-
-Agent C (consistency): same prompt, different role
-```
-
-Each agent claims files, posts findings, and reacts to others' work. ReviewSwarm tracks consensus automatically:
-- **2+ confirms** (no disputes) = finding is **confirmed**
-- **1+ dispute** = finding is **disputed** (with reason)
-- **duplicate** reactions link related findings
+---
 
 ## CLI
 
 ```bash
-review-swarm --version             # Show version
-review-swarm init                  # Create default config
-review-swarm serve --transport stdio  # Start MCP server (stdio)
-review-swarm serve --port 8787     # Start MCP server (SSE)
-review-swarm list-sessions         # List all sessions
-review-swarm report <session-id>   # Generate report (markdown or --format json)
-review-swarm purge --older-than 30 # Delete completed sessions older than 30 days
-review-swarm purge --dry-run       # Preview what would be deleted
-review-swarm prompt --list         # List available expert profiles
-review-swarm prompt <expert-name>  # Print system prompt for an expert
+# Orchestrator (one-command review)
+review-swarm review . --scope src/ --task "security audit"
+review-swarm review . --task "pre-release" --experts 5
+
+# Server
+review-swarm serve --transport stdio
+review-swarm serve --port 8787
+
+# Session management
+review-swarm init
+review-swarm list-sessions
+review-swarm report <session-id>
+review-swarm report <session-id> --format json
+
+# Monitoring & analysis
+review-swarm tail <session-id>                           # Live event stream
+review-swarm stats                                       # Aggregate stats
+review-swarm stats <session-id>                          # Session breakdown
+review-swarm diff <session-a> <session-b>                # Compare reviews
+review-swarm export <session-id> --format sarif -o out.sarif
+
+# Expert profiles
+review-swarm prompt --list
+review-swarm prompt <expert-name>
+
+# Maintenance
+review-swarm purge --older-than 30
 ```
 
-## MCP Tools (12 total)
+---
 
-### Session Management
+## MCP Tools (23)
+
+### Orchestrator
+
 | Tool | Description |
 |------|-------------|
-| `start_session` | Start a review session for a project path |
-| `end_session` | End session, release claims, get summary stats |
-| `get_session` | Get current session state (finding counts, claims) |
+| `orchestrate_review` | One-command review. Provide scope + task, get a complete execution plan. |
+
+### Session Management
+
+| Tool | Description |
+|------|-------------|
+| `start_session` | Start a review session |
+| `end_session` | End session, release claims, get summary |
+| `get_session` | Get session state |
 | `list_sessions` | List all sessions |
 
 ### Expert Coordination
+
 | Tool | Description |
 |------|-------------|
-| `suggest_experts` | Analyze project, recommend expert profiles |
-| `claim_file` | Claim a file for review (prevents duplicate work) |
+| `suggest_experts` | Recommend expert profiles for project |
+| `claim_file` | Claim a file for review (30min TTL) |
 | `release_file` | Release a claimed file |
-| `get_claims` | See which files are currently claimed |
+| `get_claims` | See current claims |
 
 ### Findings
+
 | Tool | Description |
 |------|-------------|
-| `post_finding` | Post a finding with evidence (actual + expected + source_ref) |
-| `get_findings` | Query findings with filters (severity, file, status, etc.) |
-| `react` | React to a finding: confirm, dispute, extend, or duplicate |
-| `get_summary` | Generate markdown or JSON report |
+| `post_finding` | Post finding with evidence. Rate-limited. Path-validated. |
+| `post_findings_batch` | Post multiple findings in one call |
+| `get_findings` | Query findings with filters + pagination |
+| `find_duplicates` | Check for duplicates before posting |
+| `react` | Confirm, dispute, extend, or mark duplicate |
+| `post_comment` | Inline comment on a finding |
+| `get_summary` | Generate Markdown/JSON report |
 
-### post_finding Parameters
+### Real-Time
 
-Every finding requires evidence:
+| Tool | Description |
+|------|-------------|
+| `get_events` | Get events since timestamp (polling fallback) |
+
+### Agent Messaging (Star Topology)
+
+| Tool | Description |
+|------|-------------|
+| `send_message` | Direct, broadcast, query, or response. Urgent + context. |
+| `get_inbox` | Get messages with read tracking |
+| `get_thread` | Get query + all responses |
+| `broadcast` | Send to all agents |
+
+Every tool response includes `_pending` — unread messages piggyback on every call so agents react immediately.
+
+---
+
+## 13 Expert Profiles
+
+| Profile | Focus |
+|---------|-------|
+| `threading-safety` | Race conditions, deadlocks, async safety |
+| `api-signatures` | Signature mismatches, type contracts |
+| `consistency` | Broken imports, stale re-exports, config drift |
+| `error-handling` | Swallowed errors, empty catches |
+| `resource-lifecycle` | Unclosed files/connections, missing cleanup |
+| `dead-code` | Unreachable code, unused exports |
+| `security-surface` | Injection, secrets, unsafe deserialization |
+| `dependency-drift` | Unused/missing deps, version conflicts |
+| `project-context` | Documentation accuracy |
+| `test-quality` | Weakened assertions, unrealistic mocks |
+| `performance` | N+1 queries, O(n^2), memory leaks |
+| `logging-patterns` | Sensitive data in logs, missing error logging |
+| `type-safety` | Unchecked null, unsafe casts, any abuse |
+
+All **language-agnostic**: Python, JS/TS, Go, Rust, Java, Kotlin, C#, C/C++, Ruby, Elixir, Swift, PHP.
+
+---
+
+## Consensus
 
 ```
-session_id:        "sess-2026-03-21-001"
-expert_role:       "threading-safety"
-file:              "src/server.py"
-line_start:        42
-line_end:          58
-severity:          "critical" | "high" | "medium" | "low" | "info"
-category:          "bug" | "omission" | "inconsistency" | "security" | "performance" | "style" | "design"
-title:             "Race condition in cache update"
-actual:            "self._cache[key] = value without lock"
-expected:          "Cache writes should be protected by self._lock"
-source_ref:        "src/server.py:45"
-suggestion_action: "fix" | "investigate" | "document" | "ignore"
-suggestion_detail: "Wrap cache write in 'with self._lock:' block"
-confidence:        0.92
+1+ duplicate  →  DUPLICATE
+1+ dispute    →  DISPUTED
+N+ confirm    →  CONFIRMED  (N = confirm_threshold, default 2)
+otherwise     →  OPEN
 ```
 
-**Duplicate detection:** `post_finding` automatically returns `potential_duplicates` when another finding targets the same file + overlapping lines + similar title. The agent can then call `react` with `"duplicate"` to link them.
+---
 
-### react Parameters
+## Agent Communication
+
+Star topology — every agent reaches every other via the hub:
 
 ```
-session_id:          "sess-2026-03-21-001"
-expert_role:         "api-signatures"
-finding_id:          "f-a1b2c3"
-reaction:            "confirm" | "dispute" | "extend" | "duplicate"
-reason:              "Verified: no lock protection on lines 42-58"
-related_finding_id:  "f-d4e5f6"   # for duplicate/extend only
+     threading-safety
+            ↕
+api-signs ↔ Hub ↔ consistency
+            ↕
+     security-surface
 ```
 
-## Built-in Expert Profiles (10)
+**Message types:** `direct`, `broadcast`, `query` (always urgent), `response`
 
-| Profile | Focus Area | Key Checks |
-|---------|-----------|------------|
-| `threading-safety` | Concurrency | Race conditions, deadlocks, shared state, daemon cleanup |
-| `api-signatures` | API Contracts | Signature mismatches, return types, deprecated APIs |
-| `consistency` | Cross-References | Broken imports, stale re-exports, config-code drift |
-| `error-handling` | Robustness | Swallowed errors, unchecked returns, broad catches |
-| `resource-lifecycle` | Resource Leaks | Unclosed files, missing shutdown, use-after-close |
-| `dead-code` | Code Hygiene | Unreachable code, unused exports, orphaned functions |
-| `security-surface` | Security | Injection, hardcoded secrets, unsafe deserialization |
-| `dependency-drift` | Dependencies | Unused/missing deps, manifest-lockfile drift |
-| `project-context` | Documentation | CLAUDE.md/README accuracy, stale docs |
-| `test-quality` | Test Quality | Weakened assertions, unrealistic mocks, missing coverage |
+**Piggyback `_pending`:** every tool response includes unread message count + preview. Agents react immediately — no polling loop, no race conditions.
 
-All profiles are **language-agnostic** -- they detect patterns across Python, JavaScript/TypeScript, Go, Rust, Java, C#, C/C++, Ruby, Elixir, Swift, and PHP.
+**Context:** messages carry structured references to findings:
 
-### Custom Experts
-
-Create YAML files in `~/.review-swarm/custom-experts/`:
-
-```yaml
-name: "My Custom Expert"
-version: "1.0"
-description: "Checks for project-specific patterns"
-file_patterns: ["**/*.py", "**/*.js"]
-exclude_patterns: ["tests/**"]
-relevance_signals:
-  imports: ["flask", "django"]
-  patterns: ["request\\.", "cursor\\.execute"]
-check_rules:
-  - id: "my-check"
-    description: "Description of what to check"
-    severity_default: "high"
-severity_guidance:
-  critical: "When this happens..."
-system_prompt: |
-  You are a Custom Expert. Review code for...
+```json
+{
+  "content": "Is this lock pattern correct?",
+  "urgent": true,
+  "context": {
+    "finding_id": "f-abc",
+    "file": "src/cache.py",
+    "line_start": 20,
+    "severity": "critical"
+  }
+}
 ```
 
-### Using Expert Prompts
+---
 
-Extract any expert's system prompt for use with AI agents:
+## Safety
 
-```bash
-# List available experts
-review-swarm prompt --list
+| Feature | Details |
+|---------|---------|
+| Rate limiting | 60 findings/min, 120 messages/min per agent |
+| Path validation | Rejects `../`, absolute paths, backslashes |
+| Duplicate reactions | Same agent can't confirm/dispute same finding twice |
+| Session auto-expiry | Active sessions expire after 24h |
+| Atomic writes | JSONL uses temp file + `os.replace()` |
+| Max findings | 10,000 per session |
 
-# Get the full system prompt for threading-safety
-review-swarm prompt threading-safety
-
-# Pipe into clipboard (macOS)
-review-swarm prompt security-surface | pbcopy
-```
+---
 
 ## Configuration
 
-Optional. Create via `review-swarm init` or manually at `~/.review-swarm/config.yaml`:
+`~/.review-swarm/config.yaml`:
 
 ```yaml
 storage_dir: "~/.review-swarm"
 max_sessions: 50
 default_format: "markdown"
+session_timeout_hours: 24
 
 consensus:
-  confirm_threshold: 2        # confirms needed without disputes
+  confirm_threshold: 2
   auto_close_duplicates: true
 
 experts:
   custom_dir: "~/.review-swarm/custom-experts"
-  auto_suggest: true           # suggest experts on session start
+  auto_suggest: true
+
+rate_limit:
+  max_findings_per_minute: 60
+  max_messages_per_minute: 120
 ```
 
-Config is validated on load -- invalid values produce clear error messages.
+---
+
+## Architecture
+
+```
+src/review_swarm/
+├── orchestrator.py        # One-command review planning
+├── server.py              # 23 MCP tools + resources + subscriptions
+├── models.py              # Finding, Claim, Reaction, Event, Message
+├── session_manager.py     # Session lifecycle, caching, auto-expiry
+├── finding_store.py       # JSONL storage + in-memory index (atomic writes)
+├── claim_registry.py      # Advisory file claims with TTL
+├── reaction_engine.py     # Consensus engine + duplicate reaction guard
+├── report_generator.py    # Markdown, JSON, SARIF reports
+├── event_bus.py           # Real-time event pub/sub
+├── message_bus.py         # Agent-to-agent messaging (star topology)
+├── rate_limiter.py        # Per-agent sliding window rate limiter
+├── expert_profiler.py     # Profile loading + auto-suggestion
+├── logging_config.py      # Structured logging
+├── config.py              # Config with validation
+├── cli.py                 # Click CLI (review, tail, stats, diff, export...)
+└── experts/               # 13 YAML expert profiles
+```
+
+---
 
 ## Data Storage
 
-Sessions stored in `~/.review-swarm/sessions/`:
+```
+~/.review-swarm/sessions/sess-2026-03-22-001/
+  ├── meta.json
+  ├── findings.jsonl
+  ├── claims.json
+  ├── reactions.jsonl
+  ├── events.jsonl
+  └── messages.jsonl
+```
 
-```
-~/.review-swarm/sessions/
-  sess-2026-03-21-001/
-    meta.json          # Session metadata, status
-    findings.jsonl     # Append-only findings log
-    claims.json        # Current file claims
-    reactions.jsonl    # Reaction log
-```
+---
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                         # 98 tests, <1s
-pytest -v --tb=short           # verbose output
-mypy src/review_swarm/         # type checking
+pytest                    # 215 tests, ~3s
+mypy src/review_swarm/
 ```
 
-## How It Works
+CI: Python 3.10/3.11/3.12 on Ubuntu + Windows.
 
-```
-You (Claude Code / Cursor / Windsurf)
-  |
-  |  "Review this project with 3 experts"
-  v
-Spawn Agent A ──── MCP ──┐
-Spawn Agent B ──── MCP ──┤
-Spawn Agent C ──── MCP ──┤
-                         v
-              ReviewSwarm Server
-              ┌─────────────────┐
-              │  Shared State:  │
-              │  - Findings     │  Agents read each other's work,
-              │  - Claims       │  confirm or dispute findings,
-              │  - Reactions    │  avoid reviewing same files.
-              │  - Consensus    │
-              └─────────────────┘
-                         │
-                         v
-              Final Report (markdown/JSON)
-              - Confirmed findings (2+ agrees)
-              - Disputed findings (with reasons)
-              - Per-file breakdown
-              - Expert coverage map
-```
+---
 
 ## License
 
-MIT
+[MIT](LICENSE) &copy; 2026 Ilya Sidorov

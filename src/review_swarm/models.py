@@ -99,6 +99,7 @@ class Finding:
     # Server-managed
     status: Status = Status.OPEN
     reactions: list[dict] = field(default_factory=list)
+    comments: list[dict] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
 
@@ -131,6 +132,7 @@ class Finding:
             "related_findings": list(self.related_findings),
             "status": self.status.value,
             "reactions": list(self.reactions),
+            "comments": list(self.comments),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -160,6 +162,7 @@ class Finding:
             related_findings=d.get("related_findings", []),
             status=Status(d["status"]),
             reactions=d.get("reactions", []),
+            comments=d.get("comments", []),
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at", ""),
         )
@@ -280,4 +283,123 @@ class Reaction:
             related_finding_id=d.get("related_finding_id", ""),
             created_at=d.get("created_at", ""),
             id=d.get("id", ""),
+        )
+
+
+# ── Event ──────────────────────────────────────────────────────────────
+
+
+class EventType(str, Enum):
+    FINDING_POSTED = "finding_posted"
+    REACTION_ADDED = "reaction_added"
+    STATUS_CHANGED = "status_changed"
+    FILE_CLAIMED = "file_claimed"
+    FILE_RELEASED = "file_released"
+    SESSION_ENDED = "session_ended"
+    # Agent-to-agent communication
+    MESSAGE = "message"
+    BROADCAST = "broadcast"
+
+
+@dataclass
+class Event:
+    """A real-time event published when session state changes."""
+
+    id: str
+    event_type: EventType
+    session_id: str
+    timestamp: str
+    payload: dict
+
+    @staticmethod
+    def generate_id() -> str:
+        """Generate an event ID: 'e-' + 8 hex chars."""
+        return "e-" + secrets.token_hex(4)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "event_type": self.event_type.value,
+            "session_id": self.session_id,
+            "timestamp": self.timestamp,
+            "payload": self.payload,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Event:
+        return cls(
+            id=d["id"],
+            event_type=EventType(d["event_type"]),
+            session_id=d["session_id"],
+            timestamp=d["timestamp"],
+            payload=d["payload"],
+        )
+
+
+# ── Message ────────────────────────────────────────────────────────────
+
+
+class MessageType(str, Enum):
+    DIRECT = "direct"       # one agent → one agent
+    BROADCAST = "broadcast"  # one agent → all agents
+    QUERY = "query"          # question to all, expects responses
+    RESPONSE = "response"    # answer to a query
+
+
+@dataclass
+class Message:
+    """Agent-to-agent message for active coordination."""
+
+    id: str
+    session_id: str
+    from_agent: str          # expert_role of sender
+    to_agent: str            # expert_role of recipient ("*" = all)
+    message_type: MessageType
+    content: str             # free-text message
+    in_reply_to: str = ""    # message id this responds to
+    urgent: bool = False     # urgent messages appear in _pending on every tool call
+    # Structured context — links message to specific findings/files
+    context: dict = field(default_factory=dict)
+    # context example:
+    #   {"finding_id": "f-a1b2c3", "file": "src/server.py",
+    #    "line_start": 42, "line_end": 58, "title": "Race condition in cache"}
+    created_at: str = ""
+
+    @staticmethod
+    def generate_id() -> str:
+        return "m-" + secrets.token_hex(4)
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = Message.generate_id()
+        if not self.created_at:
+            self.created_at = now_iso()
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "from_agent": self.from_agent,
+            "to_agent": self.to_agent,
+            "message_type": self.message_type.value,
+            "content": self.content,
+            "in_reply_to": self.in_reply_to,
+            "urgent": self.urgent,
+            "context": self.context,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Message:
+        return cls(
+            id=d["id"],
+            session_id=d["session_id"],
+            from_agent=d["from_agent"],
+            to_agent=d["to_agent"],
+            message_type=MessageType(d["message_type"]),
+            content=d["content"],
+            in_reply_to=d.get("in_reply_to", ""),
+            urgent=d.get("urgent", False),
+            context=d.get("context", {}),
+            created_at=d.get("created_at", ""),
         )

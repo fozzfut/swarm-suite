@@ -121,3 +121,64 @@ class ReportGenerator:
             },
             "findings": [f.to_dict() for f in findings],
         }, indent=2, ensure_ascii=False)
+
+    def generate_sarif(self, session_id: str) -> str:
+        """Generate SARIF 2.1.0 output for GitHub Code Scanning integration."""
+        findings = self._store.get()
+        severity_to_level = {
+            "critical": "error",
+            "high": "error",
+            "medium": "warning",
+            "low": "note",
+            "info": "note",
+        }
+        results = []
+        rules = {}
+        for f in findings:
+            rule_id = f"{f.category.value}/{f.expert_role}"
+            if rule_id not in rules:
+                rules[rule_id] = {
+                    "id": rule_id,
+                    "shortDescription": {"text": f"{f.category.value} ({f.expert_role})"},
+                }
+            results.append({
+                "ruleId": rule_id,
+                "level": severity_to_level.get(f.severity.value, "warning"),
+                "message": {
+                    "text": f"{f.title}\n\nActual: {f.actual}\nExpected: {f.expected}\n"
+                            f"Suggestion: [{f.suggestion_action.value}] {f.suggestion_detail}\n"
+                            f"Confidence: {f.confidence:.0%} | Status: {f.status.value}",
+                },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": f.file},
+                        "region": {
+                            "startLine": f.line_start,
+                            "endLine": f.line_end,
+                        },
+                    },
+                }],
+                "properties": {
+                    "reviewswarm-id": f.id,
+                    "expert_role": f.expert_role,
+                    "status": f.status.value,
+                    "confidence": f.confidence,
+                },
+            })
+
+        sarif = {
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": "ReviewSwarm",
+                        "version": "0.1.1",
+                        "informationUri": "https://github.com/fozzfut/review-swarm",
+                        "rules": list(rules.values()),
+                    },
+                },
+                "results": results,
+            }],
+        }
+        return json.dumps(sarif, indent=2, ensure_ascii=False)

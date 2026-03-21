@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from collections import Counter
 from pathlib import Path
@@ -54,11 +56,17 @@ class FindingStore:
         file: str | None = None,
         expert_role: str | None = None,
         min_confidence: float | None = None,
+        limit: int = 0,
+        offset: int = 0,
     ) -> list[Finding]:
         """Return findings matching all provided filters.
 
         Filter values are strings compared against enum fields via ==.
         This works because all enums inherit from (str, Enum).
+
+        Args:
+            limit: Max results to return (0 = unlimited).
+            offset: Number of results to skip before returning.
         """
         with self._lock:
             results = list(self._findings.values())
@@ -75,6 +83,12 @@ class FindingStore:
             results = [f for f in results if f.expert_role == expert_role]
         if min_confidence is not None:
             results = [f for f in results if f.confidence >= min_confidence]
+
+        # Pagination
+        if offset > 0:
+            results = results[offset:]
+        if limit > 0:
+            results = results[:limit]
 
         return results
 
@@ -160,6 +174,16 @@ class FindingStore:
             finding.updated_at = now_iso()
             self._flush()
 
+    def add_comment(self, finding_id: str, comment_dict: dict) -> None:
+        """Append a comment dict to a finding's comments list. Flushes."""
+        with self._lock:
+            finding = self._findings.get(finding_id)
+            if finding is None:
+                raise KeyError(f"Finding {finding_id} not found")
+            finding.comments.append(comment_dict)
+            finding.updated_at = now_iso()
+            self._flush()
+
     def add_related(self, finding_id: str, related_id: str) -> None:
         """Append a related finding ID if not already present. Flushes."""
         with self._lock:
@@ -176,12 +200,27 @@ class FindingStore:
     def _flush(self) -> None:
         """Rewrite the entire JSONL file from in-memory state.
 
+        Uses atomic write (write to temp file, then os.replace) to avoid
+        data loss if two threads flush simultaneously.
+
         NOTE: breaks strict append-only semantics for v0.1 -- acceptable
         because updates (status, reactions) require modifying existing lines.
         """
-        with open(self._path, "w", encoding="utf-8") as fh:
-            for finding in self._findings.values():
-                fh.write(json.dumps(finding.to_dict()) + "\n")
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._path.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                for finding in self._findings.values():
+                    fh.write(json.dumps(finding.to_dict()) + "\n")
+            os.replace(tmp_path, str(self._path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _append(self, finding: Finding) -> None:
         """Append a single finding as one JSON line to the JSONL file."""

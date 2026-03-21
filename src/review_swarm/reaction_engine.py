@@ -49,6 +49,15 @@ class ReactionEngine:
             if finding is None:
                 raise KeyError(f"Finding {reaction.finding_id} not found")
 
+            # Check for duplicate reaction from same expert
+            for existing in finding.reactions:
+                if (existing.get("expert_role") == reaction.expert_role
+                    and existing.get("reaction") == reaction.reaction.value):
+                    raise ValueError(
+                        f"Duplicate reaction: {reaction.expert_role} already "
+                        f"{reaction.reaction.value}d finding {reaction.finding_id}"
+                    )
+
             # 2. Set timestamp
             reaction.created_at = now_iso()
 

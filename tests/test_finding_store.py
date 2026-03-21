@@ -1,5 +1,7 @@
 """Tests for FindingStore -- JSONL persistence with filtering and limits."""
 
+import json
+
 import pytest
 
 from review_swarm.finding_store import FindingStore
@@ -241,3 +243,57 @@ class TestFindingStoreCounts:
         counts = store.count_by_status()
         assert counts["open"] == 1
         assert counts["confirmed"] == 1
+
+
+class TestFindingStoreAtomicWrite:
+    """Test that _flush() uses atomic write (temp file + os.replace)."""
+
+    def test_atomic_flush_produces_valid_jsonl(self, tmp_path):
+        """After an atomic flush, the JSONL file exists and contains valid JSON lines."""
+        jsonl_path = tmp_path / "findings.jsonl"
+        store = FindingStore(jsonl_path)
+        f1 = _make_finding(title="First")
+        f2 = _make_finding(title="Second")
+        store.post(f1)
+        store.post(f2)
+
+        # Trigger a flush via update_status (which calls _flush internally)
+        store.update_status(f1.id, Status.CONFIRMED)
+
+        # File must exist and contain valid JSONL
+        assert jsonl_path.exists()
+        text = jsonl_path.read_text(encoding="utf-8")
+        lines = [line for line in text.strip().split("\n") if line.strip()]
+        assert len(lines) == 2
+
+        # Each line must be valid JSON with expected keys
+        for line in lines:
+            data = json.loads(line)
+            assert "id" in data
+            assert "title" in data
+
+    def test_atomic_flush_no_temp_files_left(self, tmp_path):
+        """After a successful flush, no .tmp files remain in the directory."""
+        jsonl_path = tmp_path / "findings.jsonl"
+        store = FindingStore(jsonl_path)
+        store.post(_make_finding())
+        store.update_status(list(store._findings.keys())[0], Status.CONFIRMED)
+
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert tmp_files == [], f"Leftover temp files: {tmp_files}"
+
+    def test_atomic_flush_preserves_data_after_reload(self, tmp_path):
+        """Data written by atomic flush can be reloaded by a new store instance."""
+        jsonl_path = tmp_path / "findings.jsonl"
+        store1 = FindingStore(jsonl_path)
+        f1 = _make_finding(title="Atomic test finding")
+        store1.post(f1)
+        store1.update_status(f1.id, Status.CONFIRMED)
+
+        # Reload from disk
+        store2 = FindingStore(jsonl_path)
+        assert store2.count() == 1
+        reloaded = store2.get_by_id(f1.id)
+        assert reloaded is not None
+        assert reloaded.title == "Atomic test finding"
+        assert reloaded.status == Status.CONFIRMED

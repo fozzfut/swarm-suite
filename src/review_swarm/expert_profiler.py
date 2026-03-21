@@ -7,7 +7,9 @@ from pathlib import Path
 
 import yaml
 
+from .logging_config import get_logger
 
+_log = get_logger("expert_profiler")
 _BUILTIN_DIR = Path(__file__).parent / "experts"
 
 
@@ -62,7 +64,8 @@ class ExpertProfiler:
                     file_contents[str(f.relative_to(proj))] = f.read_text(
                         encoding="utf-8", errors="ignore"
                     )
-                except Exception:
+                except Exception as exc:
+                    _log.warning("Skipping file %s: %s", f, exc)
                     continue
 
         has_docs = (proj / "docs").exists() and any((proj / "docs").rglob("*"))

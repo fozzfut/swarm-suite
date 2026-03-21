@@ -21,12 +21,20 @@ class ExpertsConfig:
 
 
 @dataclass
+class RateLimitConfig:
+    max_findings_per_minute: int = 60
+    max_messages_per_minute: int = 120
+
+
+@dataclass
 class Config:
     storage_dir: str | Path = "~/.review-swarm"
     max_sessions: int = 50
     default_format: str = "markdown"
+    session_timeout_hours: int = 24
     consensus: ConsensusConfig = field(default_factory=ConsensusConfig)
     experts: ExpertsConfig = field(default_factory=ExpertsConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
 
     @property
     def storage_path(self) -> Path:
@@ -54,12 +62,15 @@ class Config:
             )
         consensus = ConsensusConfig(**data.get("consensus", {}))
         experts = ExpertsConfig(**data.get("experts", {}))
+        rate_limit = RateLimitConfig(**data.get("rate_limit", {}))
         return cls(
             storage_dir=data.get("storage_dir", "~/.review-swarm"),
             max_sessions=data.get("max_sessions", 50),
             default_format=data.get("default_format", "markdown"),
+            session_timeout_hours=data.get("session_timeout_hours", 24),
             consensus=consensus,
             experts=experts,
+            rate_limit=rate_limit,
         )
 
     @staticmethod
@@ -91,6 +102,7 @@ class Config:
             "storage_dir": str(self.storage_dir),
             "max_sessions": self.max_sessions,
             "default_format": self.default_format,
+            "session_timeout_hours": self.session_timeout_hours,
             "consensus": {
                 "confirm_threshold": self.consensus.confirm_threshold,
                 "auto_close_duplicates": self.consensus.auto_close_duplicates,
@@ -98,6 +110,10 @@ class Config:
             "experts": {
                 "custom_dir": self.experts.custom_dir,
                 "auto_suggest": self.experts.auto_suggest,
+            },
+            "rate_limit": {
+                "max_findings_per_minute": self.rate_limit.max_findings_per_minute,
+                "max_messages_per_minute": self.rate_limit.max_messages_per_minute,
             },
         }
         return yaml.dump(data, default_flow_style=False, sort_keys=False)

@@ -63,18 +63,18 @@ def _make_reaction(finding_id, reaction_type, **overrides):
 
 class TestReactionEngineConsensus:
     def test_two_confirms_to_confirmed(self, tmp_path):
-        """1 confirm = still OPEN, 2nd confirm = CONFIRMED."""
+        """1 confirm = still OPEN, 2nd confirm from different expert = CONFIRMED."""
         store, engine = _make_engine(tmp_path)
         finding = _make_finding()
         store.post(finding)
 
         # First confirm -- still OPEN
-        r1 = _make_reaction(finding.id, ReactionType.CONFIRM, agent_id="agent-002")
+        r1 = _make_reaction(finding.id, ReactionType.CONFIRM, expert_role="security", agent_id="agent-002")
         updated = engine.react(r1)
         assert updated.status == Status.OPEN
 
-        # Second confirm -- now CONFIRMED
-        r2 = _make_reaction(finding.id, ReactionType.CONFIRM, agent_id="agent-003")
+        # Second confirm from different expert -- now CONFIRMED
+        r2 = _make_reaction(finding.id, ReactionType.CONFIRM, expert_role="performance", agent_id="agent-003")
         updated = engine.react(r2)
         assert updated.status == Status.CONFIRMED
 
@@ -94,18 +94,18 @@ class TestReactionEngineConsensus:
         finding = _make_finding()
         store.post(finding)
 
-        # Two confirms -> CONFIRMED
+        # Two confirms from different experts -> CONFIRMED
         engine.react(
-            _make_reaction(finding.id, ReactionType.CONFIRM, agent_id="agent-002")
+            _make_reaction(finding.id, ReactionType.CONFIRM, expert_role="security", agent_id="agent-002")
         )
         updated = engine.react(
-            _make_reaction(finding.id, ReactionType.CONFIRM, agent_id="agent-003")
+            _make_reaction(finding.id, ReactionType.CONFIRM, expert_role="performance", agent_id="agent-003")
         )
         assert updated.status == Status.CONFIRMED
 
-        # One dispute overrides -> DISPUTED
+        # One dispute from yet another expert overrides -> DISPUTED
         updated = engine.react(
-            _make_reaction(finding.id, ReactionType.DISPUTE, agent_id="agent-004")
+            _make_reaction(finding.id, ReactionType.DISPUTE, expert_role="design", agent_id="agent-004")
         )
         assert updated.status == Status.DISPUTED
 
@@ -166,6 +166,46 @@ class TestReactionEngineErrors:
         r = _make_reaction("f-nonexistent", ReactionType.CONFIRM)
         with pytest.raises(KeyError, match="f-nonexistent"):
             engine.react(r)
+
+    def test_duplicate_reaction_from_same_expert_raises(self, tmp_path):
+        """ValueError when same expert submits same reaction type twice."""
+        store, engine = _make_engine(tmp_path)
+        finding = _make_finding()
+        store.post(finding)
+
+        r1 = _make_reaction(
+            finding.id, ReactionType.CONFIRM,
+            expert_role="security", agent_id="agent-002",
+        )
+        engine.react(r1)
+
+        # Same expert_role + same reaction type -> duplicate
+        r2 = _make_reaction(
+            finding.id, ReactionType.CONFIRM,
+            expert_role="security", agent_id="agent-002",
+        )
+        with pytest.raises(ValueError, match="Duplicate reaction"):
+            engine.react(r2)
+
+    def test_same_expert_different_reaction_type_allowed(self, tmp_path):
+        """Same expert can submit different reaction types on the same finding."""
+        store, engine = _make_engine(tmp_path)
+        finding = _make_finding()
+        store.post(finding)
+
+        r1 = _make_reaction(
+            finding.id, ReactionType.CONFIRM,
+            expert_role="security", agent_id="agent-002",
+        )
+        engine.react(r1)
+
+        # Same expert_role but different reaction type -> allowed
+        r2 = _make_reaction(
+            finding.id, ReactionType.DISPUTE,
+            expert_role="security", agent_id="agent-002",
+        )
+        updated = engine.react(r2)
+        assert updated.status == Status.DISPUTED
 
 
 class TestReactionEnginePersistence:
