@@ -1,4 +1,4 @@
-"""MCP Server with 21 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
+"""MCP Server with 24 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
 
 from __future__ import annotations
 
@@ -144,6 +144,12 @@ def tool_post_finding(
         raise ValueError(f"Invalid file path: {file!r}. Must be relative, no traversal.")
     if '\\' in file:
         raise ValueError(f"Invalid file path: {file!r}. Must be relative, no traversal.")
+    if not (0.0 <= confidence <= 1.0):
+        raise ValueError(f"confidence must be 0.0-1.0, got {confidence}")
+    if line_start < 0 or line_end < 0:
+        raise ValueError(f"line numbers must be >= 0, got start={line_start}, end={line_end}")
+    if line_end < line_start:
+        raise ValueError(f"line_end ({line_end}) must be >= line_start ({line_start})")
 
     store = ctx.session_manager.get_finding_store(session_id)
     finding = Finding(
@@ -289,6 +295,89 @@ def tool_find_duplicates(
     return [{"id": d.id, "title": d.title, "expert_role": d.expert_role,
              "file": d.file, "line_start": d.line_start, "line_end": d.line_end,
              "severity": d.severity.value} for d in dupes]
+
+
+def tool_mark_fixed(
+    ctx: AppContext,
+    session_id: str,
+    finding_id: str,
+    fix_ref: str = "",
+) -> dict:
+    """Mark a finding as FIXED. Called by fix-agents after applying a patch.
+
+    Args:
+        finding_id: The finding to mark as fixed.
+        fix_ref: Optional reference to the fix (commit hash, PR url, etc.)
+    """
+    from .models import Status
+    store = ctx.session_manager.get_finding_store(session_id)
+    finding = store.get_by_id(finding_id)
+    if finding is None:
+        raise KeyError(f"Finding {finding_id} not found")
+    store.update_status(finding_id, Status.FIXED)
+    if fix_ref:
+        store.add_comment(finding_id, {
+            "expert_role": "_system",
+            "content": f"Marked as FIXED. Ref: {fix_ref}",
+            "created_at": from_models_import_now_iso(),
+        })
+    updated = store.get_by_id(finding_id)
+    result = updated.to_dict() if updated else {"id": finding_id, "status": "fixed"}
+    try:
+        bus = ctx.session_manager.get_event_bus(session_id)
+        bus.publish_sync(EventType.STATUS_CHANGED, {
+            "finding_id": finding_id,
+            "old_status": "open",
+            "new_status": "fixed",
+            "fix_ref": fix_ref,
+        })
+    except (KeyError, Exception):
+        pass
+    return result
+
+
+def tool_bulk_update_status(
+    ctx: AppContext,
+    session_id: str,
+    finding_ids: list[str],
+    new_status: str,
+    reason: str = "",
+) -> dict:
+    """Update status of multiple findings at once.
+
+    Args:
+        finding_ids: List of finding IDs to update.
+        new_status: New status (fixed, wontfix, open, confirmed, disputed).
+        reason: Optional reason for the status change.
+    """
+    from .models import Status
+    status = Status(new_status)
+    store = ctx.session_manager.get_finding_store(session_id)
+    updated = 0
+    errors = []
+    for fid in finding_ids:
+        try:
+            store.update_status(fid, status)
+            if reason:
+                store.add_comment(fid, {
+                    "expert_role": "_system",
+                    "content": f"Status → {new_status}: {reason}",
+                    "created_at": from_models_import_now_iso(),
+                })
+            updated += 1
+        except KeyError:
+            errors.append(fid)
+    return {
+        "updated": updated,
+        "errors": errors,
+        "new_status": new_status,
+    }
+
+
+def from_models_import_now_iso() -> str:
+    """Helper to avoid circular import issues."""
+    from .models import now_iso
+    return now_iso()
 
 
 def tool_post_findings_batch(
@@ -531,7 +620,8 @@ def create_mcp_server():
         task: str = "",
         max_experts: int = 5,
         session_name: str = "",
-        ctx: Context = None,
+        # ctx default is None per FastMCP convention; framework injects the real value
+        ctx: Context = None,  # type: ignore[assignment]
     ) -> str:
         import json
         app = ctx.request_context.lifespan_context
@@ -782,6 +872,45 @@ def create_mcp_server():
         import json
         app = ctx.request_context.lifespan_context
         result = tool_post_comment(app, session_id, finding_id, expert_role, content)
+        return json.dumps(result)
+
+    # ── Status Update Tools (for fix-agents) ───────────────────────
+
+    @mcp.tool(
+        name="mark_fixed",
+        description=(
+            "Mark a finding as FIXED after applying a fix. "
+            "Optionally attach a fix_ref (commit hash, PR URL). "
+            "Called by fix-agents after patching code."
+        ),
+    )
+    def _mark_fixed(
+        session_id: str, finding_id: str, fix_ref: str = "",
+        ctx: Context = None,
+    ) -> str:
+        import json
+        app = ctx.request_context.lifespan_context
+        result = tool_mark_fixed(app, session_id, finding_id, fix_ref=fix_ref)
+        return json.dumps(result)
+
+    @mcp.tool(
+        name="bulk_update_status",
+        description=(
+            "Update status of multiple findings at once. "
+            "Statuses: fixed, wontfix, open, confirmed, disputed. "
+            "Use after batch-fixing bugs from the review report."
+        ),
+    )
+    def _bulk_update_status(
+        session_id: str, finding_ids: list[str], new_status: str,
+        reason: str = "",
+        ctx: Context = None,
+    ) -> str:
+        import json
+        app = ctx.request_context.lifespan_context
+        result = tool_bulk_update_status(
+            app, session_id, finding_ids, new_status, reason=reason,
+        )
         return json.dumps(result)
 
     # ── Event Polling Tool ───────────────────────────────────────────

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -117,7 +119,16 @@ class ClaimRegistry:
             self._claims = []
 
     def _save(self) -> None:
-        """Write the full claims list to the JSON file."""
+        """Write the full claims list to the JSON file (atomic via tempfile+replace)."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as fh:
-            json.dump([c.to_dict() for c in self._claims], fh, indent=2)
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                json.dump([c.to_dict() for c in self._claims], fh, indent=2)
+            os.replace(tmp_path, str(self._path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise

@@ -15,7 +15,7 @@
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python 3.10+" /></a>
   <img src="https://img.shields.io/badge/tests-215%20passing-brightgreen.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/experts-13-orange.svg" alt="Experts" />
-  <img src="https://img.shields.io/badge/MCP_tools-23-blue.svg" alt="MCP Tools" />
+  <img src="https://img.shields.io/badge/MCP_tools-24-blue.svg" alt="MCP Tools" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg" alt="Platform" />
 </p>
 
@@ -58,7 +58,7 @@ ReviewSwarm Orchestrator
 
 ## What is ReviewSwarm?
 
-ReviewSwarm is **not** an LLM — it's **infrastructure**. It provides **23 MCP tools** that AI agents use to:
+ReviewSwarm is **not** an LLM — it's **infrastructure**. It provides **24 MCP tools** that AI agents use to:
 
 - **Post findings** with structured evidence (actual + expected + source_ref)
 - **Claim files** for review (advisory locks with TTL)
@@ -153,7 +153,7 @@ review-swarm purge --older-than 30
 
 ---
 
-## MCP Tools (23)
+## MCP Tools (24)
 
 ### Orchestrator
 
@@ -196,6 +196,14 @@ review-swarm purge --older-than 30
 | Tool | Description |
 |------|-------------|
 | `get_events` | Get events since timestamp (polling fallback) |
+
+### Phase Barriers
+
+| Tool | Description |
+|------|-------------|
+| `mark_phase_done` | Mark that an expert has completed a phase |
+| `check_phase_ready` | Check if a phase can be started (all agents done with previous phase) |
+| `get_phase_status` | Get full phase completion status for all agents |
 
 ### Agent Messaging (Star Topology)
 
@@ -319,7 +327,7 @@ rate_limit:
 ```
 src/review_swarm/
 ├── orchestrator.py        # One-command review planning
-├── server.py              # 23 MCP tools + resources + subscriptions
+├── server.py              # 24 MCP tools + resources + subscriptions
 ├── models.py              # Finding, Claim, Reaction, Event, Message
 ├── session_manager.py     # Session lifecycle, caching, auto-expiry
 ├── finding_store.py       # JSONL storage + in-memory index (atomic writes)

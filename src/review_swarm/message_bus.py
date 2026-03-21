@@ -31,6 +31,7 @@ class MessageBus:
         self._session_id = session_id
         self._messages_path = Path(messages_path)
         self._messages: list[Message] = []
+        self._messages_by_id: dict[str, Message] = {}
         self._inboxes: dict[str, list[Message]] = defaultdict(list)
         self._agents: set[str] = set()
         # Read watermark per agent: ISO timestamp of last read
@@ -59,6 +60,7 @@ class MessageBus:
         """Send a message. Routes to appropriate inbox(es) based on type."""
         with self._lock:
             self._messages.append(message)
+            self._messages_by_id[message.id] = message
             self._append_to_disk(message)
 
             if message.message_type == MessageType.DIRECT:
@@ -261,10 +263,7 @@ class MessageBus:
     # ── Persistence ──────────────────────────────────────────────────
 
     def _find_message(self, message_id: str) -> Message | None:
-        for m in self._messages:
-            if m.id == message_id:
-                return m
-        return None
+        return self._messages_by_id.get(message_id)
 
     def _append_to_disk(self, message: Message) -> None:
         self._messages_path.parent.mkdir(parents=True, exist_ok=True)
@@ -282,6 +281,7 @@ class MessageBus:
                 try:
                     msg = Message.from_dict(json.loads(line))
                     self._messages.append(msg)
+                    self._messages_by_id[msg.id] = msg
                     self._agents.add(msg.from_agent)
                     if msg.to_agent and msg.to_agent != "*":
                         self._agents.add(msg.to_agent)

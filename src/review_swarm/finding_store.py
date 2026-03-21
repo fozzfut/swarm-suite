@@ -203,6 +203,9 @@ class FindingStore:
         Uses atomic write (write to temp file, then os.replace) to avoid
         data loss if two threads flush simultaneously.
 
+        NOTE: _flush() rewrites the full file. This is O(N) per mutation but
+        ensures atomicity via tempfile+replace. For v0.2, acceptable for <10K findings.
+
         NOTE: breaks strict append-only semantics for v0.1 -- acceptable
         because updates (status, reactions) require modifying existing lines.
         """
@@ -211,7 +214,13 @@ class FindingStore:
             dir=str(self._path.parent), suffix=".tmp"
         )
         try:
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+        except Exception:
+            os.close(tmp_fd)
+            os.unlink(tmp_path)
+            raise
+        try:
+            with fh:
                 for finding in self._findings.values():
                     fh.write(json.dumps(finding.to_dict()) + "\n")
             os.replace(tmp_path, str(self._path))

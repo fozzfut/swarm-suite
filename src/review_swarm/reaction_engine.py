@@ -19,6 +19,9 @@ class ReactionEngine:
         - N+ "confirm", 0 dispute  -> status: CONFIRMED (N = confirm_threshold)
         - otherwise                -> status: OPEN
         - "extend" reactions       -> no status change, bidirectional link
+
+    Lock ordering: ReactionEngine._lock is always acquired BEFORE FindingStore._lock.
+    Never acquire ReactionEngine._lock while holding FindingStore._lock.
     """
 
     def __init__(

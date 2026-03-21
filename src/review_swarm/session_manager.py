@@ -65,8 +65,11 @@ class SessionManager:
                     (sess_dir / "meta.json").write_text(
                         json.dumps(meta, indent=2), encoding="utf-8"
                     )
-                except Exception:
-                    pass  # non-critical, session starts regardless
+                except Exception as exc:
+                    import logging
+                    logging.getLogger("review_swarm.session_manager").warning(
+                        "Expert suggestion failed for %s: %s", project_path, exc
+                    )
 
             # Enforce max_sessions
             self._prune_old_sessions()
