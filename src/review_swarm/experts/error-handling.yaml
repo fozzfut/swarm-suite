@@ -1,0 +1,139 @@
+name: "Error Handling Expert"
+version: "1.0"
+description: "Detects swallowed errors, empty catches, unchecked error returns, and missing error propagation"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.rb"
+  - "**/*.ex"
+  - "**/*.swift"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+relevance_signals:
+  imports: []
+  patterns:
+    - "try[:\\s{]"
+    - "catch\\s*\\("
+    - "except[:\\s]"
+    - "rescue\\s"
+    - "if err != nil"
+    - "\\.unwrap\\("
+    - "\\.expect\\("
+    - "panic!\\("
+    - "raise "
+    - "throw "
+check_rules:
+  - id: "swallowed-error"
+    description: "Error/exception is caught but silently discarded without logging or re-raising"
+    severity_default: "high"
+    check: |
+      Find catch/except/rescue blocks where:
+      1. The error variable is never used (not logged, not re-raised, not returned)
+      2. The block is empty or contains only `pass`/`continue`/`break`/`{}`
+      3. The block returns a default value without any indication of failure
+      Language-specific:
+      - Python: bare `except:` or `except Exception: pass`
+      - Go: `if err != nil { }` or `_ = functionThatReturnsError()`
+      - Java/Kotlin: empty catch block, catch with just comment
+      - Rust: `.unwrap_or_default()` hiding important errors
+      - JS/TS: empty .catch(() => {}) or try {} catch(e) {}
+      - C#: empty catch block
+      Do NOT flag:
+      - Catch blocks with logging (even if they don't re-raise)
+      - Explicit `// intentionally ignored` comments with justification
+      - Test code that expects errors
+      - Cleanup/finally blocks where re-raise would hide the original error
+
+  - id: "unchecked-error-return"
+    description: "Function returns error/result but caller ignores it"
+    severity_default: "high"
+    check: |
+      Find calls to functions that return error indicators where the return is discarded:
+      - Go: `err` from multi-return ignored (assigned to `_` or not captured)
+      - Rust: Result<> not matched, ? not used, and .unwrap() not called
+      - C: return code from system calls ignored
+      - Python: function that returns (result, error) tuple but caller only captures result
+      Do NOT flag:
+      - Functions documented as infallible
+      - Functions where the error is non-critical by design (logging, metrics, cleanup)
+      - Deferred cleanup functions (defer f.Close() in Go -- error is conventionally ignored)
+
+  - id: "broad-catch"
+    description: "Catch block is too broad, catching errors that should propagate"
+    severity_default: "medium"
+    check: |
+      Flag catch blocks that are overly broad:
+      - Python: `except Exception` (catches SystemExit, KeyboardInterrupt indirectly via BaseException -- actually Exception doesn't catch those, but it catches too much else)
+      - Java: `catch (Exception e)` or `catch (Throwable t)` without re-throwing
+      - JS/TS: `catch(e)` that catches both expected and unexpected errors
+      - C#: `catch (Exception)` without filtering
+      Do NOT flag:
+      - Top-level error boundaries (main(), request handlers, event loops)
+      - Frameworks where broad catch is the convention (middleware, plugin hosts)
+      - Catch blocks that log AND re-raise
+      - Desktop apps where broad catch prevents crash to user (style debt, not a bug)
+
+  - id: "panic-in-library"
+    description: "Library/module code uses panic/crash mechanisms instead of returning errors"
+    severity_default: "medium"
+    check: |
+      In library/module code (not main/entry point), flag:
+      - Rust: panic!(), .unwrap(), .expect() on user-provided data
+      - Go: panic() in library functions (should return error)
+      - Python: sys.exit() in library code
+      - Java: System.exit() in library code
+      Do NOT flag:
+      - Panics on programmer errors (assertion violations, unreachable states)
+      - Entry point / main function panics
+      - Test code panics/asserts
+
+severity_guidance:
+  critical: "Error in critical path (data write, transaction, safety operation) silently discarded"
+  high: "Error in important operation swallowed or unchecked"
+  medium: "Overly broad catch, panic in library code"
+  low: "Missing error context, could add more detail to error message"
+  info: "Error handling pattern observation"
+
+system_prompt: |
+  You are an Error Handling Expert. You find places where errors are silently lost,
+  improperly handled, or where failures can propagate undetected.
+
+  ## Key Principle
+
+  Not all error suppression is a bug. The critical question is:
+  **Would a caller/user/operator want to know about this failure?**
+
+  If yes and the error is silenced → finding.
+  If no (cleanup, metrics, logging) → not a finding.
+
+  ## Verification Before Reporting
+
+  1. **Read the full catch/error block** -- there may be logging you didn't see
+  2. **Check if the comment explains intentional suppression** -- `// safe to ignore: X` is valid
+  3. **Understand the error's impact** -- is this a data path or a diagnostic path?
+  4. **Check if the function CAN fail meaningfully** -- some functions have trivial failure modes
+  5. **Check if error is handled elsewhere** -- middleware, error boundary, global handler
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's OK |
+  |---------|------------|
+  | `defer f.Close()` without error check (Go) | Convention, error is non-critical |
+  | Logging the error without re-raising | Caller chose to handle it |
+  | `except Exception` at top-level | Error boundary, intentional |
+  | `.unwrap()` in test code | Tests should panic on unexpected errors |
+  | Comment says "intentionally ignored" | Developer made conscious choice |
+  | Cleanup code in finally/defer | Re-raise would hide original error |

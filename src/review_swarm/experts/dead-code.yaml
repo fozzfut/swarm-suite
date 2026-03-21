@@ -1,0 +1,125 @@
+name: "Dead Code Expert"
+version: "1.0"
+description: "Detects unreachable code paths, unused exports, orphaned functions, and dead feature flags"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.c"
+  - "**/*.h"
+  - "**/*.rb"
+  - "**/*.ex"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+  - "dist/**"
+relevance_signals:
+  imports: []
+  patterns: []
+check_rules:
+  - id: "unreachable-code"
+    description: "Code after unconditional return/raise/panic/break that can never execute"
+    severity_default: "medium"
+    check: |
+      Find code that appears after unconditional control flow exits:
+      - Statements after return/raise/throw/panic/break/continue/os.Exit/sys.exit
+      - Branches where the condition is always true/false (constant condition)
+      - Match/switch arms that can never be reached
+      Do NOT flag:
+      - Code after conditional returns (other branches may reach it)
+      - Code gated by feature flags (may be enabled later)
+      - #ifdef blocks for other platforms
+      - Code with TODO/FIXME comments indicating future use
+
+  - id: "unused-export"
+    description: "Public function/class/type is exported but never imported or called from outside its module"
+    severity_default: "low"
+    check: |
+      Find public/exported symbols that have zero usage outside their own module:
+      1. Identify all public exports (public functions, __all__ entries, pub fns, exported types)
+      2. Search the ENTIRE codebase for references to each
+      3. Flag symbols with zero external references
+      Do NOT flag:
+      - Entry points (main, handlers, CLI commands, API endpoints)
+      - Interface/trait implementations (called via dispatch, not direct reference)
+      - Serialization hooks (__json__, __str__, toString, MarshalJSON)
+      - Test fixtures and helpers
+      - Plugin/extension points designed for external use
+      - Public API of a library (external consumers exist outside this repo)
+      - Recently added code (< 5 commits old) -- may not have callers yet
+
+  - id: "orphaned-function"
+    description: "Private function/method that is never called from anywhere"
+    severity_default: "medium"
+    check: |
+      Find private/internal functions with zero call sites:
+      1. Identify private functions (_, private, no pub, internal, not in __all__)
+      2. Search for calls to each within the module and submodules
+      3. Flag functions with zero call sites
+      Do NOT flag:
+      - Callback functions registered dynamically (signal.connect, addEventListener, etc.)
+      - Decorated functions (@app.route, @property, @staticmethod, etc.)
+      - Magic/dunder methods (__init__, __enter__, etc.)
+      - Functions referenced by string (reflection, getattr, registry patterns)
+
+  - id: "dead-import"
+    description: "Import statement brings in a symbol that is never used in the file"
+    severity_default: "low"
+    check: |
+      Find imports where the imported symbol is never referenced in the file.
+      Do NOT flag:
+      - Type-only imports (TYPE_CHECKING, type annotations, generic bounds)
+      - Side-effect imports (importing a module for its side effects: registration, patching)
+      - Re-exports (import in __init__.py / index.ts for re-export)
+      - Wildcard imports (can't tell what's used)
+      - Conditional imports (try/except fallback)
+
+severity_guidance:
+  critical: "N/A -- dead code is never critical (it doesn't execute)"
+  high: "N/A -- dead code is never high (it doesn't execute)"
+  medium: "Unreachable code or orphaned function (confusing, maintenance burden)"
+  low: "Unused export, dead import (noise, minor cleanup)"
+  info: "Potentially dead code that needs investigation"
+
+system_prompt: |
+  You are a Dead Code Expert. You find code that is never executed: unreachable paths,
+  unused exports, orphaned functions, and dead imports.
+
+  ## Critical Constraint: SEVERITY
+
+  Dead code is NEVER critical or high severity. It doesn't execute, so it can't crash,
+  corrupt data, or cause security issues. Maximum severity is MEDIUM.
+  Dead code is tech debt, not a runtime bug.
+
+  ## Verification Before Reporting
+
+  1. **Search the ENTIRE codebase** for references before flagging unused
+  2. **Check dynamic usage** -- reflection, string-based lookup, registry patterns
+  3. **Check decorators/annotations** -- framework magic may call the function
+  4. **Check if it's a public API** -- external callers exist outside this repo
+  5. **Check signal/event connections** -- callbacks may be registered dynamically
+  6. **Check if recently added** -- new code may not have callers yet (< 1 week)
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's alive |
+  |---------|---------------|
+  | @app.route / @api.endpoint | Framework calls it via routing |
+  | signal.connect(self._handler) | Called via event dispatch |
+  | __init__, __str__, __enter__ | Magic methods called implicitly |
+  | Plugin/extension interface | Called by host dynamically |
+  | Public API of a library | External consumers |
+  | Type-only import | Erased at runtime, used by type checker |
+  | Side-effect import | Module init runs on import |
+  | Re-export in barrel file | Used by other modules |

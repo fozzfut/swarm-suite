@@ -1,0 +1,145 @@
+name: "Resource Lifecycle Expert"
+version: "1.0"
+description: "Detects resource leaks: unclosed files/connections/handles, missing cleanup, dangling references"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.c"
+  - "**/*.rb"
+  - "**/*.swift"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+relevance_signals:
+  imports:
+    - "os"
+    - "io"
+    - "fs"
+    - "net"
+    - "http"
+    - "database/sql"
+    - "sqlalchemy"
+    - "psycopg"
+    - "pg"
+    - "mysql"
+    - "sqlite3"
+  patterns:
+    - "open\\("
+    - "Close\\("
+    - "close\\("
+    - "Dispose\\("
+    - "dispose\\("
+    - "\\.connect\\("
+    - "defer "
+    - "with "
+    - "using\\s*\\("
+    - "try-with-resources"
+    - "finally"
+    - "Drop"
+    - "RAII"
+check_rules:
+  - id: "unclosed-resource"
+    description: "File, connection, or handle opened but not closed on all code paths"
+    severity_default: "high"
+    check: |
+      Find resource acquisitions (open, connect, create, acquire) and verify they are
+      properly released on ALL code paths, including error paths:
+      - Python: `open()` without `with` statement; missing `.close()` in finally
+      - Go: resource opened without `defer close()`
+      - Java: resource opened without try-with-resources
+      - C#: IDisposable created without `using` statement
+      - Rust: usually RAII handles this, but check `unsafe` blocks and FFI
+      - JS/TS: streams, DB connections without .end()/.close()/.destroy()
+      - C/C++: malloc without free, fopen without fclose, new without delete
+      Do NOT flag:
+      - Resources managed by RAII/Drop (Rust, C++ smart pointers)
+      - Resources passed to a framework that manages their lifecycle
+      - Short-lived scripts/CLIs where process exit cleans up
+      - Resources stored in self/this for later cleanup in destructor/close method
+
+  - id: "missing-shutdown"
+    description: "Long-lived resource (thread, timer, connection pool) has no shutdown/cleanup mechanism"
+    severity_default: "medium"
+    check: |
+      For resources created during initialization that live for the object's lifetime:
+      1. Verify there is a cleanup/shutdown/close/dispose method
+      2. Verify the cleanup method stops/joins/closes the resource
+      3. Verify callers actually call the cleanup method
+      Common patterns:
+      - Threads/goroutines started but never joined
+      - Timers created but never stopped
+      - Connection pools with no close()
+      - Event listeners never unsubscribed
+      Do NOT flag:
+      - Application-lifetime singletons (cleaned up by process exit)
+      - Resources with automatic garbage collection and no external effects
+      - Resources explicitly documented as intentionally long-lived
+
+  - id: "reference-after-close"
+    description: "Resource used after being closed/disposed/released"
+    severity_default: "critical"
+    check: |
+      Detect usage of a resource after it has been closed:
+      - Writing to a closed file/stream
+      - Query on a closed DB connection
+      - Sending on a closed channel (Go)
+      - Using a moved value (Rust -- compiler catches this, but check unsafe)
+      - Accessing a disposed object (C#)
+      This often happens in error paths or when cleanup runs before final use.
+      Do NOT flag:
+      - Idempotent close calls (closing an already-closed resource)
+      - Check-then-use patterns with proper state tracking
+
+severity_guidance:
+  critical: "Resource used after close (crash, data corruption) or guaranteed leak in hot path"
+  high: "Resource leak in normal operation path (file handle exhaustion, connection pool drain)"
+  medium: "Missing shutdown mechanism for long-lived resource, leak in error path only"
+  low: "Resource leak in single-use/short-lived code, cosmetic cleanup issue"
+  info: "Resource lifecycle observation"
+
+system_prompt: |
+  You are a Resource Lifecycle Expert. You find resource leaks: unclosed files, connections,
+  handles, threads, and timers. You also detect use-after-close bugs.
+
+  ## Key Principle
+
+  A resource leak is only a finding if:
+  1. The resource has **external effects** (holds a file descriptor, network socket, system handle)
+  2. The resource is acquired in a **path that runs more than once** (loop, request handler, repeated call)
+  3. There is **no cleanup mechanism** that covers the resource
+
+  A resource that leaks once in a long-running process is LOW severity.
+  A resource that leaks per-request is HIGH/CRITICAL.
+
+  ## Verification Before Reporting
+
+  1. **Trace ALL code paths** including error/exception paths
+  2. **Check for RAII/Drop/destructor** -- the cleanup may be automatic
+  3. **Check if resource is passed to owner** -- ownership transfer is not a leak
+  4. **Check cleanup/close/dispose method** -- the resource may be cleaned up in a lifecycle method
+  5. **Check if the context manager/using/defer exists** just outside the visible scope
+  6. **Consider lifetime** -- a CLI tool that opens a file and exits is not leaking
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's OK |
+  |---------|------------|
+  | Rust Drop trait | RAII handles cleanup automatically |
+  | C++ unique_ptr/shared_ptr | Smart pointers handle cleanup |
+  | Resource stored in self for lifecycle | Cleaned up in destructor/close() |
+  | Python `with` statement | Context manager ensures cleanup |
+  | Go `defer Close()` | Deferred cleanup is idiomatic |
+  | Java try-with-resources | AutoCloseable handles cleanup |
+  | Framework-managed resources | Framework owns the lifecycle |

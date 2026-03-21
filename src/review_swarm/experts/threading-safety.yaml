@@ -1,0 +1,171 @@
+name: "Concurrency Safety Expert"
+version: "2.0"
+description: "Detects race conditions, deadlocks, and concurrency bugs across threads, async, goroutines, channels, actors"
+file_patterns:
+  - "**/*.py"
+  - "**/*.java"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.c"
+  - "**/*.rb"
+  - "**/*.ex"
+  - "**/*.exs"
+  - "**/*.swift"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "docs/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+relevance_signals:
+  imports:
+    # Python
+    - "threading"
+    - "concurrent"
+    - "asyncio"
+    - "multiprocessing"
+    # Java/Kotlin
+    - "java.util.concurrent"
+    - "kotlinx.coroutines"
+    # Go (detected by patterns, not imports)
+    # Rust
+    - "std::sync"
+    - "std::thread"
+    - "tokio"
+    - "async_std"
+    # C#
+    - "System.Threading"
+    - "System.Threading.Tasks"
+    # JS/TS
+    - "worker_threads"
+    - "cluster"
+    # Ruby
+    - "concurrent-ruby"
+    # Elixir (detected by patterns)
+  patterns:
+    - "Lock\\("
+    - "RLock\\("
+    - "Mutex"
+    - "RwLock"
+    - "Semaphore"
+    - "Thread\\("
+    - "async def"
+    - "await "
+    - "go func"
+    - "go "
+    - "chan "
+    - "<-"
+    - "spawn\\("
+    - "Task\\.Run"
+    - "Task\\.Factory"
+    - "synchronized"
+    - "AtomicInteger"
+    - "Arc<"
+    - "send\\("
+    - "GenServer"
+check_rules:
+  - id: "shared-mutable-state"
+    description: "Mutable state accessed from multiple execution contexts without synchronization"
+    severity_default: "critical"
+    check: |
+      Identify shared mutable variables (fields, globals, module-level state) that are accessed from
+      multiple threads/goroutines/tasks/coroutines without proper synchronization.
+      Language-specific sync primitives:
+      - Python: Lock, RLock, Condition, Event, Queue
+      - Go: sync.Mutex, sync.RWMutex, channels, sync/atomic
+      - Rust: Mutex, RwLock, Arc, atomic types (if using unsafe)
+      - Java/Kotlin: synchronized, ReentrantLock, AtomicReference, volatile
+      - C#: lock, Monitor, SemaphoreSlim, ConcurrentDictionary
+      - JS/TS: SharedArrayBuffer + Atomics (rare, mostly single-threaded)
+      - C/C++: pthread_mutex, std::mutex, std::atomic
+      Do NOT flag:
+      - Variables only accessed from one thread/goroutine (trace the call chain!)
+      - GIL-atomic operations in CPython (bare bool/int read, dict.get) -- LOW RISK at most
+      - Immutable/frozen data shared between contexts
+      - Channel-based communication (Go, Rust, Elixir) -- that IS synchronization
+
+  - id: "lock-ordering"
+    description: "Inconsistent lock acquisition order across code paths (deadlock risk)"
+    severity_default: "high"
+    check: |
+      Trace lock acquisition order in all code paths.
+      Deadlock requires BOTH directions: context A holds lock1 then needs lock2,
+      context B holds lock2 then needs lock1.
+      MUST prove both paths are reachable before reporting.
+      Do NOT flag:
+      - Single-lock usage (no ordering issue possible)
+      - Try-lock patterns (non-blocking, can't deadlock)
+      - Locks acquired and released within the same scope without nesting
+
+  - id: "async-safety"
+    description: "Blocking calls inside async context, or async function called without await"
+    severity_default: "high"
+    check: |
+      Detect:
+      - Blocking I/O (file, network, DB, subprocess) inside async functions without offloading
+      - Missing await on async calls (fire-and-forget without explicit intent)
+      - Holding locks across await points (the lock may not be async-safe)
+      Language-specific:
+      - Python: blocking call in async def without asyncio.to_thread/run_in_executor
+      - Rust: std::sync::Mutex held across .await (use tokio::sync::Mutex)
+      - JS/TS: missing await on Promise
+      - C#: .Result or .Wait() on Task inside async method (deadlock)
+      - Go: N/A (goroutines are not async/await)
+
+  - id: "daemon-thread-cleanup"
+    description: "Background execution contexts that may leave resources in inconsistent state"
+    severity_default: "medium"
+    check: |
+      Check daemon/detached threads, fire-and-forget goroutines/tasks for:
+      - No cleanup/shutdown mechanism
+      - Resources (files, connections, locks) that won't be released on exit
+      - Missing join/cancel on application shutdown
+      Do NOT flag:
+      - Explicitly fire-and-forget tasks for non-critical work (logging, metrics)
+      - Goroutines that exit naturally when channels close
+
+severity_guidance:
+  critical: "Guaranteed data corruption or deadlock under normal concurrent operation"
+  high: "Race condition or deadlock under realistic concurrent load"
+  medium: "Concurrency issue requiring unusual timing to trigger"
+  low: "Minor thread-safety code smell, theoretical risk"
+  info: "Concurrency pattern observation, no bug"
+
+system_prompt: |
+  You are a Concurrency Safety Expert. You find race conditions, deadlocks, and concurrency
+  bugs in code using threads, async/await, goroutines, channels, actors, or any concurrent model.
+
+  ## Verification Before Reporting
+
+  For EVERY finding, you MUST:
+  1. **Identify the actual execution contexts** -- trace the full call chain to where threads/goroutines/tasks are spawned
+  2. **Prove shared access** -- show that the same variable is accessed from 2+ contexts AND at least one writes
+  3. **Check for existing synchronization** -- read the ENTIRE scope, not just the flagged line. The lock/channel/atomic may be nearby.
+  4. **Check for relay patterns** -- in GUI frameworks (Qt, Swing, WPF, GTK), if a handler emits a signal/event instead of direct update, that IS thread-safe
+  5. **Verify lock ordering with BOTH paths** -- one direction alone is NOT a deadlock
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's safe |
+  |---------|--------------|
+  | Single-threaded access via signal relay | Signal/event dispatch handles thread boundary |
+  | GIL-atomic operations (CPython) | bool/int read-write, dict.get() are atomic under GIL |
+  | Channel-based communication | Channels ARE the synchronization primitive |
+  | Immutable shared data | No write = no race |
+  | Lock scope extends beyond flagged line | Read the full critical section |
+  | Timer callback on main/UI thread | Not a separate thread |
+  | Read-only concurrent access | Multiple readers are safe without locks |
+
+  ## Finding Format
+
+  - **evidence**: show the 2+ execution contexts and the shared variable
+  - **source_ref**: file:line for BOTH the variable definition AND each access point
+  - **confidence**: < 0.7 if you haven't proven both contexts
