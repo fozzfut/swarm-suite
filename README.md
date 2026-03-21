@@ -13,11 +13,81 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python 3.10+" /></a>
-  <img src="https://img.shields.io/badge/tests-215%20passing-brightgreen.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-227%20passing-brightgreen.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/experts-13-orange.svg" alt="Experts" />
-  <img src="https://img.shields.io/badge/MCP_tools-24-blue.svg" alt="MCP Tools" />
+  <img src="https://img.shields.io/badge/MCP_tools-26-blue.svg" alt="MCP Tools" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg" alt="Platform" />
 </p>
+
+---
+
+## Full Workflow
+
+ReviewSwarm covers the complete review-to-fix cycle:
+
+```
+                          REVIEW PHASE                              FIX PHASE
+                    ┌──────────────────────┐                ┌──────────────────────┐
+                    │                      │                │                      │
+ You: "Review src/" │  ReviewSwarm Server  │  report.md     │   Fix Agent          │
+ ─────────────────► │                      │ ──────────►    │   (can modify code)  │
+                    │  ┌────────────────┐  │                │                      │
+                    │  │ Phase 1: REVIEW│  │  report.json   │  reads report.md     │
+                    │  │ claim files    │  │ ──────────►    │  fixes bugs          │
+                    │  │ post findings  │  │                │  calls mark_fixed()  │
+                    │  │ mark_phase_done│  │  report.sarif  │                      │
+                    │  ├────────────────┤  │ ──────────►    │  Finding: open→fixed │
+                    │  │ ═══ BARRIER ═══│  │                │                      │
+                    │  ├────────────────┤  │                └──────────────────────┘
+                    │  │ Phase 2: CROSS │  │
+                    │  │ get_findings   │  │
+                    │  │ react (confirm │  │
+                    │  │   / dispute)   │  │
+                    │  │ mark_phase_done│  │
+                    │  ├────────────────┤  │
+                    │  │ ═══ BARRIER ═══│  │
+                    │  ├────────────────┤  │
+                    │  │ Phase 3: REPORT│  │
+                    │  │ end_session    │  │
+                    │  │ auto-save      │  │
+                    │  │  reports       │  │
+                    │  └────────────────┘  │
+                    └──────────────────────┘
+```
+
+### Step by step
+
+```bash
+# 1. REVIEW: one command launches everything
+review-swarm review . --scope src/ --task "security audit"
+
+# Orchestrator: creates session, picks experts, assigns files, returns plan.
+# Agents execute the plan:
+#   Phase 1 — each expert reviews files, posts findings
+#   ═══ BARRIER ═══ (all agents must finish before Phase 2)
+#   Phase 2 — each expert reads others' findings, confirms/disputes
+#   ═══ BARRIER ═══
+#   Phase 3 — end_session auto-saves reports
+
+# 2. REPORTS: auto-saved to session directory
+ls ~/.review-swarm/sessions/sess-2026-03-22-001/
+#   report.md      ← Markdown (executive summary, per-file, per-expert)
+#   report.json    ← JSON (machine-readable)
+#   report.sarif   ← SARIF 2.1.0 (GitHub Code Scanning)
+
+# 3. FIX: separate agent reads report, fixes code, marks findings as fixed
+#   Fix agent calls: mark_fixed(session_id, finding_id, fix_ref="abc1234")
+#   Finding status:  open → fixed
+#   Bulk update:     bulk_update_status(session_id, [ids...], "fixed")
+```
+
+### Key principles
+
+- **Review agents are read-only** — they produce a recommendation report, never modify code
+- **Fix agents are separate** — they read the report, apply patches, and call `mark_fixed`
+- **Phase barriers** — Phase 2 cannot start until all agents finish Phase 1
+- **Consensus** — 2+ confirms = confirmed, 1+ dispute = disputed
+- **Reports as specs** — each finding is a self-contained fix spec with file, lines, evidence, and suggestion
 
 ---
 
@@ -33,24 +103,7 @@ Or via MCP:
 orchestrate_review(project_path=".", scope="src/", task="security audit")
 ```
 
-ReviewSwarm creates a session, selects experts, assigns files, and returns a step-by-step plan. The LLM agent follows the plan — you get a complete multi-expert review report.
-
-```
-You: "Review src/ for security"
-  │
-  ▼
-ReviewSwarm Orchestrator
-  ├─ Creates session sess-2026-03-22-001
-  ├─ Scans 47 source files in src/
-  ├─ Selects: security-surface, error-handling, api-signatures
-  ├─ Assigns files to experts
-  └─ Returns 3-phase execution plan
-       │
-       ▼
-  Phase 1: Review ─── each expert reviews files, posts findings
-  Phase 2: Cross-check ─── experts confirm/dispute each other
-  Phase 3: Report ─── aggregated report with consensus
-```
+ReviewSwarm creates a session, selects experts, assigns files, and returns a 3-phase execution plan with barrier synchronization.
 
 **Task keywords** (EN/RU): security, performance, concurrency, quality, pre-release, bug, type, log, dependency, test, doc — the orchestrator auto-selects relevant experts.
 
@@ -58,16 +111,15 @@ ReviewSwarm Orchestrator
 
 ## What is ReviewSwarm?
 
-ReviewSwarm is **not** an LLM — it's **infrastructure**. It provides **24 MCP tools** that AI agents use to:
+ReviewSwarm is **not** an LLM — it's **infrastructure**. It provides **26 MCP tools** that AI agents use to:
 
 - **Post findings** with structured evidence (actual + expected + source_ref)
 - **Claim files** for review (advisory locks with TTL)
 - **React** to each other's work (confirm, dispute, extend, duplicate)
 - **Message each other** — direct, broadcast, query/response (star topology)
 - **Reach consensus** automatically (2+ confirms = confirmed)
+- **Track fixes** — mark findings as fixed with commit/PR references
 - **Generate reports** in Markdown, JSON, or SARIF
-
-**Key principle:** agents form a **REVIEW** — they produce a recommendation report, not code changes. Agents never modify project files.
 
 ---
 
@@ -153,20 +205,20 @@ review-swarm purge --older-than 30
 
 ---
 
-## MCP Tools (24)
+## MCP Tools (26)
 
 ### Orchestrator
 
 | Tool | Description |
 |------|-------------|
-| `orchestrate_review` | One-command review. Provide scope + task, get a complete execution plan. |
+| `orchestrate_review` | One-command review. Provide scope + task, get a complete execution plan with phase barriers. |
 
 ### Session Management
 
 | Tool | Description |
 |------|-------------|
 | `start_session` | Start a review session |
-| `end_session` | End session, release claims, get summary |
+| `end_session` | End session, release claims, auto-save reports (md + json + sarif) |
 | `get_session` | Get session state |
 | `list_sessions` | List all sessions |
 
@@ -183,27 +235,34 @@ review-swarm purge --older-than 30
 
 | Tool | Description |
 |------|-------------|
-| `post_finding` | Post finding with evidence. Rate-limited. Path-validated. |
+| `post_finding` | Post finding with evidence. Rate-limited. Input-validated. |
 | `post_findings_batch` | Post multiple findings in one call |
-| `get_findings` | Query findings with filters + pagination |
+| `get_findings` | Query findings with filters + pagination (limit/offset) |
 | `find_duplicates` | Check for duplicates before posting |
 | `react` | Confirm, dispute, extend, or mark duplicate |
 | `post_comment` | Inline comment on a finding |
 | `get_summary` | Generate Markdown/JSON report |
 
-### Real-Time
+### Fix Tracking
+
+| Tool | Description |
+|------|-------------|
+| `mark_fixed` | Mark a finding as FIXED with optional commit/PR reference |
+| `bulk_update_status` | Batch status update (fixed, wontfix, open, confirmed, disputed) |
+
+### Phase Barriers (Two-Pass Sync)
+
+| Tool | Description |
+|------|-------------|
+| `mark_phase_done` | Mark that an expert completed a phase |
+| `check_phase_ready` | Check if all agents finished previous phase |
+| `get_phase_status` | Full phase status for all agents |
+
+### Real-Time Events
 
 | Tool | Description |
 |------|-------------|
 | `get_events` | Get events since timestamp (polling fallback) |
-
-### Phase Barriers
-
-| Tool | Description |
-|------|-------------|
-| `mark_phase_done` | Mark that an expert has completed a phase |
-| `check_phase_ready` | Check if a phase can be started (all agents done with previous phase) |
-| `get_phase_status` | Get full phase completion status for all agents |
 
 ### Agent Messaging (Star Topology)
 
@@ -215,6 +274,49 @@ review-swarm purge --older-than 30
 | `broadcast` | Send to all agents |
 
 Every tool response includes `_pending` — unread messages piggyback on every call so agents react immediately.
+
+---
+
+## Two-Pass Review with Phase Barriers
+
+Agents can't start cross-checking until everyone finishes reviewing:
+
+```
+Phase 1: REVIEW
+  Expert A reviews → mark_phase_done(sid, "threading-safety", 1)
+  Expert B reviews → mark_phase_done(sid, "api-signatures", 1)
+  Expert C reviews → mark_phase_done(sid, "consistency", 1)
+                     ════════════ BARRIER ════════════
+                     check_phase_ready(sid, 2) → ready: true
+
+Phase 2: CROSS-CHECK
+  Expert A reads findings, reacts → mark_phase_done(sid, "threading-safety", 2)
+  Expert B reads findings, reacts → mark_phase_done(sid, "api-signatures", 2)
+  Expert C reads findings, reacts → mark_phase_done(sid, "consistency", 2)
+                     ════════════ BARRIER ════════════
+                     check_phase_ready(sid, 3) → ready: true
+
+Phase 3: REPORT
+  end_session → auto-saves report.md + report.json + report.sarif
+```
+
+---
+
+## Fix Tracking
+
+After review, a separate fix-agent reads the report and patches code:
+
+```python
+# Fix agent reads report.md, fixes the bug, then:
+mark_fixed(session_id, "f-a1b2c3", fix_ref="commit:abc1234")
+# Finding status: open → fixed
+
+# Or batch-update after fixing multiple bugs:
+bulk_update_status(session_id, ["f-a1b2c3", "f-d4e5f6"], "fixed",
+                   reason="Fixed in PR #42")
+```
+
+Finding statuses: `open` → `confirmed` → `fixed` / `wontfix` / `disputed`
 
 ---
 
@@ -240,7 +342,7 @@ All **language-agnostic**: Python, JS/TS, Go, Rust, Java, Kotlin, C#, C/C++, Rub
 
 ---
 
-## Consensus
+## Consensus Algorithm
 
 ```
 1+ duplicate  →  DUPLICATE
@@ -251,9 +353,7 @@ otherwise     →  OPEN
 
 ---
 
-## Agent Communication
-
-Star topology — every agent reaches every other via the hub:
+## Agent Communication (Star Topology)
 
 ```
      threading-safety
@@ -267,21 +367,6 @@ api-signs ↔ Hub ↔ consistency
 
 **Piggyback `_pending`:** every tool response includes unread message count + preview. Agents react immediately — no polling loop, no race conditions.
 
-**Context:** messages carry structured references to findings:
-
-```json
-{
-  "content": "Is this lock pattern correct?",
-  "urgent": true,
-  "context": {
-    "finding_id": "f-abc",
-    "file": "src/cache.py",
-    "line_start": 20,
-    "severity": "critical"
-  }
-}
-```
-
 ---
 
 ## Safety
@@ -290,9 +375,11 @@ api-signs ↔ Hub ↔ consistency
 |---------|---------|
 | Rate limiting | 60 findings/min, 120 messages/min per agent |
 | Path validation | Rejects `../`, absolute paths, backslashes |
+| Input validation | Confidence 0-1, line numbers >= 0, line_end >= line_start |
 | Duplicate reactions | Same agent can't confirm/dispute same finding twice |
 | Session auto-expiry | Active sessions expire after 24h |
-| Atomic writes | JSONL uses temp file + `os.replace()` |
+| Atomic writes | JSONL and JSON use temp file + `os.replace()` |
+| Corruption recovery | Bad JSONL lines skipped with warning, not crash |
 | Max findings | 10,000 per session |
 
 ---
@@ -322,20 +409,39 @@ rate_limit:
 
 ---
 
+## Data Storage
+
+```
+~/.review-swarm/sessions/sess-2026-03-22-001/
+  ├── meta.json          # Session metadata + report paths
+  ├── findings.jsonl     # Findings (one per line)
+  ├── claims.json        # File claims
+  ├── reactions.jsonl    # Reactions log
+  ├── events.jsonl       # Real-time events
+  ├── messages.jsonl     # Agent-to-agent messages
+  ├── phases.json        # Phase barrier state
+  ├── report.md          # Auto-saved Markdown report
+  ├── report.json        # Auto-saved JSON report
+  └── report.sarif       # Auto-saved SARIF report
+```
+
+---
+
 ## Architecture
 
 ```
 src/review_swarm/
 ├── orchestrator.py        # One-command review planning
-├── server.py              # 24 MCP tools + resources + subscriptions
+├── server.py              # 26 MCP tools + resources + subscriptions
 ├── models.py              # Finding, Claim, Reaction, Event, Message
 ├── session_manager.py     # Session lifecycle, caching, auto-expiry
 ├── finding_store.py       # JSONL storage + in-memory index (atomic writes)
-├── claim_registry.py      # Advisory file claims with TTL
+├── claim_registry.py      # Advisory file claims with TTL (atomic writes)
 ├── reaction_engine.py     # Consensus engine + duplicate reaction guard
 ├── report_generator.py    # Markdown, JSON, SARIF reports
-├── event_bus.py           # Real-time event pub/sub
-├── message_bus.py         # Agent-to-agent messaging (star topology)
+├── event_bus.py           # Real-time event pub/sub (thread-safe)
+├── message_bus.py         # Agent messaging, star topology (thread-safe)
+├── phase_barrier.py       # Two-pass sync barriers
 ├── rate_limiter.py        # Per-agent sliding window rate limiter
 ├── expert_profiler.py     # Profile loading + auto-suggestion
 ├── logging_config.py      # Structured logging
@@ -346,25 +452,11 @@ src/review_swarm/
 
 ---
 
-## Data Storage
-
-```
-~/.review-swarm/sessions/sess-2026-03-22-001/
-  ├── meta.json
-  ├── findings.jsonl
-  ├── claims.json
-  ├── reactions.jsonl
-  ├── events.jsonl
-  └── messages.jsonl
-```
-
----
-
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 215 tests, ~3s
+pytest                    # 227 tests, ~3s
 mypy src/review_swarm/
 ```
 
