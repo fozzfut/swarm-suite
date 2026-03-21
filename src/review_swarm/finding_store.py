@@ -9,7 +9,7 @@ import threading
 from collections import Counter
 from pathlib import Path
 
-from .models import Category, Finding, Severity, Status, now_iso
+from .models import Finding, Status, now_iso
 
 
 class FindingStore:
@@ -233,10 +233,16 @@ class FindingStore:
         if not self._path.exists():
             return
         with open(self._path, "r", encoding="utf-8") as fh:
-            for line in fh:
+            for line_num, line in enumerate(fh, 1):
                 line = line.strip()
                 if not line:
                     continue
-                data = json.loads(line)
-                finding = Finding.from_dict(data)
-                self._findings[finding.id] = finding
+                try:
+                    data = json.loads(line)
+                    finding = Finding.from_dict(data)
+                    self._findings[finding.id] = finding
+                except (json.JSONDecodeError, KeyError, ValueError) as exc:
+                    import logging
+                    logging.getLogger("review_swarm.finding_store").warning(
+                        "Skipping corrupt line %d in %s: %s", line_num, self._path, exc
+                    )

@@ -251,11 +251,6 @@ class Reaction:
         if not self.id:
             self.id = "r-" + secrets.token_hex(3)
 
-    @staticmethod
-    def generate_id() -> str:
-        """Generate a reaction ID: 'r-' + 6 hex chars."""
-        return "r-" + secrets.token_hex(3)
-
     def to_dict(self) -> dict:
         """Serialize to a plain dict."""
         return {

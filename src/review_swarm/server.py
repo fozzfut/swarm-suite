@@ -1,10 +1,8 @@
-"""MCP Server with 17 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
+"""MCP Server with 21 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-
 from .config import Config
 from .rate_limiter import RateLimiter
 from .session_manager import SessionManager
@@ -91,7 +89,13 @@ def tool_claim_file(
 ) -> dict:
     reg = ctx.session_manager.get_claim_registry(session_id)
     claim = reg.claim(session_id, file, expert_role, agent_id)
-    return claim.to_dict()
+    result = claim.to_dict()
+    try:
+        bus = ctx.session_manager.get_event_bus(session_id)
+        bus.publish_sync(EventType.FILE_CLAIMED, result)
+    except (KeyError, Exception):
+        pass
+    return result
 
 
 def tool_release_file(
@@ -99,7 +103,13 @@ def tool_release_file(
 ) -> dict:
     reg = ctx.session_manager.get_claim_registry(session_id)
     reg.release(session_id, file, expert_role)
-    return {"status": "released"}
+    result = {"status": "released", "file": file, "expert_role": expert_role}
+    try:
+        bus = ctx.session_manager.get_event_bus(session_id)
+        bus.publish_sync(EventType.FILE_RELEASED, result)
+    except (KeyError, Exception):
+        pass
+    return result
 
 
 def tool_get_claims(ctx: AppContext, session_id: str) -> list[dict]:
@@ -159,6 +169,14 @@ def tool_post_finding(
     )
     store.post(finding)
     result = finding.to_dict()
+
+    # Publish event sync (works both via MCP wrappers and direct Python calls)
+    try:
+        bus = ctx.session_manager.get_event_bus(session_id)
+        bus.publish_sync(EventType.FINDING_POSTED, result)
+    except (KeyError, Exception):
+        pass  # session may not have event bus yet
+
     dupes = store.find_duplicates(
         file, line_start, line_end, title, exclude_id=finding.id,
     )
@@ -212,7 +230,13 @@ def tool_react(
         related_finding_id=related_finding_id,
     )
     updated = engine.react(r)
-    return updated.to_dict()
+    result = updated.to_dict()
+    try:
+        bus = ctx.session_manager.get_event_bus(session_id)
+        bus.publish_sync(EventType.REACTION_ADDED, result)
+    except (KeyError, Exception):
+        pass
+    return result
 
 
 def tool_get_summary(
@@ -356,19 +380,50 @@ def tool_send_message(
     mbus.register_agent(from_agent)
 
     mt = MessageType(message_type)
-    if mt == MessageType.QUERY:
-        msg = mbus.send_query(session_id, from_agent, content)
-    elif mt == MessageType.RESPONSE:
-        msg = mbus.send_response(session_id, from_agent, in_reply_to, content)
-    elif mt == MessageType.BROADCAST:
-        msg = mbus.send_broadcast(session_id, from_agent, content, urgent=urgent)
-    else:
-        msg = mbus.send_direct(session_id, from_agent, to_agent, content, urgent=urgent)
+    msg = Message(
+        id=Message.generate_id(),
+        session_id=session_id,
+        from_agent=from_agent,
+        to_agent=to_agent,
+        message_type=mt,
+        content=content,
+        in_reply_to=in_reply_to,
+        urgent=urgent if mt != MessageType.QUERY else True,
+        context=context or {},
+    )
+    mbus.send(msg)
 
-    if context:
-        msg.context = context
+    result = msg.to_dict()
+    try:
+        bus = ctx.session_manager.get_event_bus(session_id)
+        et = EventType.BROADCAST if mt == MessageType.BROADCAST else EventType.MESSAGE
+        bus.publish_sync(et, result)
+    except (KeyError, Exception):
+        pass
+    return result
 
-    return msg.to_dict()
+
+def tool_mark_phase_done(
+    ctx: AppContext, session_id: str, expert_role: str, phase: int,
+) -> dict:
+    """Mark that an agent has completed a phase. Returns barrier status."""
+    barrier = ctx.session_manager.get_phase_barrier(session_id)
+    barrier.register_agent(expert_role)
+    return barrier.mark_phase_done(expert_role, phase)
+
+
+def tool_check_phase_ready(
+    ctx: AppContext, session_id: str, phase: int,
+) -> dict:
+    """Check if a phase can be started (all agents done with previous phase)."""
+    barrier = ctx.session_manager.get_phase_barrier(session_id)
+    return barrier.check_phase_ready(phase)
+
+
+def tool_get_phase_status(ctx: AppContext, session_id: str) -> dict:
+    """Get full phase status for all agents."""
+    barrier = ctx.session_manager.get_phase_barrier(session_id)
+    return barrier.get_status()
 
 
 def tool_get_inbox(
@@ -422,7 +477,7 @@ def _inject_pending(app: AppContext, session_id: str, expert_role: str, result: 
         pending = mbus.get_pending(expert_role)
         if pending:
             result["_pending"] = pending
-    except (KeyError, Exception):
+    except KeyError:
         pass  # session may not exist yet or be ended
     return result
 
@@ -447,7 +502,7 @@ async def _notify_resource_subscribers(
 
 
 def create_mcp_server():
-    """Create and configure the MCP server with all 17 tools + resources."""
+    """Create and configure the MCP server with all 21 tools + resources."""
     from mcp.server.fastmcp import FastMCP, Context
     from contextlib import asynccontextmanager
     from collections.abc import AsyncIterator
@@ -752,6 +807,50 @@ def create_mcp_server():
             event_type=event_type or None,
         )
         return json.dumps(result)
+
+    # ── Phase Barrier Tools (two-pass sync) ────────────────────────
+
+    @mcp.tool(
+        name="mark_phase_done",
+        description=(
+            "Mark that you (as expert_role) have completed a phase. "
+            "Phase 1 = review (post findings), Phase 2 = cross-check (react to others). "
+            "Returns whether all agents are done and who is still working."
+        ),
+    )
+    def _mark_phase_done(
+        session_id: str, expert_role: str, phase: int,
+        ctx: Context = None,
+    ) -> str:
+        import json
+        app = ctx.request_context.lifespan_context
+        result = tool_mark_phase_done(app, session_id, expert_role, phase)
+        _inject_pending(app, session_id, expert_role, result)
+        return json.dumps(result)
+
+    @mcp.tool(
+        name="check_phase_ready",
+        description=(
+            "Check if a phase can be started. Phase 2 is ready only when ALL "
+            "agents have completed Phase 1. Returns ready status and who is still working."
+        ),
+    )
+    def _check_phase_ready(
+        session_id: str, phase: int,
+        ctx: Context = None,
+    ) -> str:
+        import json
+        app = ctx.request_context.lifespan_context
+        return json.dumps(tool_check_phase_ready(app, session_id, phase))
+
+    @mcp.tool(
+        name="get_phase_status",
+        description="Get full phase completion status for all agents in the session.",
+    )
+    def _get_phase_status(session_id: str, ctx: Context = None) -> str:
+        import json
+        app = ctx.request_context.lifespan_context
+        return json.dumps(tool_get_phase_status(app, session_id))
 
     # ── Agent Messaging Tools (star topology) ──────────────────────
 

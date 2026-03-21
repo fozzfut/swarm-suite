@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections import defaultdict
 from pathlib import Path
 
@@ -34,16 +35,19 @@ class MessageBus:
         self._agents: set[str] = set()
         # Read watermark per agent: ISO timestamp of last read
         self._read_watermarks: dict[str, str] = {}
+        self._lock = threading.Lock()
         self._load()
 
     # ── Agent registration ───────────────────────────────────────────
 
     def register_agent(self, expert_role: str) -> None:
         """Register an agent so it can receive broadcasts and queries."""
-        self._agents.add(expert_role)
+        with self._lock:
+            self._agents.add(expert_role)
 
     def unregister_agent(self, expert_role: str) -> None:
-        self._agents.discard(expert_role)
+        with self._lock:
+            self._agents.discard(expert_role)
 
     @property
     def registered_agents(self) -> set[str]:
@@ -53,26 +57,27 @@ class MessageBus:
 
     def send(self, message: Message) -> Message:
         """Send a message. Routes to appropriate inbox(es) based on type."""
-        self._messages.append(message)
-        self._append_to_disk(message)
+        with self._lock:
+            self._messages.append(message)
+            self._append_to_disk(message)
 
-        if message.message_type == MessageType.DIRECT:
-            self._inboxes[message.to_agent].append(message)
+            if message.message_type == MessageType.DIRECT:
+                self._inboxes[message.to_agent].append(message)
 
-        elif message.message_type in (MessageType.BROADCAST, MessageType.QUERY):
-            for agent in self._agents:
-                if agent != message.from_agent:
-                    self._inboxes[agent].append(message)
+            elif message.message_type in (MessageType.BROADCAST, MessageType.QUERY):
+                for agent in self._agents:
+                    if agent != message.from_agent:
+                        self._inboxes[agent].append(message)
 
-        elif message.message_type == MessageType.RESPONSE:
-            original = self._find_message(message.in_reply_to)
-            if original:
-                self._inboxes[original.from_agent].append(message)
-            if message.to_agent and message.to_agent != "*":
-                if not original or message.to_agent != original.from_agent:
-                    self._inboxes[message.to_agent].append(message)
+            elif message.message_type == MessageType.RESPONSE:
+                original = self._find_message(message.in_reply_to)
+                if original:
+                    self._inboxes[original.from_agent].append(message)
+                if message.to_agent and message.to_agent != "*":
+                    if not original or message.to_agent != original.from_agent:
+                        self._inboxes[message.to_agent].append(message)
 
-        return message
+            return message
 
     def send_direct(
         self, session_id: str, from_agent: str, to_agent: str, content: str,
@@ -153,15 +158,16 @@ class MessageBus:
 
         Calling this advances the read watermark to now.
         """
-        msgs = self._inboxes.get(expert_role, [])
-        if since:
-            msgs = [m for m in msgs if m.created_at > since]
-        if message_type:
-            mt = MessageType(message_type)
-            msgs = [m for m in msgs if m.message_type == mt]
-        # Advance read watermark
-        self._read_watermarks[expert_role] = now_iso()
-        return [m.to_dict() for m in msgs]
+        with self._lock:
+            msgs = self._inboxes.get(expert_role, [])
+            if since:
+                msgs = [m for m in msgs if m.created_at > since]
+            if message_type:
+                mt = MessageType(message_type)
+                msgs = [m for m in msgs if m.message_type == mt]
+            # Advance read watermark
+            self._read_watermarks[expert_role] = now_iso()
+            return [m.to_dict() for m in msgs]
 
     def mark_read(self, expert_role: str) -> None:
         """Explicitly mark all messages as read for this agent."""
@@ -183,57 +189,59 @@ class MessageBus:
 
         Returns empty dict ({}) if no pending messages.
         """
-        watermark = self._read_watermarks.get(expert_role, "")
-        inbox = self._inboxes.get(expert_role, [])
+        with self._lock:
+            watermark = self._read_watermarks.get(expert_role, "")
+            inbox = self._inboxes.get(expert_role, [])
 
-        if watermark:
-            unread = [m for m in inbox if m.created_at > watermark]
-        else:
-            unread = list(inbox)
+            if watermark:
+                unread = [m for m in inbox if m.created_at > watermark]
+            else:
+                unread = list(inbox)
 
-        if not unread:
-            return {}
+            if not unread:
+                return {}
 
-        urgent_count = sum(1 for m in unread if m.urgent)
+            urgent_count = sum(1 for m in unread if m.urgent)
 
-        # Sort: urgent first, then newest first
-        sorted_unread = sorted(
-            unread,
-            key=lambda m: (not m.urgent, m.created_at),
-            reverse=False,
-        )
-        # Urgent first, then reverse chronological
-        urgent_msgs = [m for m in sorted_unread if m.urgent]
-        normal_msgs = sorted(
-            [m for m in sorted_unread if not m.urgent],
-            key=lambda m: m.created_at,
-            reverse=True,
-        )
-        preview_msgs = (urgent_msgs + normal_msgs)[:max_preview]
+            # Sort: urgent first, then newest first
+            sorted_unread = sorted(
+                unread,
+                key=lambda m: (not m.urgent, m.created_at),
+                reverse=False,
+            )
+            # Urgent first, then reverse chronological
+            urgent_msgs = [m for m in sorted_unread if m.urgent]
+            normal_msgs = sorted(
+                [m for m in sorted_unread if not m.urgent],
+                key=lambda m: m.created_at,
+                reverse=True,
+            )
+            preview_msgs = (urgent_msgs + normal_msgs)[:max_preview]
 
-        preview = []
-        for m in preview_msgs:
-            preview.append({
-                "id": m.id,
-                "from_agent": m.from_agent,
-                "message_type": m.message_type.value,
-                "content": m.content[:200] + ("..." if len(m.content) > 200 else ""),
-                "urgent": m.urgent,
-            })
+            preview = []
+            for m in preview_msgs:
+                preview.append({
+                    "id": m.id,
+                    "from_agent": m.from_agent,
+                    "message_type": m.message_type.value,
+                    "content": m.content[:200] + ("..." if len(m.content) > 200 else ""),
+                    "urgent": m.urgent,
+                })
 
-        return {
-            "count": len(unread),
-            "urgent": urgent_count,
-            "preview": preview,
-        }
+            return {
+                "count": len(unread),
+                "urgent": urgent_count,
+                "preview": preview,
+            }
 
     def get_thread(self, message_id: str) -> list[dict]:
         """Get a query and all its responses (conversation thread)."""
-        thread = []
-        for m in self._messages:
-            if m.id == message_id or m.in_reply_to == message_id:
-                thread.append(m.to_dict())
-        return thread
+        with self._lock:
+            thread = []
+            for m in self._messages:
+                if m.id == message_id or m.in_reply_to == message_id:
+                    thread.append(m.to_dict())
+            return thread
 
     def get_all_messages(
         self, since: str | None = None, message_type: str | None = None,
@@ -267,15 +275,21 @@ class MessageBus:
         if not self._messages_path.exists():
             return
         with open(self._messages_path, "r", encoding="utf-8") as fh:
-            for line in fh:
+            for line_num, line in enumerate(fh, 1):
                 line = line.strip()
                 if not line:
                     continue
-                msg = Message.from_dict(json.loads(line))
-                self._messages.append(msg)
-                self._agents.add(msg.from_agent)
-                if msg.to_agent and msg.to_agent != "*":
-                    self._agents.add(msg.to_agent)
+                try:
+                    msg = Message.from_dict(json.loads(line))
+                    self._messages.append(msg)
+                    self._agents.add(msg.from_agent)
+                    if msg.to_agent and msg.to_agent != "*":
+                        self._agents.add(msg.to_agent)
+                except (json.JSONDecodeError, KeyError, ValueError) as exc:
+                    import logging
+                    logging.getLogger("review_swarm.message_bus").warning(
+                        "Skipping corrupt line %d in %s: %s", line_num, self._messages_path, exc
+                    )
         self._rebuild_inboxes()
 
     def _rebuild_inboxes(self) -> None:

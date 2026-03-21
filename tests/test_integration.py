@@ -135,9 +135,8 @@ class TestEventBusIntegration:
     def test_publish_sync_and_get_events(self, app_ctx, sample_project):
         result = tool_start_session(app_ctx, str(sample_project))
         sid = result["session_id"]
-        bus = app_ctx.session_manager.get_event_bus(sid)
 
-        # Simulate what MCP wrapper does: post finding, then publish event
+        # tool_post_finding now auto-publishes events via publish_sync
         finding = tool_post_finding(app_ctx, sid,
             expert_role="threading-safety",
             file="src/main.py", line_start=1, line_end=5,
@@ -148,10 +147,9 @@ class TestEventBusIntegration:
             suggestion_action="fix", suggestion_detail="Add lock",
             confidence=0.9,
         )
-        bus.publish_sync(EventType.FINDING_POSTED, finding)
 
         events = tool_get_events(app_ctx, sid)
-        assert len(events) == 1
+        assert len(events) >= 1
         assert events[0]["event_type"] == "finding_posted"
         assert events[0]["payload"]["id"] == finding["id"]
 

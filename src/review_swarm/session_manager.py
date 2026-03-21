@@ -13,6 +13,7 @@ from .event_bus import SessionEventBus
 from .finding_store import FindingStore
 from .claim_registry import ClaimRegistry
 from .message_bus import MessageBus
+from .phase_barrier import PhaseBarrier
 from .reaction_engine import ReactionEngine
 from .models import now_iso
 
@@ -26,7 +27,8 @@ class SessionManager:
         self._engines: dict[str, ReactionEngine] = {}
         self._event_buses: dict[str, SessionEventBus] = {}
         self._message_buses: dict[str, MessageBus] = {}
-        self._lock = threading.Lock()
+        self._phase_barriers: dict[str, PhaseBarrier] = {}
+        self._lock = threading.RLock()
 
     def start_session(self, project_path: str, name: str | None = None) -> str:
         with self._lock:
@@ -53,6 +55,7 @@ class SessionManager:
             (sess_dir / "reactions.jsonl").write_text("", encoding="utf-8")
             (sess_dir / "events.jsonl").write_text("", encoding="utf-8")
             (sess_dir / "messages.jsonl").write_text("", encoding="utf-8")
+            (sess_dir / "phases.json").write_text("{}", encoding="utf-8")
 
             # Auto-suggest experts if configured (spec requirement)
             if self._expert_profiler and self._config.experts.auto_suggest:
@@ -84,6 +87,27 @@ class SessionManager:
                 "findings_by_status": store.count_by_status(),
             }
 
+            # Auto-save reports (markdown + json + sarif)
+            try:
+                from .report_generator import ReportGenerator
+                gen = ReportGenerator(store)
+                (sess_dir / "report.md").write_text(
+                    gen.generate(session_id, fmt="markdown"), encoding="utf-8"
+                )
+                (sess_dir / "report.json").write_text(
+                    gen.generate(session_id, fmt="json"), encoding="utf-8"
+                )
+                (sess_dir / "report.sarif").write_text(
+                    gen.generate_sarif(session_id), encoding="utf-8"
+                )
+                result["reports"] = {
+                    "markdown": str(sess_dir / "report.md"),
+                    "json": str(sess_dir / "report.json"),
+                    "sarif": str(sess_dir / "report.sarif"),
+                }
+            except Exception:
+                pass  # report generation is non-critical
+
             # Release all claims
             claims_reg = self.get_claim_registry(session_id)
             claims_reg.release_all(session_id)
@@ -92,6 +116,8 @@ class SessionManager:
             meta = self._load_meta(sess_dir)
             meta["status"] = "completed"
             meta["ended_at"] = now_iso()
+            if "reports" in result:
+                meta["reports"] = result["reports"]
             (sess_dir / "meta.json").write_text(
                 json.dumps(meta, indent=2), encoding="utf-8"
             )
@@ -102,6 +128,7 @@ class SessionManager:
             self._engines.pop(session_id, None)
             self._event_buses.pop(session_id, None)
             self._message_buses.pop(session_id, None)
+            self._phase_barriers.pop(session_id, None)
 
             return result
 
@@ -154,46 +181,60 @@ class SessionManager:
             )
 
     def get_finding_store(self, session_id: str) -> FindingStore:
-        if session_id not in self._stores:
-            sess_dir = self._session_dir(session_id)
-            self._stores[session_id] = FindingStore(
-                sess_dir / "findings.jsonl",
-                max_findings=10_000,
-            )
-        return self._stores[session_id]
+        with self._lock:
+            if session_id not in self._stores:
+                sess_dir = self._session_dir(session_id)
+                self._stores[session_id] = FindingStore(
+                    sess_dir / "findings.jsonl",
+                    max_findings=10_000,
+                )
+            return self._stores[session_id]
 
     def get_claim_registry(self, session_id: str) -> ClaimRegistry:
-        if session_id not in self._claims:
-            sess_dir = self._session_dir(session_id)
-            self._claims[session_id] = ClaimRegistry(sess_dir / "claims.json")
-        return self._claims[session_id]
+        with self._lock:
+            if session_id not in self._claims:
+                sess_dir = self._session_dir(session_id)
+                self._claims[session_id] = ClaimRegistry(sess_dir / "claims.json")
+            return self._claims[session_id]
 
     def get_reaction_engine(self, session_id: str) -> ReactionEngine:
-        if session_id not in self._engines:
-            sess_dir = self._session_dir(session_id)
-            store = self.get_finding_store(session_id)
-            self._engines[session_id] = ReactionEngine(
-                store,
-                sess_dir / "reactions.jsonl",
-                confirm_threshold=self._config.consensus.confirm_threshold,
-            )
-        return self._engines[session_id]
+        with self._lock:
+            if session_id not in self._engines:
+                sess_dir = self._session_dir(session_id)
+                store = self.get_finding_store(session_id)
+                self._engines[session_id] = ReactionEngine(
+                    store,
+                    sess_dir / "reactions.jsonl",
+                    confirm_threshold=self._config.consensus.confirm_threshold,
+                )
+            return self._engines[session_id]
 
     def get_message_bus(self, session_id: str) -> MessageBus:
-        if session_id not in self._message_buses:
-            sess_dir = self._session_dir(session_id)
-            self._message_buses[session_id] = MessageBus(
-                session_id, sess_dir / "messages.jsonl",
-            )
-        return self._message_buses[session_id]
+        with self._lock:
+            if session_id not in self._message_buses:
+                sess_dir = self._session_dir(session_id)
+                self._message_buses[session_id] = MessageBus(
+                    session_id, sess_dir / "messages.jsonl",
+                )
+            return self._message_buses[session_id]
+
+    def get_phase_barrier(self, session_id: str) -> PhaseBarrier:
+        with self._lock:
+            if session_id not in self._phase_barriers:
+                sess_dir = self._session_dir(session_id)
+                self._phase_barriers[session_id] = PhaseBarrier(
+                    session_id, sess_dir / "phases.json",
+                )
+            return self._phase_barriers[session_id]
 
     def get_event_bus(self, session_id: str) -> SessionEventBus:
-        if session_id not in self._event_buses:
-            sess_dir = self._session_dir(session_id)
-            self._event_buses[session_id] = SessionEventBus(
-                session_id, sess_dir / "events.jsonl",
-            )
-        return self._event_buses[session_id]
+        with self._lock:
+            if session_id not in self._event_buses:
+                sess_dir = self._session_dir(session_id)
+                self._event_buses[session_id] = SessionEventBus(
+                    session_id, sess_dir / "events.jsonl",
+                )
+            return self._event_buses[session_id]
 
     def get_project_path(self, session_id: str) -> str:
         sess_dir = self._session_dir(session_id)
@@ -207,7 +248,10 @@ class SessionManager:
         return d
 
     def _load_meta(self, sess_dir: Path) -> dict:
-        return json.loads((sess_dir / "meta.json").read_text(encoding="utf-8"))
+        try:
+            return json.loads((sess_dir / "meta.json").read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            return {"session_id": sess_dir.name, "status": "corrupt", "error": str(exc)}
 
     def _prune_old_sessions(self) -> None:
         """Delete oldest completed sessions if count exceeds max_sessions."""
@@ -226,7 +270,10 @@ class SessionManager:
                 continue
             meta = json.loads(meta_file.read_text(encoding="utf-8"))
             if meta.get("status") == "completed":
-                shutil.rmtree(sess_dir)
+                try:
+                    shutil.rmtree(sess_dir)
+                except OSError:
+                    continue  # skip locked/busy sessions
                 sid = meta.get("session_id", sess_dir.name)
                 self._stores.pop(sid, None)
                 self._claims.pop(sid, None)

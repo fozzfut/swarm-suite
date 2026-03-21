@@ -106,8 +106,15 @@ class ClaimRegistry:
         text = self._path.read_text(encoding="utf-8").strip()
         if not text:
             return
-        data = json.loads(text)
-        self._claims = [Claim.from_dict(d) for d in data]
+        try:
+            data = json.loads(text)
+            self._claims = [Claim.from_dict(d) for d in data]
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            import logging
+            logging.getLogger("review_swarm.claim_registry").warning(
+                "Corrupt claims file %s, starting fresh: %s", self._path, exc
+            )
+            self._claims = []
 
     def _save(self) -> None:
         """Write the full claims list to the JSON file."""

@@ -297,7 +297,6 @@ def tail(session_id: str, interval: float):
 @click.argument("session_id", required=False)
 def stats(session_id: str | None):
     """Show aggregate statistics for a session or all sessions."""
-    import json
     from collections import Counter
 
     config = Config.load()
@@ -342,7 +341,6 @@ def stats(session_id: str | None):
                 click.echo(f"    {expert:25s} {count} findings")
     else:
         # Aggregate across all sessions
-        total_findings = 0
         total_sessions = len(sessions)
         by_status: Counter = Counter()
         for s in sessions:

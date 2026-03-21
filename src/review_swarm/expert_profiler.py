@@ -68,7 +68,6 @@ class ExpertProfiler:
                     _log.warning("Skipping file %s: %s", f, exc)
                     continue
 
-        has_docs = (proj / "docs").exists() and any((proj / "docs").rglob("*"))
         has_tests = (
             (proj / "tests").exists() and any((proj / "tests").rglob("*"))
         ) or (
@@ -77,9 +76,11 @@ class ExpertProfiler:
             (proj / "spec").exists() and any((proj / "spec").rglob("*"))
         )
 
+        all_text = "\n".join(file_contents.values())
+
         suggestions = []
         for profile in self.list_profiles():
-            score = self._score_relevance(profile, file_contents, has_docs, has_tests)
+            score = self._score_relevance(profile, file_contents, all_text, has_tests)
             if score > 0:
                 profile_name = Path(profile.get("_source_file", "")).stem
                 suggestions.append({
@@ -94,14 +95,12 @@ class ExpertProfiler:
 
     def _score_relevance(
         self, profile: dict, file_contents: dict[str, str],
-        has_docs: bool, has_tests: bool,
+        all_text: str, has_tests: bool,
     ) -> float:
         score = 0.0
         signals = profile.get("relevance_signals", {})
         import_signals = signals.get("imports", [])
         pattern_signals = signals.get("patterns", [])
-
-        all_text = "\n".join(file_contents.values())
 
         # Check imports (language-agnostic patterns)
         import_patterns = [
@@ -163,6 +162,13 @@ class ExpertProfiler:
         return score
 
     def _load_yaml(self, path: Path) -> dict:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (yaml.YAMLError, OSError) as exc:
+            _log.warning("Corrupt expert profile %s: %s", path, exc)
+            return {"name": path.stem, "description": f"Error loading: {exc}", "_source_file": str(path)}
+        if not isinstance(data, dict):
+            _log.warning("Expert profile %s is not a dict, skipping", path)
+            return {"name": path.stem, "description": "Invalid format", "_source_file": str(path)}
         data["_source_file"] = str(path)
         return data

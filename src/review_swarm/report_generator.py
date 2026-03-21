@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
+from . import __version__
 from .finding_store import FindingStore
 from .models import Finding, Severity, Status
 
@@ -173,7 +174,7 @@ class ReportGenerator:
                 "tool": {
                     "driver": {
                         "name": "ReviewSwarm",
-                        "version": "0.1.1",
+                        "version": __version__,
                         "informationUri": "https://github.com/fozzfut/review-swarm",
                         "rules": list(rules.values()),
                     },

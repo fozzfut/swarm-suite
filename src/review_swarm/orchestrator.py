@@ -10,14 +10,12 @@ LLM follows the plan step by step.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
 from .expert_profiler import ExpertProfiler
 from .session_manager import SessionManager
-from .models import now_iso
 
 
 @dataclass
@@ -313,10 +311,14 @@ class Orchestrator:
                     f"As {expert}, review {len(file_list)} files. "
                     f"For each file: call claim_file, read the file content, "
                     f"then call post_finding for each issue found. "
-                    f"Focus on: {task or 'general code quality'}."
+                    f"Focus on: {task or 'general code quality'}. "
+                    f"When done, call mark_phase_done(session_id, '{expert}', 1)."
                 ),
                 "files": file_list,
-                "tools_to_use": ["claim_file", "post_finding", "release_file"],
+                "tools_to_use": [
+                    "claim_file", "post_finding", "release_file",
+                    "mark_phase_done",
+                ],
             })
 
         phases.append({
@@ -325,8 +327,11 @@ class Orchestrator:
             "description": (
                 "Each expert reviews their assigned files and posts findings. "
                 "Claim files before reviewing. Post findings with evidence "
-                "(actual + expected + source_ref). Release files when done."
+                "(actual + expected + source_ref). Release files when done. "
+                "IMPORTANT: When finished, call mark_phase_done(session_id, expert_role, 1). "
+                "Phase 2 cannot start until ALL agents complete Phase 1."
             ),
+            "sync": "barrier",
             "instructions": review_instructions,
         })
 
@@ -338,23 +343,31 @@ class Orchestrator:
                 "expert_role": expert,
                 "action": "cross_check",
                 "description": (
-                    f"As {expert}, call get_findings to see all findings from "
-                    f"other experts. For findings in your area of expertise: "
-                    f"CONFIRM if you agree, DISPUTE if you disagree (explain why), "
-                    f"EXTEND if you have additional context. "
-                    f"Check get_inbox for questions from other experts."
+                    f"As {expert}: first call check_phase_ready(session_id, 2) "
+                    f"to verify Phase 1 is complete. Then call get_findings to "
+                    f"see all findings from other experts. For findings in your "
+                    f"area of expertise: CONFIRM if you agree, DISPUTE if you "
+                    f"disagree (explain why), EXTEND if you have additional context. "
+                    f"Check get_inbox for questions from other experts. "
+                    f"When done, call mark_phase_done(session_id, '{expert}', 2)."
                 ),
-                "tools_to_use": ["get_findings", "react", "get_inbox", "send_message"],
+                "tools_to_use": [
+                    "check_phase_ready", "get_findings", "react",
+                    "get_inbox", "send_message", "mark_phase_done",
+                ],
             })
 
         phases.append({
             "phase": 2,
             "name": "Cross-check",
             "description": (
+                "WAIT: call check_phase_ready(session_id, 2) first. "
+                "Phase 2 starts only when ALL agents finished Phase 1. "
                 "Each expert reviews other experts' findings and reacts. "
-                "This builds consensus: 2+ confirms = confirmed, "
-                "1+ dispute = disputed. Also answer any pending queries."
+                "2+ confirms = confirmed, 1+ dispute = disputed. "
+                "When done, call mark_phase_done(session_id, expert_role, 2)."
             ),
+            "sync": "barrier",
             "instructions": cross_check_instructions,
         })
 
@@ -363,14 +376,21 @@ class Orchestrator:
             "phase": 3,
             "name": "Report",
             "description": (
+                "WAIT: call check_phase_ready(session_id, 3) first. "
                 "Generate the final review report. Call get_summary to get "
                 "the aggregated report with confirmed/disputed findings. "
-                "Then call end_session to close the session."
+                "Then call end_session to close the session and auto-save reports."
             ),
+            "sync": "barrier",
             "instructions": [{
                 "action": "report",
-                "description": "Call get_summary, then end_session.",
-                "tools_to_use": ["get_summary", "end_session"],
+                "description": (
+                    "Call check_phase_ready(session_id, 3), then get_summary, "
+                    "then end_session. Reports are auto-saved to the session directory."
+                ),
+                "tools_to_use": [
+                    "check_phase_ready", "get_summary", "end_session",
+                ],
             }],
         })
 

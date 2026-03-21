@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 from .models import Event, EventType, now_iso
@@ -25,6 +26,7 @@ class SessionEventBus:
         self._events_path = Path(events_path)
         self._events: list[Event] = []
         self._subscribers: dict[str, asyncio.Queue[Event]] = {}
+        self._lock = threading.Lock()
         self._load()
 
     # ── Publishing ───────────────────────────────────────────────────
@@ -34,16 +36,17 @@ class SessionEventBus:
 
         Safe to call from sync code. Tests and direct tool_* calls use this.
         """
-        event = Event(
-            id=Event.generate_id(),
-            event_type=event_type,
-            session_id=self._session_id,
-            timestamp=now_iso(),
-            payload=payload,
-        )
-        self._events.append(event)
-        self._append_to_disk(event)
-        return event
+        with self._lock:
+            event = Event(
+                id=Event.generate_id(),
+                event_type=event_type,
+                session_id=self._session_id,
+                timestamp=now_iso(),
+                payload=payload,
+            )
+            self._events.append(event)
+            self._append_to_disk(event)
+            return event
 
     async def publish(self, event_type: EventType, payload: dict) -> Event:
         """Async publish: persist + fan out to all subscriber queues."""
@@ -63,13 +66,15 @@ class SessionEventBus:
 
     def subscribe(self, subscriber_id: str, max_queue: int = 256) -> asyncio.Queue[Event]:
         """Register a subscriber, return its event queue."""
-        if subscriber_id not in self._subscribers:
-            self._subscribers[subscriber_id] = asyncio.Queue(maxsize=max_queue)
-        return self._subscribers[subscriber_id]
+        with self._lock:
+            if subscriber_id not in self._subscribers:
+                self._subscribers[subscriber_id] = asyncio.Queue(maxsize=max_queue)
+            return self._subscribers[subscriber_id]
 
     def unsubscribe(self, subscriber_id: str) -> None:
         """Remove a subscriber."""
-        self._subscribers.pop(subscriber_id, None)
+        with self._lock:
+            self._subscribers.pop(subscriber_id, None)
 
     @property
     def subscriber_count(self) -> int:
@@ -86,12 +91,13 @@ class SessionEventBus:
 
         Polling fallback for clients that don't support MCP subscriptions.
         """
-        results: list[Event] = self._events
-        if since:
-            results = [e for e in results if e.timestamp > since]
-        if event_type:
-            results = [e for e in results if e.event_type == event_type]
-        return [e.to_dict() for e in results]
+        with self._lock:
+            results: list[Event] = self._events
+            if since:
+                results = [e for e in results if e.timestamp > since]
+            if event_type:
+                results = [e for e in results if e.event_type == event_type]
+            return [e.to_dict() for e in results]
 
     def event_count(self) -> int:
         return len(self._events)
@@ -107,8 +113,14 @@ class SessionEventBus:
         if not self._events_path.exists():
             return
         with open(self._events_path, "r", encoding="utf-8") as fh:
-            for line in fh:
+            for line_num, line in enumerate(fh, 1):
                 line = line.strip()
                 if not line:
                     continue
-                self._events.append(Event.from_dict(json.loads(line)))
+                try:
+                    self._events.append(Event.from_dict(json.loads(line)))
+                except (json.JSONDecodeError, KeyError, ValueError) as exc:
+                    import logging
+                    logging.getLogger("review_swarm.event_bus").warning(
+                        "Skipping corrupt line %d in %s: %s", line_num, self._events_path, exc
+                    )
