@@ -7,7 +7,10 @@ import json
 import threading
 from pathlib import Path
 
+from .logging_config import get_logger
 from .models import Event, EventType, now_iso
+
+_log = get_logger("event_bus")
 
 
 class SessionEventBus:
@@ -120,7 +123,6 @@ class SessionEventBus:
                 try:
                     self._events.append(Event.from_dict(json.loads(line)))
                 except (json.JSONDecodeError, KeyError, ValueError) as exc:
-                    import logging
-                    logging.getLogger("review_swarm.event_bus").warning(
+                    _log.warning(
                         "Skipping corrupt line %d in %s: %s", line_num, self._events_path, exc
                     )

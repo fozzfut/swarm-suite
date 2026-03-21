@@ -7,7 +7,10 @@ import threading
 from collections import defaultdict
 from pathlib import Path
 
+from .logging_config import get_logger
 from .models import Message, MessageType, now_iso
+
+_log = get_logger("message_bus")
 
 
 class MessageBus:
@@ -173,7 +176,8 @@ class MessageBus:
 
     def mark_read(self, expert_role: str) -> None:
         """Explicitly mark all messages as read for this agent."""
-        self._read_watermarks[expert_role] = now_iso()
+        with self._lock:
+            self._read_watermarks[expert_role] = now_iso()
 
     def get_pending(self, expert_role: str, max_preview: int = 3) -> dict:
         """Get pending (unread) message summary for piggyback injection.
@@ -249,7 +253,8 @@ class MessageBus:
         self, since: str | None = None, message_type: str | None = None,
     ) -> list[dict]:
         """Get all messages (global view), optionally filtered."""
-        msgs = self._messages
+        with self._lock:
+            msgs = list(self._messages)
         if since:
             msgs = [m for m in msgs if m.created_at > since]
         if message_type:
@@ -286,8 +291,7 @@ class MessageBus:
                     if msg.to_agent and msg.to_agent != "*":
                         self._agents.add(msg.to_agent)
                 except (json.JSONDecodeError, KeyError, ValueError) as exc:
-                    import logging
-                    logging.getLogger("review_swarm.message_bus").warning(
+                    _log.warning(
                         "Skipping corrupt line %d in %s: %s", line_num, self._messages_path, exc
                     )
         self._rebuild_inboxes()

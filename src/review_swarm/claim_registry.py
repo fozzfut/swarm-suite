@@ -8,7 +8,10 @@ import tempfile
 import threading
 from pathlib import Path
 
+from .logging_config import get_logger
 from .models import Claim, ClaimStatus, now_iso
+
+_log = get_logger("claim_registry")
 
 
 class ClaimRegistry:
@@ -112,8 +115,7 @@ class ClaimRegistry:
             data = json.loads(text)
             self._claims = [Claim.from_dict(d) for d in data]
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
-            import logging
-            logging.getLogger("review_swarm.claim_registry").warning(
+            _log.warning(
                 "Corrupt claims file %s, starting fresh: %s", self._path, exc
             )
             self._claims = []

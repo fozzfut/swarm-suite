@@ -136,7 +136,6 @@ class TestEventBusIntegration:
         result = tool_start_session(app_ctx, str(sample_project))
         sid = result["session_id"]
 
-        # tool_post_finding now auto-publishes events via publish_sync
         finding = tool_post_finding(app_ctx, sid,
             expert_role="threading-safety",
             file="src/main.py", line_start=1, line_end=5,
@@ -147,6 +146,11 @@ class TestEventBusIntegration:
             suggestion_action="fix", suggestion_detail="Add lock",
             confidence=0.9,
         )
+
+        # Event publishing is now only done in MCP async wrappers.
+        # For direct Python callers, publish manually via bus.publish_sync().
+        bus = app_ctx.session_manager.get_event_bus(sid)
+        bus.publish_sync(EventType.FINDING_POSTED, finding)
 
         events = tool_get_events(app_ctx, sid)
         assert len(events) >= 1

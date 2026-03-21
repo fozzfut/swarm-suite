@@ -9,7 +9,10 @@ import threading
 from collections import Counter
 from pathlib import Path
 
+from .logging_config import get_logger
 from .models import Finding, Status, now_iso
+
+_log = get_logger("finding_store")
 
 
 class FindingStore:
@@ -251,7 +254,6 @@ class FindingStore:
                     finding = Finding.from_dict(data)
                     self._findings[finding.id] = finding
                 except (json.JSONDecodeError, KeyError, ValueError) as exc:
-                    import logging
-                    logging.getLogger("review_swarm.finding_store").warning(
+                    _log.warning(
                         "Skipping corrupt line %d in %s: %s", line_num, self._path, exc
                     )

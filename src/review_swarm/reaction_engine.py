@@ -90,11 +90,13 @@ class ReactionEngine:
 
         Priority: duplicate > dispute > confirmed > open
         """
+        # Snapshot reactions while still holding self._lock
+        reactions = list(finding.reactions)
         confirms = 0
         disputes = 0
         duplicates = 0
 
-        for r in finding.reactions:
+        for r in reactions:
             rtype = r.get("reaction", "")
             if rtype == ReactionType.CONFIRM.value:
                 confirms += 1

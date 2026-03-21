@@ -15,7 +15,10 @@ from .claim_registry import ClaimRegistry
 from .message_bus import MessageBus
 from .phase_barrier import PhaseBarrier
 from .reaction_engine import ReactionEngine
+from .logging_config import get_logger
 from .models import now_iso
+
+_log = get_logger("session_manager")
 
 
 class SessionManager:
@@ -66,8 +69,7 @@ class SessionManager:
                         json.dumps(meta, indent=2), encoding="utf-8"
                     )
                 except Exception as exc:
-                    import logging
-                    logging.getLogger("review_swarm.session_manager").warning(
+                    _log.warning(
                         "Expert suggestion failed for %s: %s", project_path, exc
                     )
 
@@ -283,3 +285,4 @@ class SessionManager:
                 self._engines.pop(sid, None)
                 self._event_buses.pop(sid, None)
                 self._message_buses.pop(sid, None)
+                self._phase_barriers.pop(sid, None)

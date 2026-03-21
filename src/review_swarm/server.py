@@ -11,7 +11,7 @@ from .orchestrator import Orchestrator
 from .report_generator import ReportGenerator
 from .models import (
     Finding, Reaction, Severity, Category, Action, ReactionType, EventType,
-    Message, MessageType,
+    Message, MessageType, Status, now_iso,
 )
 
 
@@ -31,6 +31,9 @@ def create_app_context(
     config: Config | None = None,
     project_path_override: str | None = None,
 ) -> AppContext:
+    from .logging_config import setup_logging
+    setup_logging()
+
     if config is None:
         config = Config.load()
     config.sessions_path.mkdir(parents=True, exist_ok=True)
@@ -90,11 +93,6 @@ def tool_claim_file(
     reg = ctx.session_manager.get_claim_registry(session_id)
     claim = reg.claim(session_id, file, expert_role, agent_id)
     result = claim.to_dict()
-    try:
-        bus = ctx.session_manager.get_event_bus(session_id)
-        bus.publish_sync(EventType.FILE_CLAIMED, result)
-    except (KeyError, Exception):
-        pass
     return result
 
 
@@ -104,11 +102,6 @@ def tool_release_file(
     reg = ctx.session_manager.get_claim_registry(session_id)
     reg.release(session_id, file, expert_role)
     result = {"status": "released", "file": file, "expert_role": expert_role}
-    try:
-        bus = ctx.session_manager.get_event_bus(session_id)
-        bus.publish_sync(EventType.FILE_RELEASED, result)
-    except (KeyError, Exception):
-        pass
     return result
 
 
@@ -176,13 +169,6 @@ def tool_post_finding(
     store.post(finding)
     result = finding.to_dict()
 
-    # Publish event sync (works both via MCP wrappers and direct Python calls)
-    try:
-        bus = ctx.session_manager.get_event_bus(session_id)
-        bus.publish_sync(EventType.FINDING_POSTED, result)
-    except (KeyError, Exception):
-        pass  # session may not have event bus yet
-
     dupes = store.find_duplicates(
         file, line_start, line_end, title, exclude_id=finding.id,
     )
@@ -237,11 +223,6 @@ def tool_react(
     )
     updated = engine.react(r)
     result = updated.to_dict()
-    try:
-        bus = ctx.session_manager.get_event_bus(session_id)
-        bus.publish_sync(EventType.REACTION_ADDED, result)
-    except (KeyError, Exception):
-        pass
     return result
 
 
@@ -309,7 +290,6 @@ def tool_mark_fixed(
         finding_id: The finding to mark as fixed.
         fix_ref: Optional reference to the fix (commit hash, PR url, etc.)
     """
-    from .models import Status
     store = ctx.session_manager.get_finding_store(session_id)
     finding = store.get_by_id(finding_id)
     if finding is None:
@@ -319,7 +299,7 @@ def tool_mark_fixed(
         store.add_comment(finding_id, {
             "expert_role": "_system",
             "content": f"Marked as FIXED. Ref: {fix_ref}",
-            "created_at": from_models_import_now_iso(),
+            "created_at": now_iso(),
         })
     updated = store.get_by_id(finding_id)
     result = updated.to_dict() if updated else {"id": finding_id, "status": "fixed"}
@@ -327,7 +307,7 @@ def tool_mark_fixed(
         bus = ctx.session_manager.get_event_bus(session_id)
         bus.publish_sync(EventType.STATUS_CHANGED, {
             "finding_id": finding_id,
-            "old_status": "open",
+            "old_status": finding.status.value,
             "new_status": "fixed",
             "fix_ref": fix_ref,
         })
@@ -350,7 +330,6 @@ def tool_bulk_update_status(
         new_status: New status (fixed, wontfix, open, confirmed, disputed).
         reason: Optional reason for the status change.
     """
-    from .models import Status
     status = Status(new_status)
     store = ctx.session_manager.get_finding_store(session_id)
     updated = 0
@@ -362,7 +341,7 @@ def tool_bulk_update_status(
                 store.add_comment(fid, {
                     "expert_role": "_system",
                     "content": f"Status → {new_status}: {reason}",
-                    "created_at": from_models_import_now_iso(),
+                    "created_at": now_iso(),
                 })
             updated += 1
         except KeyError:
@@ -372,12 +351,6 @@ def tool_bulk_update_status(
         "errors": errors,
         "new_status": new_status,
     }
-
-
-def from_models_import_now_iso() -> str:
-    """Helper to avoid circular import issues."""
-    from .models import now_iso
-    return now_iso()
 
 
 def tool_post_findings_batch(
@@ -423,7 +396,6 @@ def tool_post_comment(
     content: str,
 ) -> dict:
     """Post an inline comment on a finding."""
-    from .models import now_iso
     store = ctx.session_manager.get_finding_store(session_id)
     comment = {
         "expert_role": expert_role,
@@ -483,12 +455,6 @@ def tool_send_message(
     mbus.send(msg)
 
     result = msg.to_dict()
-    try:
-        bus = ctx.session_manager.get_event_bus(session_id)
-        et = EventType.BROADCAST if mt == MessageType.BROADCAST else EventType.MESSAGE
-        bus.publish_sync(et, result)
-    except (KeyError, Exception):
-        pass
     return result
 
 
@@ -645,13 +611,10 @@ def create_mcp_server():
     async def _end_session(session_id: str, ctx: Context = None) -> str:
         import json
         app = ctx.request_context.lifespan_context
-        # Publish event BEFORE ending (bus gets cleaned up on end)
         bus = app.session_manager.get_event_bus(session_id)
-        result = tool_end_session(app, session_id)
+        result = tool_end_session(app, session_id)  # clears caches
         await bus.publish(EventType.SESSION_ENDED, result)
-        await _notify_resource_subscribers(app, session_id, "findings")
-        await _notify_resource_subscribers(app, session_id, "claims")
-        await _notify_resource_subscribers(app, session_id, "events")
+        # Don't notify subscribers after session is ended -- caches are cleared
         return json.dumps(result)
 
     @mcp.tool(name="get_session", description="Get current session state")
@@ -1072,53 +1035,6 @@ def create_mcp_server():
         await _notify_resource_subscribers(app, session_id, "events")
 
         return json.dumps(result)
-
-    # ── MCP Resources ────────────────────────────────────────────────
-
-    @mcp.resource(
-        "reviewswarm://sessions/{session_id}/findings",
-        name="session_findings",
-        description="All findings for a review session (live-updated via subscription)",
-        mime_type="application/json",
-    )
-    def _resource_findings(session_id: str) -> str:
-        import json
-        # Resource handlers don't receive Context; use direct access
-        # This is called by read_resource when a client requests the URI
-        # We need to get the app context -- resources are read after subscription
-        # For now, list_resources provides the URI; read_resource fetches live data
-        # The FastMCP framework handles context injection differently for resources
-        return json.dumps({"error": "Use get_findings tool for data access"})
-
-    @mcp.resource(
-        "reviewswarm://sessions/{session_id}/claims",
-        name="session_claims",
-        description="Active file claims for a review session (live-updated via subscription)",
-        mime_type="application/json",
-    )
-    def _resource_claims(session_id: str) -> str:
-        import json
-        return json.dumps({"error": "Use get_claims tool for data access"})
-
-    @mcp.resource(
-        "reviewswarm://sessions/{session_id}/events",
-        name="session_events",
-        description="Event stream for a review session (live-updated via subscription)",
-        mime_type="application/json",
-    )
-    def _resource_events(session_id: str) -> str:
-        import json
-        return json.dumps({"error": "Use get_events tool for data access"})
-
-    @mcp.resource(
-        "reviewswarm://sessions/{session_id}/messages",
-        name="session_messages",
-        description="Agent-to-agent messages (live-updated via subscription)",
-        mime_type="application/json",
-    )
-    def _resource_messages(session_id: str) -> str:
-        import json
-        return json.dumps({"error": "Use get_inbox tool for data access"})
 
     # ── MCP Subscription Handlers ────────────────────────────────────
 
