@@ -33,7 +33,7 @@ def apply_plan(
 
     for file_path in plan.files():
         source = (base / file_path).resolve()
-        if not str(source).startswith(str(base.resolve())):
+        if not source.resolve().is_relative_to(base.resolve()):
             for action in plan.actions_for_file(file_path):
                 results.append(FixResult(
                     finding_id=action.finding_id,

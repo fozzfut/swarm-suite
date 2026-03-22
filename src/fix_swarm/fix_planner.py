@@ -33,7 +33,7 @@ def build_plan(
             continue
 
         source_path = (base / finding.file).resolve()
-        if not str(source_path).startswith(str(base.resolve())):
+        if not source_path.resolve().is_relative_to(base.resolve()):
             continue  # skip files outside project
         if not source_path.is_file():
             continue
@@ -57,14 +57,13 @@ def build_plan(
         # finding.expected is natural language and must not be injected.
         new_text = finding.suggestion_detail or ""
 
-        if not new_text:
+        if not new_text.strip():
             # Nothing concrete to replace with -- skip.
             continue
 
-        # Determine action type
-        if not new_text.strip():
-            action_type = FixActionType.DELETE
-        elif not old_text.strip():
+        # Determine action type (DELETE no longer possible here --
+        # whitespace-only new_text is skipped above)
+        if not old_text.strip():
             action_type = FixActionType.INSERT
         else:
             action_type = FixActionType.REPLACE

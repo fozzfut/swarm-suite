@@ -98,7 +98,10 @@ def _looks_like_json(text: str) -> bool:
 
 
 def _parse_json(text: str) -> list[ParsedFinding]:
-    data: Any = json.loads(text)
+    try:
+        data: Any = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in report: {exc}") from exc
 
     # The JSON report has {"summary": {...}, "findings": [...]}
     if isinstance(data, dict) and "findings" in data:
