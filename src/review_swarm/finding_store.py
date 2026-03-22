@@ -80,26 +80,26 @@ class FindingStore:
         with self._lock:
             results = list(self._findings.values())
 
-        if severity is not None:
-            results = [f for f in results if f.severity == severity]
-        if category is not None:
-            results = [f for f in results if f.category == category]
-        if status is not None:
-            results = [f for f in results if f.status == status]
-        if file is not None:
-            results = [f for f in results if f.file == file]
-        if expert_role is not None:
-            results = [f for f in results if f.expert_role == expert_role]
-        if min_confidence is not None:
-            results = [f for f in results if f.confidence >= min_confidence]
+            if severity is not None:
+                results = [f for f in results if f.severity == severity]
+            if category is not None:
+                results = [f for f in results if f.category == category]
+            if status is not None:
+                results = [f for f in results if f.status == status]
+            if file is not None:
+                results = [f for f in results if f.file == file]
+            if expert_role is not None:
+                results = [f for f in results if f.expert_role == expert_role]
+            if min_confidence is not None:
+                results = [f for f in results if f.confidence >= min_confidence]
 
-        # Pagination
-        if offset > 0:
-            results = results[offset:]
-        if limit > 0:
-            results = results[:limit]
+            # Pagination
+            if offset > 0:
+                results = results[offset:]
+            if limit > 0:
+                results = results[:limit]
 
-        return [copy.deepcopy(f) for f in results]
+            return [copy.deepcopy(f) for f in results]
 
     def get_by_id(self, finding_id: str) -> Finding | None:
         """Return a finding by its ID, or None if not found."""

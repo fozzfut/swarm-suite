@@ -67,23 +67,26 @@ class SessionManager:
 
             _log.info("Session %s started for %s", session_id, project_path)
 
-            # Auto-suggest experts if configured (spec requirement)
-            if self._expert_profiler and self._config.experts.auto_suggest:
-                try:
-                    suggestions = self._expert_profiler.suggest_experts(project_path)
-                    meta["suggested_experts"] = suggestions
-                    (sess_dir / "meta.json").write_text(
-                        json.dumps(meta, indent=2), encoding="utf-8"
-                    )
-                except Exception as exc:
-                    _log.warning(
-                        "Expert suggestion failed for %s: %s", project_path, exc
-                    )
-
             # Enforce max_sessions
             self._prune_old_sessions()
 
-            return session_id
+        # Outside lock: non-critical auto-suggest (may be slow / IO-bound)
+        if self._expert_profiler and self._config.experts.auto_suggest:
+            try:
+                suggestions = self._expert_profiler.suggest_experts(project_path)
+                sess_dir = self._config.sessions_path / session_id
+                meta_path = sess_dir / "meta.json"
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                meta["suggested_experts"] = suggestions
+                meta_path.write_text(
+                    json.dumps(meta, indent=2), encoding="utf-8"
+                )
+            except Exception as exc:
+                _log.warning(
+                    "Expert suggestion failed for %s: %s", project_path, exc
+                )
+
+        return session_id
 
     def end_session(self, session_id: str) -> dict:
         with self._lock:
