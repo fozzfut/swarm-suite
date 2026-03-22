@@ -176,7 +176,7 @@ def _parse_markdown(text: str) -> list[ParsedFinding]:
         category = cat_m.group(1).lower() if cat_m else "bug"
 
         # Extract title from "### Some Title [status]"
-        title_m = re.match(r"###\s+(.+?)(?:\s*\[.*\])?\s*$", block, re.MULTILINE)
+        title_m = re.match(r"###\s+(.+?)(?:\s+\[[^\]]*\])?\s*$", block, re.MULTILINE)
         title = title_m.group(1).strip() if title_m else ""
 
         actual_m = _ACTUAL_RE.search(block)

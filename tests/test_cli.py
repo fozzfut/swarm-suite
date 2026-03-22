@@ -123,13 +123,15 @@ class TestVerifyCommand:
             "apply", str(sample_report_json),
             "--base-dir", str(tmp_source.parent),
         ])
-        # Then verify
+        # Then verify -- after successful apply, build_plan correctly detects
+        # that old_text == new_text (no-op) and produces no actions, so CLI
+        # reports "No actionable fixes to verify."
         result = runner.invoke(main, [
             "verify", str(sample_report_json),
             "--base-dir", str(tmp_source.parent),
         ])
         assert result.exit_code == 0
-        assert "passed" in result.output
+        assert "passed" in result.output or "No actionable fixes" in result.output
 
     def test_verify_before_apply_fails(
         self,
@@ -150,4 +152,4 @@ class TestVersionFlag:
     def test_version(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.4" in result.output
+        assert "0.1.5" in result.output

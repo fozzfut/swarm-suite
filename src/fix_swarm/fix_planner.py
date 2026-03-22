@@ -61,6 +61,10 @@ def build_plan(
             # Nothing concrete to replace with -- skip.
             continue
 
+        if new_text.strip() == old_text.strip():
+            # No-op replacement -- skip.
+            continue
+
         # Determine action type (DELETE no longer possible here --
         # whitespace-only new_text is skipped above)
         if not old_text.strip():

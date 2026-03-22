@@ -70,14 +70,13 @@ def apply_plan(
         actions = plan.actions_for_file(file_path)
         original_lines = list(lines)  # snapshot for rollback
         file_failed = False
-        for action in actions:
+        for idx, action in enumerate(actions):
             result = _apply_action(action, lines)
             if not result.success:
                 # Rollback all changes for this file
                 lines = original_lines
                 results.append(result)
                 # Mark remaining actions as failed too
-                idx = actions.index(action)
                 for remaining in actions[idx + 1:]:
                     results.append(FixResult(
                         finding_id=remaining.finding_id,
@@ -229,8 +228,14 @@ def verify_fixes(
         window = "\n".join(lines[start:end])
 
         if action.action == FixActionType.DELETE:
-            # old_text should be gone from the window
-            if action.old_text.strip() and action.old_text.strip() in window:
+            if not action.old_text.strip():
+                # Cannot verify DELETE with empty old_text -- always looks "passed"
+                results.append(FixResult(
+                    finding_id=action.finding_id,
+                    success=False,
+                    error="Cannot verify DELETE with empty old_text",
+                ))
+            elif action.old_text.strip() in window:
                 results.append(FixResult(
                     finding_id=action.finding_id,
                     success=False,
