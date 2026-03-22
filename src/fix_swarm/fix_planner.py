@@ -32,7 +32,9 @@ def build_plan(
         if finding.suggestion_action != "fix":
             continue
 
-        source_path = base / finding.file
+        source_path = (base / finding.file).resolve()
+        if not str(source_path).startswith(str(base.resolve())):
+            continue  # skip files outside project
         if not source_path.is_file():
             continue
 

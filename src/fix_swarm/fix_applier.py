@@ -32,7 +32,15 @@ def apply_plan(
     results: list[FixResult] = []
 
     for file_path in plan.files():
-        source = base / file_path
+        source = (base / file_path).resolve()
+        if not str(source).startswith(str(base.resolve())):
+            for action in plan.actions_for_file(file_path):
+                results.append(FixResult(
+                    finding_id=action.finding_id,
+                    success=False,
+                    error=f"Path traversal blocked: {file_path}",
+                ))
+            continue
         if not source.is_file():
             for action in plan.actions_for_file(file_path):
                 results.append(FixResult(
@@ -193,7 +201,15 @@ def verify_fixes(
             ))
             continue
 
-        content = source.read_text(encoding="utf-8")
+        try:
+            content = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            results.append(FixResult(
+                finding_id=action.finding_id,
+                success=False,
+                error=f"Cannot read file: {exc}",
+            ))
+            continue
         lines = content.splitlines()
         start = max(0, action.line_start - 1 - 5)
         end = min(len(lines), action.line_end + 5)
