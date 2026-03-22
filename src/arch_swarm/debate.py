@@ -116,7 +116,9 @@ class DebateSession:
         lines.append(f"# Debate: {s.topic}")
         if s.context:
             lines.append("")
-            lines.append(f"> {s.context}")
+            context_lines = s.context.split("\n")
+            quoted = "\n".join(f"> {line}" for line in context_lines)
+            lines.append(quoted)
         lines.append("")
 
         # Proposals

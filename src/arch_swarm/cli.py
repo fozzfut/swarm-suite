@@ -101,14 +101,24 @@ def debate(project_path: str, topic: str, scope: Optional[str]) -> None:
             )
             ds.add_critique(critique)
 
-    # 5. Each role votes (support own proposal, neutral on others)
+    # 5. Each role votes based on critiques (not just own proposal)
     for role in ALL_ROLES:
+        own_proposal = next(
+            (p for p in ds.session.proposals if p.author == role.name), None
+        )
         for proposal in ds.session.proposals:
-            ds.vote(
-                agent=role.name,
-                proposal_id=proposal.id,
-                support=(proposal.author == role.name),
-            )
+            # Always support own proposal
+            support = own_proposal is not None and proposal.id == own_proposal.id
+            # Also support proposals that this agent did not oppose
+            if not support:
+                own_critiques = [
+                    c
+                    for c in ds.session.critiques
+                    if c.critic == role.name and c.proposal_id == proposal.id
+                ]
+                if own_critiques and own_critiques[0].verdict != Verdict.OPPOSE:
+                    support = True
+            ds.vote(agent=role.name, proposal_id=proposal.id, support=support)
 
     # 6. Resolve and print
     decision = ds.resolve()

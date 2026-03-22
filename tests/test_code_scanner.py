@@ -28,8 +28,8 @@ class TestScanProject:
 
     def test_class_hierarchy(self, tmp_project: Path) -> None:
         analysis = scan_project(tmp_project, scope="src/myapp")
-        assert "Child" in analysis.class_hierarchy
-        assert "Base" in analysis.class_hierarchy["Child"]
+        assert "myapp.utils.Child" in analysis.class_hierarchy
+        assert "Base" in analysis.class_hierarchy["myapp.utils.Child"]
 
     def test_complexity_scores(self, tmp_project: Path) -> None:
         analysis = scan_project(tmp_project, scope="src/myapp")

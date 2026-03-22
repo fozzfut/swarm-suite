@@ -177,7 +177,10 @@ def scan_project(
         analysis.modules.append(mod)
         analysis.dependency_graph[mod.name] = mod.imports
         analysis.complexity_scores[mod.name] = _estimate_complexity(tree)
-        analysis.class_hierarchy.update(_extract_class_hierarchy(tree))
+        hierarchy = _extract_class_hierarchy(tree)
+        for cls_name, bases in hierarchy.items():
+            qualified = f"{mod.name}.{cls_name}"
+            analysis.class_hierarchy[qualified] = bases
 
     # -- coupling metrics ----------------------------------------------------
     all_names = {m.name for m in analysis.modules}

@@ -98,6 +98,8 @@ class ArchSession:
     # -- helpers -------------------------------------------------------------
 
     def add_proposal(self, proposal: DesignProposal) -> None:
+        if any(p.id == proposal.id for p in self.proposals):
+            raise ValueError(f"Duplicate proposal ID: {proposal.id}")
         self.proposals.append(proposal)
 
     def add_critique(self, critique: DesignCritique) -> None:
