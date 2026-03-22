@@ -55,6 +55,8 @@ class ExpertProfiler:
         skip_dirs = {
             "node_modules", ".venv", "__pycache__", ".git",
             "target", "build", "dist", "vendor", "bin", "obj",
+            ".mypy_cache", ".pytest_cache", ".tox",
+            ".eggs", "site-packages",
         }
         for ext in source_exts:
             for f in proj.rglob(ext):
