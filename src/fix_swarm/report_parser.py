@@ -141,7 +141,7 @@ def _finding_from_dict(d: dict) -> ParsedFinding:
 
 _SEV_RE = re.compile(r"\*\*Severity:\*\*\s*(\w+)", re.IGNORECASE)
 _CAT_RE = re.compile(r"\*\*Category:\*\*\s*(\w+)", re.IGNORECASE)
-_FILE_RE = re.compile(r"\*\*File:\*\*\s*`([^`:]+):(\d+)-(\d+)`", re.IGNORECASE)
+_FILE_RE = re.compile(r"\*\*File:\*\*\s*`(.+?):(\d+)-(\d+)`", re.IGNORECASE)
 _ACTUAL_RE = re.compile(r"\*\*Actual:\*\*\s*(.+)", re.IGNORECASE)
 _EXPECTED_RE = re.compile(r"\*\*Expected:\*\*\s*(.+)", re.IGNORECASE)
 _SUGGESTION_RE = re.compile(

@@ -144,11 +144,24 @@ def _apply_action(action: FixAction, lines: list[str]) -> FixResult:
 
     try:
         if action.action == FixActionType.DELETE:
+            if start >= len(lines):
+                return FixResult(
+                    finding_id=action.finding_id,
+                    success=False,
+                    error=f"DELETE start {start} is past end of file ({len(lines)} lines)",
+                )
             lines[start:end] = []
         elif action.action == FixActionType.INSERT:
             new_lines = _ensure_newlines(action.new_text)
             lines[start:start] = new_lines
         elif action.action == FixActionType.REPLACE:
+            if start >= len(lines):
+                return FixResult(
+                    finding_id=action.finding_id,
+                    success=False,
+                    error=f"REPLACE start {start} is past end of file ({len(lines)} lines)",
+                )
+
             new_lines = _ensure_newlines(action.new_text)
             lines[start:end] = new_lines
         else:
