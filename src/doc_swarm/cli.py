@@ -123,9 +123,9 @@ def scan(project_path: str, scope: str):
         click.echo(f"  {path} ({loc} lines)")
         for cls in pub_classes:
             methods = [m for m in cls.get("methods", []) if m.get("is_public")]
-            click.echo(f"    class {cls['name']} ({len(methods)} methods)")
+            click.echo(f"    class {cls.get('name', '?')} ({len(methods)} methods)")
         for func in pub_funcs:
-            click.echo(f"    def {func['name']}()")
+            click.echo(f"    def {func.get('name', '?')}()")
 
 
 @main.command()
@@ -154,7 +154,7 @@ def verify(project_path: str, docs: str, scope: str):
         click.echo("All docs verified. No issues found.")
         return
 
-    by_sev = {}
+    by_sev: dict[str, list] = {}
     for issue in issues:
         by_sev.setdefault(issue.severity.value, []).append(issue)
 

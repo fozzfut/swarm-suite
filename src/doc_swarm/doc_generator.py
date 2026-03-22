@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from typing import Any
+
 from .models import DocPage, DocType, DocStatus, ModuleInfo
 
 _log = logging.getLogger("doc_swarm.doc_generator")
@@ -62,8 +64,8 @@ class DocGenerator:
             frontmatter={
                 "source_file": module_path,
                 "lines_of_code": info.get("lines_of_code", 0),
-                "classes": [c["name"] for c in classes if c.get("is_public")],
-                "functions": [f["name"] for f in functions if f.get("is_public")],
+                "classes": [c.get("name", "") for c in classes if c.get("is_public")],
+                "functions": [f.get("name", "") for f in functions if f.get("is_public")],
             },
             content="\n".join(lines),
             status=DocStatus.DRAFT,
@@ -203,8 +205,8 @@ class DocGenerator:
 
     # ── Helpers ──────────────────────────────────────────────────────
 
-    def _render_class(self, cls: dict, lines: list[str]) -> None:
-        name = cls["name"]
+    def _render_class(self, cls: Any, lines: list[str]) -> None:
+        name = cls.get("name", "unknown")
         is_public = cls.get("is_public", True)
         if not is_public:
             return
@@ -224,17 +226,17 @@ class DocGenerator:
         if public_methods:
             lines.append("**Methods:**\n")
             for m in public_methods:
-                sig = m.get("signature", m["name"])
+                sig = m.get("signature", m.get("name", "unknown"))
                 doc = m.get("docstring", "")
                 first_line = doc.split("\n")[0] if doc else ""
                 lines.append(f"- `{sig}`{' — ' + first_line if first_line else ''}")
             lines.append("")
 
-    def _render_function(self, func: dict, lines: list[str]) -> None:
+    def _render_function(self, func: Any, lines: list[str]) -> None:
         if not func.get("is_public", True):
             return
 
-        sig = func.get("signature", func["name"])
+        sig = func.get("signature", func.get("name", "unknown"))
         lines.append(f"### `{sig}`\n")
 
         docstring = func.get("docstring", "")

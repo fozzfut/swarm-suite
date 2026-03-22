@@ -13,7 +13,7 @@ _log = logging.getLogger("doc_swarm.code_analyzer")
 _SKIP_DIRS = {
     "node_modules", ".venv", "__pycache__", ".git",
     "target", "build", "dist", "vendor", "bin", "obj",
-    ".mypy_cache", ".pytest_cache", ".tox", "egg-info",
+    ".mypy_cache", ".pytest_cache", ".tox",
     ".eggs", "site-packages",
 }
 
@@ -48,7 +48,7 @@ class CodeAnalyzer:
                 continue
             if f.suffix not in _SOURCE_EXTS:
                 continue
-            if any(part in _SKIP_DIRS for part in f.parts):
+            if any(part in _SKIP_DIRS or part.endswith(".egg-info") for part in f.parts):
                 continue
 
             rel = str(f.relative_to(self._root)).replace("\\", "/")
@@ -72,8 +72,8 @@ class CodeAnalyzer:
                         classes=[], functions=[], imports=[],
                         lines_of_code=len(text.splitlines()),
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.warning("Failed to read %s: %s", rel, exc)
 
         _log.info("Scanned %d source files in %s", len(modules), base)
         return modules
@@ -210,7 +210,7 @@ class CodeAnalyzer:
                 if cls.get("is_public") and not cls.get("docstring"):
                     undocumented.append({
                         "type": "class",
-                        "name": cls["name"],
+                        "name": cls.get("name", ""),
                         "file": path,
                         "line": cls.get("line_start", 0),
                     })
@@ -218,7 +218,7 @@ class CodeAnalyzer:
                     if method.get("is_public") and not method.get("docstring"):
                         undocumented.append({
                             "type": "method",
-                            "name": f"{cls['name']}.{method['name']}",
+                            "name": f"{cls.get('name', '')}.{method.get('name', '')}",
                             "file": path,
                             "line": method.get("line_start", 0),
                         })
@@ -226,7 +226,7 @@ class CodeAnalyzer:
                 if func.get("is_public") and not func.get("docstring"):
                     undocumented.append({
                         "type": "function",
-                        "name": func["name"],
+                        "name": func.get("name", ""),
                         "file": path,
                         "line": func.get("line_start", 0),
                     })

@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import TypedDict
 
+import yaml
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -126,15 +128,15 @@ class DocIssue:
     @classmethod
     def from_dict(cls, d: dict) -> DocIssue:
         return cls(
-            id=d["id"],
-            session_id=d["session_id"],
-            expert_role=d["expert_role"],
-            file=d["file"],
+            id=d.get("id", DocIssue.generate_id()),
+            session_id=d.get("session_id", ""),
+            expert_role=d.get("expert_role", ""),
+            file=d.get("file", ""),
             source_file=d.get("source_file", ""),
-            severity=Severity(d["severity"]),
-            title=d["title"],
-            description=d["description"],
-            suggestion=d["suggestion"],
+            severity=Severity(d.get("severity", "medium")),
+            title=d.get("title", ""),
+            description=d.get("description", ""),
+            suggestion=d.get("suggestion", ""),
             confidence=d.get("confidence", 0.5),
             status=DocStatus(d.get("status", "outdated")),
             created_at=d.get("created_at", ""),
@@ -178,7 +180,6 @@ class DocPage:
             "verified_by": self.verified_by,
             **self.frontmatter,
         }
-        import yaml
         lines.append(yaml.dump(fm, default_flow_style=False, sort_keys=False).strip())
         lines.append("---")
         lines.append("")
@@ -192,6 +193,7 @@ class DocPage:
             "title": self.title,
             "source_files": self.source_files,
             "frontmatter": self.frontmatter,
+            "content": self.content,
             "status": self.status.value,
             "generated_by": self.generated_by,
             "verified_by": self.verified_by,
@@ -202,9 +204,9 @@ class DocPage:
     @classmethod
     def from_dict(cls, d: dict) -> DocPage:
         return cls(
-            path=d["path"],
-            doc_type=DocType(d["doc_type"]),
-            title=d["title"],
+            path=d.get("path", ""),
+            doc_type=DocType(d.get("doc_type", "api")),
+            title=d.get("title", ""),
             source_files=d.get("source_files", []),
             frontmatter=d.get("frontmatter", {}),
             content=d.get("content", ""),

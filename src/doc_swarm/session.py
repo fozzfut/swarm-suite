@@ -48,22 +48,83 @@ class Session:
         output_dir.mkdir(parents=True, exist_ok=True)
         for page in self._pages:
             path = output_dir / page.path
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(page.to_markdown(), encoding="utf-8")
-            written.append(str(page.path))
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(page.to_markdown(), encoding="utf-8")
+                written.append(str(page.path))
+            except OSError as exc:
+                import logging
+                logging.getLogger("doc_swarm.session").warning(
+                    "Failed to write %s: %s", page.path, exc
+                )
         return written
 
     def _save_pages(self) -> None:
         path = self._dir / "pages.jsonl"
-        with open(path, "w", encoding="utf-8") as fh:
-            for page in self._pages:
-                fh.write(json.dumps(page.to_dict()) + "\n")
+        import tempfile
+        import os
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+        except Exception:
+            os.close(tmp_fd)
+            os.unlink(tmp_path)
+            raise
+        try:
+            with fh:
+                for page in self._pages:
+                    fh.write(json.dumps(page.to_dict()) + "\n")
+            os.replace(tmp_path, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _save_issues(self) -> None:
         path = self._dir / "issues.jsonl"
-        with open(path, "w", encoding="utf-8") as fh:
-            for issue in self._issues:
-                fh.write(json.dumps(issue.to_dict()) + "\n")
+        import tempfile
+        import os
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+        except Exception:
+            os.close(tmp_fd)
+            os.unlink(tmp_path)
+            raise
+        try:
+            with fh:
+                for issue in self._issues:
+                    fh.write(json.dumps(issue.to_dict()) + "\n")
+            os.replace(tmp_path, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def _load(self) -> None:
+        """Load persisted pages and issues from JSONL files."""
+        pages_path = self._dir / "pages.jsonl"
+        if pages_path.exists():
+            for line in pages_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        self._pages.append(DocPage.from_dict(json.loads(line)))
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+        issues_path = self._dir / "issues.jsonl"
+        if issues_path.exists():
+            for line in issues_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        self._issues.append(DocIssue.from_dict(json.loads(line)))
+                    except (json.JSONDecodeError, KeyError):
+                        pass
 
     def to_dict(self) -> dict:
         return {
@@ -113,5 +174,7 @@ class SessionManager:
                 sess_dir = self._sessions_dir / session_id
                 if not sess_dir.exists():
                     raise KeyError(f"Session {session_id} not found")
-                self._sessions[session_id] = Session(session_id, sess_dir)
+                session = Session(session_id, sess_dir)
+                session._load()
+                self._sessions[session_id] = session
             return self._sessions[session_id]

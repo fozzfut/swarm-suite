@@ -38,6 +38,7 @@ class DocVerifier:
 
         doc_files = self._scan_docs()
         doc_stems = {Path(d).stem for d in doc_files}
+        doc_source_files: set[str] = set()
 
         for doc_path in doc_files:
             full_path = self._docs / doc_path
@@ -51,6 +52,7 @@ class DocVerifier:
             # Check source_file reference
             source_file = frontmatter.get("source_file", "")
             if source_file:
+                doc_source_files.add(source_file)
                 source_path = self._project / source_file
                 if not source_path.exists():
                     issues.append(DocIssue(
@@ -103,9 +105,9 @@ class DocVerifier:
             if source_file and source_file in modules:
                 mod = modules[source_file]
                 documented_funcs = frontmatter.get("functions", [])
-                actual_funcs = {f["name"] for f in mod.get("functions", [])}
+                actual_funcs = {f.get("name", "") for f in mod.get("functions", [])}
                 actual_funcs.update(
-                    m["name"]
+                    m.get("name", "")
                     for c in mod.get("classes", [])
                     for m in c.get("methods", [])
                 )
@@ -124,18 +126,6 @@ class DocVerifier:
                         ))
 
         # Check for undocumented modules
-        doc_source_files = set()
-        for doc_path in doc_files:
-            full_path = self._docs / doc_path
-            try:
-                text = full_path.read_text(encoding="utf-8", errors="ignore")
-                fm, _ = self._parse_frontmatter(text)
-                sf = fm.get("source_file", "")
-                if sf:
-                    doc_source_files.add(sf)
-            except OSError:
-                continue
-
         for mod_path, info in modules.items():
             has_public = (
                 any(c.get("is_public") for c in info.get("classes", []))
