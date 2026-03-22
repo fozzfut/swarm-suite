@@ -557,10 +557,15 @@ async def _notify_resource_subscribers(
 
 
 def create_mcp_server():
-    """Create and configure the MCP server with all 21 tools + resources."""
+    """Create and configure the MCP server with all 26 tools."""
     from mcp.server.fastmcp import FastMCP, Context
     from contextlib import asynccontextmanager
     from collections.abc import AsyncIterator
+
+    def _get_app(ctx: Optional[Context]) -> AppContext:
+        """Extract AppContext from MCP Context. Validates ctx is injected."""
+        assert ctx is not None, "MCP Context not injected by FastMCP"
+        return ctx.request_context.lifespan_context
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
@@ -586,10 +591,10 @@ def create_mcp_server():
         task: str = "",
         max_experts: int = 5,
         session_name: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_orchestrate_review(
             app, project_path, scope=scope, task=task,
             max_experts=max_experts,
@@ -600,16 +605,16 @@ def create_mcp_server():
     # ── Session Management Tools ─────────────────────────────────────
 
     @mcp.tool(name="start_session", description="Start a new collaborative review session for a project")
-    def _start_session(project_path: str, name: str = "", ctx: Context = None) -> str:
+    def _start_session(project_path: str, name: str = "", ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_start_session(app, project_path, name=name or None)
         return json.dumps(result)
 
     @mcp.tool(name="end_session", description="End a review session and generate the final report")
-    async def _end_session(session_id: str, ctx: Context = None) -> str:
+    async def _end_session(session_id: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         bus = app.session_manager.get_event_bus(session_id)
         result = tool_end_session(app, session_id)  # clears caches
         await bus.publish(EventType.SESSION_ENDED, result)
@@ -617,32 +622,32 @@ def create_mcp_server():
         return json.dumps(result)
 
     @mcp.tool(name="get_session", description="Get current session state")
-    def _get_session(session_id: str, ctx: Context = None) -> str:
+    def _get_session(session_id: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_get_session(app, session_id)
         return json.dumps(result)
 
     @mcp.tool(name="list_sessions", description="List all review sessions")
-    def _list_sessions(ctx: Context = None) -> str:
+    def _list_sessions(ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_list_sessions(app)
         return json.dumps(result)
 
     # ── Expert Coordination Tools ────────────────────────────────────
 
     @mcp.tool(name="suggest_experts", description="Analyze the project and recommend expert profiles")
-    def _suggest_experts(session_id: str, ctx: Context = None) -> str:
+    def _suggest_experts(session_id: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_suggest_experts(app, session_id)
         return json.dumps(result)
 
     @mcp.tool(name="claim_file", description="Claim a file for review")
-    async def _claim_file(session_id: str, file: str, expert_role: str, ctx: Context = None) -> str:
+    async def _claim_file(session_id: str, file: str, expert_role: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         agent_id = _resolve_agent_id(ctx, expert_role)
         result = tool_claim_file(app, session_id, file, expert_role, agent_id=agent_id)
 
@@ -655,9 +660,9 @@ def create_mcp_server():
         return json.dumps(result)
 
     @mcp.tool(name="release_file", description="Release a previously claimed file")
-    async def _release_file(session_id: str, file: str, expert_role: str, ctx: Context = None) -> str:
+    async def _release_file(session_id: str, file: str, expert_role: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_release_file(app, session_id, file, expert_role)
 
         bus = app.session_manager.get_event_bus(session_id)
@@ -671,9 +676,9 @@ def create_mcp_server():
         return json.dumps(result)
 
     @mcp.tool(name="get_claims", description="See which files are currently claimed")
-    def _get_claims(session_id: str, ctx: Context = None) -> str:
+    def _get_claims(session_id: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_get_claims(app, session_id)
         return json.dumps(result)
 
@@ -691,10 +696,10 @@ def create_mcp_server():
         suggestion_action: str, suggestion_detail: str,
         confidence: float,
         snippet: str = "", tags: list[str] | None = None, related_findings: list[str] | None = None,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         agent_id = _resolve_agent_id(ctx, expert_role)
         result = tool_post_finding(
             app, session_id, expert_role, file, line_start, line_end,
@@ -720,10 +725,10 @@ def create_mcp_server():
         min_confidence: float = 0.0,
         limit: int = 0, offset: int = 0,
         caller_role: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_get_findings(
             app, session_id,
             severity=severity or None, category=category or None,
@@ -744,10 +749,10 @@ def create_mcp_server():
         session_id: str, expert_role: str, finding_id: str,
         reaction: str, reason: str,
         related_finding_id: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         agent_id = _resolve_agent_id(ctx, expert_role)
 
         # Capture old status to detect status changes
@@ -779,8 +784,8 @@ def create_mcp_server():
         return json.dumps(result)
 
     @mcp.tool(name="get_summary", description="Get aggregated summary report")
-    def _get_summary(session_id: str, format: str = "markdown", ctx: Context = None) -> str:
-        app = ctx.request_context.lifespan_context
+    def _get_summary(session_id: str, format: str = "markdown", ctx: Optional[Context] = None) -> str:
+        app = _get_app(ctx)
         return tool_get_summary(app, session_id, fmt=format or None)
 
     # ── Duplicate Detection & Batch Tools ───────────────────────────
@@ -791,10 +796,10 @@ def create_mcp_server():
     )
     def _find_duplicates(
         session_id: str, file: str, line_start: int, line_end: int, title: str,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_find_duplicates(app, session_id, file, line_start, line_end, title)
         return json.dumps(result)
 
@@ -804,10 +809,10 @@ def create_mcp_server():
     )
     async def _post_findings_batch(
         session_id: str, findings: list[dict],
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         results = tool_post_findings_batch(app, session_id, findings)
 
         bus = app.session_manager.get_event_bus(session_id)
@@ -829,10 +834,10 @@ def create_mcp_server():
     )
     def _post_comment(
         session_id: str, finding_id: str, expert_role: str, content: str,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_post_comment(app, session_id, finding_id, expert_role, content)
         return json.dumps(result)
 
@@ -848,10 +853,10 @@ def create_mcp_server():
     )
     def _mark_fixed(
         session_id: str, finding_id: str, fix_ref: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_mark_fixed(app, session_id, finding_id, fix_ref=fix_ref)
         return json.dumps(result)
 
@@ -866,10 +871,10 @@ def create_mcp_server():
     def _bulk_update_status(
         session_id: str, finding_ids: list[str], new_status: str,
         reason: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_bulk_update_status(
             app, session_id, finding_ids, new_status, reason=reason,
         )
@@ -888,10 +893,10 @@ def create_mcp_server():
     )
     def _get_events(
         session_id: str, since: str = "", event_type: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_get_events(
             app, session_id,
             since=since or None,
@@ -911,10 +916,10 @@ def create_mcp_server():
     )
     def _mark_phase_done(
         session_id: str, expert_role: str, phase: int,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_mark_phase_done(app, session_id, expert_role, phase)
         _inject_pending(app, session_id, expert_role, result)
         return json.dumps(result)
@@ -928,19 +933,19 @@ def create_mcp_server():
     )
     def _check_phase_ready(
         session_id: str, phase: int,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         return json.dumps(tool_check_phase_ready(app, session_id, phase))
 
     @mcp.tool(
         name="get_phase_status",
         description="Get full phase completion status for all agents in the session.",
     )
-    def _get_phase_status(session_id: str, ctx: Context = None) -> str:
+    def _get_phase_status(session_id: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         return json.dumps(tool_get_phase_status(app, session_id))
 
     # ── Agent Messaging Tools (star topology) ──────────────────────
@@ -962,10 +967,10 @@ def create_mcp_server():
         in_reply_to: str = "",
         urgent: bool = False,
         context: dict | None = None,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_send_message(
             app, session_id, from_agent, to_agent, content,
             message_type=message_type, in_reply_to=in_reply_to,
@@ -992,10 +997,10 @@ def create_mcp_server():
     def _get_inbox(
         session_id: str, expert_role: str,
         since: str = "", message_type: str = "",
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_get_inbox(
             app, session_id, expert_role,
             since=since or None,
@@ -1007,9 +1012,9 @@ def create_mcp_server():
         name="get_thread",
         description="Get a query message and all its responses (conversation thread).",
     )
-    def _get_thread(session_id: str, message_id: str, ctx: Context = None) -> str:
+    def _get_thread(session_id: str, message_id: str, ctx: Optional[Context] = None) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_get_thread(app, session_id, message_id)
         return json.dumps(result)
 
@@ -1022,10 +1027,10 @@ def create_mcp_server():
     )
     async def _broadcast(
         session_id: str, from_agent: str, content: str,
-        ctx: Context = None,
+        ctx: Optional[Context] = None,
     ) -> str:
         import json
-        app = ctx.request_context.lifespan_context
+        app = _get_app(ctx)
         result = tool_broadcast(app, session_id, from_agent, content)
 
         bus = app.session_manager.get_event_bus(session_id)
