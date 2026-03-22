@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ReviewSwarm-v0.2.0-blueviolet?style=for-the-badge" alt="Version" />
+  <img src="https://img.shields.io/badge/ReviewSwarm-v0.3.5-blueviolet?style=for-the-badge" alt="Version" />
 </p>
 
 <h1 align="center">ReviewSwarm</h1>
@@ -152,9 +152,15 @@ cd review-swarm && pip install -e ".[dev]"
 
 ## IDE Setup
 
-### Claude Code
+### Claude Code (recommended)
 
-Add to `~/.claude/settings.json` or project `.mcp.json`:
+One command:
+
+```bash
+claude mcp add review-swarm -- review-swarm serve --transport stdio
+```
+
+Or add manually to `~/.claude/settings.json` or project `.mcp.json`:
 
 ```json
 {

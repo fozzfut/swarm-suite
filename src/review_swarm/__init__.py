@@ -1,3 +1,3 @@
 """ReviewSwarm -- Collaborative AI Code Review MCP Server."""
 
-__version__ = "0.3.4"
+__version__ = "0.3.6"
