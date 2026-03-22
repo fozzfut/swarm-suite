@@ -149,6 +149,14 @@ def _extract_class_hierarchy(tree: ast.Module) -> dict[str, list[str]]:
     return hierarchy
 
 
+_SKIP_DIRS = {
+    "node_modules", ".venv", "__pycache__", ".git",
+    "target", "build", "dist", "vendor", "bin", "obj",
+    ".mypy_cache", ".pytest_cache", ".tox",
+    ".eggs", "site-packages",
+}
+
+
 def scan_project(
     project_path: str | Path,
     scope: str | None = None,
@@ -160,34 +168,50 @@ def scan_project(
     project_path:
         Root directory of the project.
     scope:
-        Optional sub-directory to restrict scanning (e.g. ``"src/"``).
+        Optional sub-directory or space-separated list of sub-directories
+        to restrict scanning (e.g. ``"src/"`` or ``"modules/ core/ services/"``).
     """
     root = Path(project_path).resolve()
-    scan_root = root / scope if scope else root
 
-    if not scan_root.is_dir():
-        return ArchAnalysis(root=str(root))
-
-    py_files = sorted(scan_root.rglob("*.py"))
+    if scope:
+        # Parse scope as space-separated directory list
+        scope_dirs = [s.strip().rstrip("/") for s in scope.split() if s.strip()]
+        scan_roots = []
+        for s in scope_dirs:
+            candidate = root / s
+            if candidate.is_dir():
+                scan_roots.append(candidate)
+        if not scan_roots:
+            return ArchAnalysis(root=str(root))
+    else:
+        scan_roots = [root]
 
     analysis = ArchAnalysis(root=str(root))
 
-    for fp in py_files:
-        try:
-            source = fp.read_text(encoding="utf-8", errors="ignore")
-            tree = ast.parse(source, filename=str(fp))
-        except SyntaxError:
-            continue
+    for scan_root in scan_roots:
+        for fp in sorted(scan_root.rglob("*.py")):
+            try:
+                rel_parts = fp.relative_to(root).parts
+            except ValueError:
+                continue
+            if any(part in _SKIP_DIRS or part.endswith(".egg-info") for part in rel_parts):
+                continue
 
-        rel = str(fp.relative_to(root)).replace(os.sep, "/")
-        mod = _parse_module(tree, source, rel)
-        analysis.modules.append(mod)
-        analysis.dependency_graph[mod.name] = mod.imports
-        analysis.complexity_scores[mod.name] = _estimate_complexity(tree)
-        hierarchy = _extract_class_hierarchy(tree)
-        for cls_name, bases in hierarchy.items():
-            qualified = f"{mod.name}.{cls_name}"
-            analysis.class_hierarchy[qualified] = bases
+            try:
+                source = fp.read_text(encoding="utf-8", errors="ignore")
+                tree = ast.parse(source, filename=str(fp))
+            except SyntaxError:
+                continue
+
+            rel = str(fp.relative_to(root)).replace(os.sep, "/")
+            mod = _parse_module(tree, source, rel)
+            analysis.modules.append(mod)
+            analysis.dependency_graph[mod.name] = mod.imports
+            analysis.complexity_scores[mod.name] = _estimate_complexity(tree)
+            hierarchy = _extract_class_hierarchy(tree)
+            for cls_name, bases in hierarchy.items():
+                qualified = f"{mod.name}.{cls_name}"
+                analysis.class_hierarchy[qualified] = bases
 
     # -- coupling metrics ----------------------------------------------------
     all_names = {m.name for m in analysis.modules}
