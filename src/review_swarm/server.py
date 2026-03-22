@@ -150,8 +150,8 @@ def tool_post_finding(
         raise ValueError(f"Invalid file path: {file!r}. Must be relative, no traversal.")
     if not (0.0 <= confidence <= 1.0):
         raise ValueError(f"confidence must be 0.0-1.0, got {confidence}")
-    if line_start < 0 or line_end < 0:
-        raise ValueError(f"line numbers must be >= 0, got start={line_start}, end={line_end}")
+    if line_start < 1 or line_end < 1:
+        raise ValueError(f"line numbers must be >= 1, got start={line_start}, end={line_end}")
     if line_end < line_start:
         raise ValueError(f"line_end ({line_end}) must be >= line_start ({line_start})")
 

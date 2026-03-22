@@ -18,6 +18,8 @@ class ReportGenerator:
         findings = self._store.get()
         if fmt == "json":
             return self._generate_json(findings)
+        if fmt == "sarif":
+            return self.generate_sarif(session_id)
         return self._generate_markdown(findings)
 
     def _generate_markdown(self, findings: list[Finding]) -> str:

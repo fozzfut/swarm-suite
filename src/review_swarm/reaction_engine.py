@@ -87,11 +87,14 @@ class ReactionEngine:
                 reaction.id, finding.id, reaction.expert_role, reaction.reaction.value,
             )
 
-            # 6. Recompute status
+            # 6. Re-fetch finding (get_by_id returns a copy) so we see mutations
+            finding = self._store.get_by_id(finding.id)
+
+            # 7. Recompute status
             self._recompute_status(finding)
 
-            # 7. Return updated finding
-            return finding
+            # 8. Return updated finding (re-fetch to reflect status change)
+            return self._store.get_by_id(finding.id)
 
     def _recompute_status(self, finding: Finding) -> None:
         """Recompute finding status from its reactions list.

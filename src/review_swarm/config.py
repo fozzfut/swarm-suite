@@ -82,6 +82,8 @@ class Config:
             max_sessions=data.get("max_sessions", 50),
             default_format=data.get("default_format", "markdown"),
             session_timeout_hours=data.get("session_timeout_hours", 24),
+            max_events_per_session=data.get("max_events_per_session", 50_000),
+            max_messages_per_session=data.get("max_messages_per_session", 10_000),
             consensus=consensus,
             experts=experts,
             rate_limit=rate_limit,
@@ -117,6 +119,8 @@ class Config:
             "max_sessions": self.max_sessions,
             "default_format": self.default_format,
             "session_timeout_hours": self.session_timeout_hours,
+            "max_events_per_session": self.max_events_per_session,
+            "max_messages_per_session": self.max_messages_per_session,
             "consensus": {
                 "confirm_threshold": self.consensus.confirm_threshold,
                 "auto_close_duplicates": self.consensus.auto_close_duplicates,

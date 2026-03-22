@@ -104,7 +104,8 @@ class FindingStore:
     def get_by_id(self, finding_id: str) -> Finding | None:
         """Return a finding by its ID, or None if not found."""
         with self._lock:
-            return self._findings.get(finding_id)
+            f = self._findings.get(finding_id)
+            return copy.copy(f) if f is not None else None
 
     def count(self) -> int:
         """Return total number of findings."""
