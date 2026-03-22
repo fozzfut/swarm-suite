@@ -21,38 +21,36 @@
 
 ---
 
-## Full Workflow
+## How It Works
 
-ReviewSwarm covers the complete review-to-fix cycle:
+ReviewSwarm is a **review-only** tool. It finds bugs, it does not fix them.
 
 ```
-                          REVIEW PHASE                              FIX PHASE
-                    ┌──────────────────────┐                ┌──────────────────────┐
-                    │                      │                │                      │
- You: "Review src/" │  ReviewSwarm Server  │  report.md     │   Fix Agent          │
- ─────────────────► │                      │ ──────────►    │   (can modify code)  │
-                    │  ┌────────────────┐  │                │                      │
-                    │  │ Phase 1: REVIEW│  │  report.json   │  reads report.md     │
-                    │  │ claim files    │  │ ──────────►    │  fixes bugs          │
-                    │  │ post findings  │  │                │  calls mark_fixed()  │
-                    │  │ mark_phase_done│  │  report.sarif  │                      │
-                    │  ├────────────────┤  │ ──────────►    │  Finding: open→fixed │
-                    │  │ ═══ BARRIER ═══│  │                │                      │
-                    │  ├────────────────┤  │                └──────────────────────┘
-                    │  │ Phase 2: CROSS │  │
-                    │  │ get_findings   │  │
-                    │  │ react (confirm │  │
-                    │  │   / dispute)   │  │
-                    │  │ mark_phase_done│  │
-                    │  ├────────────────┤  │
-                    │  │ ═══ BARRIER ═══│  │
-                    │  ├────────────────┤  │
-                    │  │ Phase 3: REPORT│  │
-                    │  │ end_session    │  │
-                    │  │ auto-save      │  │
-                    │  │  reports       │  │
-                    │  └────────────────┘  │
-                    └──────────────────────┘
+ You: "Review src/"
+ ─────────────────►  ReviewSwarm Server
+                     ┌────────────────────────┐
+                     │  Phase 1: REVIEW        │
+                     │  claim files             │
+                     │  post findings           │
+                     │  mark_phase_done         │
+                     ├──────────────────────────┤
+                     │  ═══════ BARRIER ═══════ │
+                     ├──────────────────────────┤
+                     │  Phase 2: CROSS-CHECK    │
+                     │  get_findings             │
+                     │  react (confirm/dispute)  │
+                     │  mark_phase_done         │
+                     ├──────────────────────────┤
+                     │  ═══════ BARRIER ═══════ │
+                     ├──────────────────────────┤
+                     │  Phase 3: REPORT          │
+                     │  end_session              │
+                     │  auto-save reports        │
+                     └────────────┬─────────────┘
+                                  │
+                                  ▼
+                     report.md / report.json / report.sarif
+                     (recommendation report — no code changes)
 ```
 
 ### Step by step
@@ -75,19 +73,32 @@ ls ~/.review-swarm/sessions/sess-2026-03-22-001/
 #   report.json    ← JSON (machine-readable)
 #   report.sarif   ← SARIF 2.1.0 (GitHub Code Scanning)
 
-# 3. FIX: separate agent reads report, fixes code, marks findings as fixed
-#   Fix agent calls: mark_fixed(session_id, finding_id, fix_ref="abc1234")
-#   Finding status:  open → fixed
-#   Bulk update:     bulk_update_status(session_id, [ids...], "fixed")
+# That's it. ReviewSwarm's job is done.
+# The report is a spec — each finding has file, lines, evidence, and suggestion.
+# What you do with it (manual fix, AI fix-agent, ignore) is up to you.
 ```
+
+### Fix tracking (optional)
+
+If you use a separate tool/agent to fix bugs from the report, you can track progress via ReviewSwarm:
+
+```bash
+# After fixing a bug, mark the finding as fixed:
+mark_fixed(session_id, "f-a1b2c3", fix_ref="commit:abc1234")
+
+# Or batch-update after fixing multiple bugs:
+bulk_update_status(session_id, ["f-a1b2c3", "f-d4e5f6"], "fixed", reason="PR #42")
+```
+
+This is **status tracking**, not code modification. ReviewSwarm never changes your code.
 
 ### Key principles
 
 - **Review agents are read-only** — they produce a recommendation report, never modify code
-- **Fix agents are separate** — they read the report, apply patches, and call `mark_fixed`
 - **Phase barriers** — Phase 2 cannot start until all agents finish Phase 1
 - **Consensus** — 2+ confirms = confirmed, 1+ dispute = disputed
-- **Reports as specs** — each finding is a self-contained fix spec with file, lines, evidence, and suggestion
+- **Reports as specs** — each finding is a self-contained bug spec with file, lines, evidence, and suggestion
+- **Fix tracking is optional** — `mark_fixed` / `bulk_update_status` track what was fixed, but fixing is external
 
 ---
 
@@ -111,15 +122,16 @@ ReviewSwarm creates a session, selects experts, assigns files, and returns a 3-p
 
 ## What is ReviewSwarm?
 
-ReviewSwarm is **not** an LLM — it's **infrastructure**. It provides **26 MCP tools** that AI agents use to:
+ReviewSwarm is **not** an LLM and **not** a fixer — it's **review infrastructure**. It provides **26 MCP tools** that AI agents use to:
 
 - **Post findings** with structured evidence (actual + expected + source_ref)
 - **Claim files** for review (advisory locks with TTL)
 - **React** to each other's work (confirm, dispute, extend, duplicate)
 - **Message each other** — direct, broadcast, query/response (star topology)
 - **Reach consensus** automatically (2+ confirms = confirmed)
-- **Track fixes** — mark findings as fixed with commit/PR references
 - **Generate reports** in Markdown, JSON, or SARIF
+
+ReviewSwarm produces a **recommendation report**. It never modifies your code. What you do with the report is up to you.
 
 ---
 
@@ -302,16 +314,15 @@ Phase 3: REPORT
 
 ---
 
-## Fix Tracking
+## Fix Tracking (Optional)
 
-After review, a separate fix-agent reads the report and patches code:
+ReviewSwarm does not fix code. These tools are for **tracking** what was fixed externally:
 
 ```python
-# Fix agent reads report.md, fixes the bug, then:
+# After you (or your fix-agent) fix a bug, mark it in ReviewSwarm:
 mark_fixed(session_id, "f-a1b2c3", fix_ref="commit:abc1234")
-# Finding status: open → fixed
 
-# Or batch-update after fixing multiple bugs:
+# Or batch-update:
 bulk_update_status(session_id, ["f-a1b2c3", "f-d4e5f6"], "fixed",
                    reason="Fixed in PR #42")
 ```
