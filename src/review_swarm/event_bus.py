@@ -24,9 +24,10 @@ class SessionEventBus:
       - publish(): persists + fans out to async subscriber queues
     """
 
-    def __init__(self, session_id: str, events_path: Path) -> None:
+    def __init__(self, session_id: str, events_path: Path, max_events: int = 50_000) -> None:
         self._session_id = session_id
         self._events_path = Path(events_path)
+        self._max_events = max_events
         self._events: list[Event] = []
         self._subscribers: dict[str, asyncio.Queue[Event]] = {}
         self._lock = threading.Lock()
@@ -48,7 +49,10 @@ class SessionEventBus:
                 payload=payload,
             )
             self._events.append(event)
+            if len(self._events) > self._max_events:
+                self._events = self._events[-self._max_events:]
             self._append_to_disk(event)
+            _log.debug("Event %s published: %s", event.id, event_type.value)
             return event
 
     async def publish(self, event_type: EventType, payload: dict) -> Event:
@@ -59,11 +63,13 @@ class SessionEventBus:
 
     async def _fan_out(self, event: Event) -> None:
         """Push event to all subscriber queues (non-blocking)."""
-        for queue in self._subscribers.values():
+        with self._lock:
+            items = list(self._subscribers.items())
+        for sub_id, queue in items:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                pass  # slow consumer; they can catch up via get_events()
+                _log.warning("QueueFull for subscriber %s, event dropped", sub_id)
 
     # ── Subscription ─────────────────────────────────────────────────
 
@@ -121,7 +127,14 @@ class SessionEventBus:
                 if not line:
                     continue
                 try:
-                    self._events.append(Event.from_dict(json.loads(line)))
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        _log.warning(
+                            "Expected dict, got %s on line %d in %s",
+                            type(data).__name__, line_num, self._events_path,
+                        )
+                        continue
+                    self._events.append(Event.from_dict(data))
                 except (json.JSONDecodeError, KeyError, ValueError) as exc:
                     _log.warning(
                         "Skipping corrupt line %d in %s: %s", line_num, self._events_path, exc

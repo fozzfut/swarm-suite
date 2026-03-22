@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import tempfile
@@ -26,10 +27,12 @@ class FindingStore:
         self._path = Path(jsonl_path)
         self._max_findings = max_findings
         self._findings: dict[str, Finding] = {}
+        self._by_file: dict[str, list[str]] = {}  # file -> [finding_id]
+        self._dirty = False
         self._lock = threading.Lock()
         self._load()
 
-    # ── Public API ──────────────────────────────────────────────────────
+    # -- Public API --------------------------------------------------------
 
     def post(self, finding: Finding) -> str:
         """Store a new finding. Sets timestamps, appends to JSONL.
@@ -47,7 +50,10 @@ class FindingStore:
             finding.created_at = now
             finding.updated_at = now
             self._findings[finding.id] = finding
+            self._by_file.setdefault(finding.file, []).append(finding.id)
             self._append(finding)
+            self._dirty = False
+            _log.debug("Finding %s posted to %s", finding.id, self._path)
             return finding.id
 
     def get(
@@ -93,7 +99,7 @@ class FindingStore:
         if limit > 0:
             results = results[:limit]
 
-        return results
+        return [copy.copy(f) for f in results]
 
     def get_by_id(self, finding_id: str) -> Finding | None:
         """Return a finding by its ID, or None if not found."""
@@ -137,10 +143,12 @@ class FindingStore:
         with self._lock:
             candidates = []
             title_words = set(title.lower().split())
-            for f in self._findings.values():
-                if f.id == exclude_id:
+            # Use file index to avoid scanning all findings
+            for fid in self._by_file.get(file, []):
+                f = self._findings.get(fid)
+                if f is None:
                     continue
-                if f.file != file:
+                if f.id == exclude_id:
                     continue
                 # Check line overlap
                 if f.line_start > line_end or f.line_end < line_start:
@@ -155,40 +163,41 @@ class FindingStore:
                     candidates.append(f)
             return candidates
 
-    # ── Mutation API (used by ReactionEngine) ───────────────────────────
+    # -- Mutation API (used by ReactionEngine) -----------------------------
 
     def update_status(self, finding_id: str, status: Status) -> None:
-        """Update the status of a finding. Rewrites JSONL."""
+        """Update the status of a finding. Marks store as dirty for deferred flush."""
         with self._lock:
             finding = self._findings.get(finding_id)
             if finding is None:
                 raise KeyError(f"Finding {finding_id} not found")
             finding.status = status
             finding.updated_at = now_iso()
-            self._flush()
+            self._dirty = True
+            _log.info("Finding %s status -> %s", finding_id, status.value)
 
     def add_reaction(self, finding_id: str, reaction_dict: dict) -> None:
-        """Append a reaction dict to a finding's reactions list. Flushes."""
+        """Append a reaction dict to a finding's reactions list. Marks dirty."""
         with self._lock:
             finding = self._findings.get(finding_id)
             if finding is None:
                 raise KeyError(f"Finding {finding_id} not found")
             finding.reactions.append(reaction_dict)
             finding.updated_at = now_iso()
-            self._flush()
+            self._dirty = True
 
     def add_comment(self, finding_id: str, comment_dict: dict) -> None:
-        """Append a comment dict to a finding's comments list. Flushes."""
+        """Append a comment dict to a finding's comments list. Marks dirty."""
         with self._lock:
             finding = self._findings.get(finding_id)
             if finding is None:
                 raise KeyError(f"Finding {finding_id} not found")
             finding.comments.append(comment_dict)
             finding.updated_at = now_iso()
-            self._flush()
+            self._dirty = True
 
     def add_related(self, finding_id: str, related_id: str) -> None:
-        """Append a related finding ID if not already present. Flushes."""
+        """Append a related finding ID if not already present. Marks dirty."""
         with self._lock:
             finding = self._findings.get(finding_id)
             if finding is None:
@@ -196,9 +205,16 @@ class FindingStore:
             if related_id not in finding.related_findings:
                 finding.related_findings.append(related_id)
                 finding.updated_at = now_iso()
-                self._flush()
+                self._dirty = True
 
-    # ── I/O ─────────────────────────────────────────────────────────────
+    def flush_if_dirty(self) -> None:
+        """Flush to disk only if in-memory state has been modified."""
+        with self._lock:
+            if self._dirty:
+                self._flush()
+                self._dirty = False
+
+    # -- I/O ---------------------------------------------------------------
 
     def _flush(self) -> None:
         """Rewrite the entire JSONL file from in-memory state.
@@ -227,6 +243,7 @@ class FindingStore:
                 for finding in self._findings.values():
                     fh.write(json.dumps(finding.to_dict()) + "\n")
             os.replace(tmp_path, str(self._path))
+            _log.debug("Flushed %d findings to %s", len(self._findings), self._path)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -251,8 +268,15 @@ class FindingStore:
                     continue
                 try:
                     data = json.loads(line)
+                    if not isinstance(data, dict):
+                        _log.warning(
+                            "Expected dict, got %s on line %d in %s",
+                            type(data).__name__, line_num, self._path,
+                        )
+                        continue
                     finding = Finding.from_dict(data)
                     self._findings[finding.id] = finding
+                    self._by_file.setdefault(finding.file, []).append(finding.id)
                 except (json.JSONDecodeError, KeyError, ValueError) as exc:
                     _log.warning(
                         "Skipping corrupt line %d in %s: %s", line_num, self._path, exc

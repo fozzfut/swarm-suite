@@ -15,7 +15,15 @@ from pathlib import Path
 
 from .config import Config
 from .expert_profiler import ExpertProfiler
+from .logging_config import get_logger
 from .session_manager import SessionManager
+
+_log = get_logger("orchestrator")
+
+# Type aliases for structured dicts used in ReviewPlan
+ExpertInfo = dict  # {profile_name, name, description, confidence}
+Assignment = dict  # {expert, files, file_count}
+PhaseInfo = dict   # {phase, name, description, sync?, instructions}
 
 
 @dataclass
@@ -27,10 +35,10 @@ class ReviewPlan:
     scope: str
     task: str
     files: list[str]
-    experts: list[dict]
-    assignments: list[dict]  # {expert, files: [...]}
-    phases: list[dict]       # ordered phases with instructions
-    summary: str             # human-readable summary
+    experts: list[ExpertInfo]
+    assignments: list[Assignment]
+    phases: list[PhaseInfo]
+    summary: str
 
     def to_dict(self) -> dict:
         return {
@@ -140,6 +148,11 @@ class Orchestrator:
 
         # 5. Build phased execution plan
         phases = self._build_phases(session_id, assignments, task)
+
+        _log.info(
+            "Planning review: scope=%s, task=%s, files=%d, experts=%d",
+            scope or "(all)", task or "(general)", len(files), len(experts),
+        )
 
         # 6. Summary
         expert_names = [e["profile_name"] for e in experts]

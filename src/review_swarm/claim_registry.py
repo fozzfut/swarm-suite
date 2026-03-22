@@ -29,6 +29,7 @@ class ClaimRegistry:
         self._load()
 
     # -- Public API -------------------------------------------------------
+    # O(N) scan acceptable for typical claim counts (< 100 per session)
 
     def claim(
         self,
@@ -65,6 +66,7 @@ class ClaimRegistry:
             )
             self._claims.append(new_claim)
             self._save()
+            _log.debug("Claim %s: %s claimed %s", new_claim.id, expert_role, file)
             return new_claim
 
     def release(self, session_id: str, file: str, expert_role: str) -> None:
@@ -81,6 +83,7 @@ class ClaimRegistry:
                     and c.status == ClaimStatus.ACTIVE
                 ):
                     c.status = ClaimStatus.RELEASED
+                    _log.debug("Released %s/%s by %s", session_id, file, expert_role)
             self._save()
 
     def release_all(self, session_id: str) -> None:

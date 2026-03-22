@@ -30,9 +30,10 @@ class MessageBus:
     Messages are persisted to messages.jsonl.
     """
 
-    def __init__(self, session_id: str, messages_path: Path) -> None:
+    def __init__(self, session_id: str, messages_path: Path, max_messages: int = 10_000) -> None:
         self._session_id = session_id
         self._messages_path = Path(messages_path)
+        self._max_messages = max_messages
         self._messages: list[Message] = []
         self._messages_by_id: dict[str, Message] = {}
         self._inboxes: dict[str, list[Message]] = defaultdict(list)
@@ -48,6 +49,7 @@ class MessageBus:
         """Register an agent so it can receive broadcasts and queries."""
         with self._lock:
             self._agents.add(expert_role)
+            _log.debug("Agent %s registered", expert_role)
 
     def unregister_agent(self, expert_role: str) -> None:
         with self._lock:
@@ -64,7 +66,13 @@ class MessageBus:
         with self._lock:
             self._messages.append(message)
             self._messages_by_id[message.id] = message
+            if len(self._messages) > self._max_messages:
+                self._messages = self._messages[-self._max_messages:]
             self._append_to_disk(message)
+            _log.debug(
+                "Message %s: %s → %s (%s)",
+                message.id, message.from_agent, message.to_agent, message.message_type.value,
+            )
 
             if message.message_type == MessageType.DIRECT:
                 self._inboxes[message.to_agent].append(message)
@@ -284,7 +292,14 @@ class MessageBus:
                 if not line:
                     continue
                 try:
-                    msg = Message.from_dict(json.loads(line))
+                    data = json.loads(line)
+                    if not isinstance(data, dict):
+                        _log.warning(
+                            "Expected dict, got %s on line %d in %s",
+                            type(data).__name__, line_num, self._messages_path,
+                        )
+                        continue
+                    msg = Message.from_dict(data)
                     self._messages.append(msg)
                     self._messages_by_id[msg.id] = msg
                     self._agents.add(msg.from_agent)

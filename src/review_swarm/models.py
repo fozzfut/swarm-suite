@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from typing import TypedDict
 
 
 # ── Helper ──────────────────────────────────────────────────────────────
@@ -64,6 +65,31 @@ class ReactionType(str, Enum):
     DISPUTE = "dispute"
     EXTEND = "extend"
     DUPLICATE = "duplicate"
+
+
+# ── TypedDicts for structured dicts used in Finding ─────────────────────
+
+
+class ReactionDict(TypedDict, total=False):
+    """Expected schema for reaction dicts stored in Finding.reactions."""
+
+    id: str
+    session_id: str
+    finding_id: str
+    agent_id: str
+    expert_role: str
+    reaction: str
+    reason: str
+    related_finding_id: str
+    created_at: str
+
+
+class CommentDict(TypedDict, total=False):
+    """Expected schema for comment dicts stored in Finding.comments."""
+
+    expert_role: str
+    content: str
+    created_at: str
 
 
 # ── Finding ─────────────────────────────────────────────────────────────
@@ -139,7 +165,11 @@ class Finding:
 
     @classmethod
     def from_dict(cls, d: dict) -> Finding:
-        """Deserialize from a plain dict."""
+        """Deserialize from a plain dict.
+
+        Convention: d["key"] (KeyError on missing) for required fields;
+        d.get("key", default) for optional fields with defaults.
+        """
         return cls(
             id=d["id"],
             session_id=d["session_id"],
@@ -188,8 +218,14 @@ class Claim:
     status: ClaimStatus = ClaimStatus.ACTIVE
 
     def is_expired(self) -> bool:
-        """Check if this claim has expired based on claimed_at + ttl_seconds."""
-        claimed = datetime.fromisoformat(self.claimed_at)
+        """Check if this claim has expired based on claimed_at + ttl_seconds.
+
+        ISO parse on every call; acceptable for < 100 claims per session.
+        """
+        try:
+            claimed = datetime.fromisoformat(self.claimed_at)
+        except (ValueError, TypeError):
+            return True  # treat corrupt timestamps as expired
         now = datetime.now(timezone.utc)
         elapsed = (now - claimed).total_seconds()
         return elapsed >= self.ttl_seconds

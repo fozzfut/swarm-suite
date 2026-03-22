@@ -1,5 +1,6 @@
 """MCP Server with 26 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
 
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -9,10 +10,13 @@ from .session_manager import SessionManager
 from .expert_profiler import ExpertProfiler
 from .orchestrator import Orchestrator
 from .report_generator import ReportGenerator
+from .logging_config import get_logger
 from .models import (
     Finding, Reaction, Severity, Category, Action, ReactionType, EventType,
     Message, MessageType, Status, now_iso,
 )
+
+_log = get_logger("server")
 
 
 @dataclass
@@ -25,6 +29,7 @@ class AppContext:
     message_limiter: RateLimiter = field(default_factory=RateLimiter)
     # Maps resource URI string -> set of MCP session objects (for push notifications)
     resource_subscriptions: dict[str, set] = field(default_factory=dict)
+    _subs_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def create_app_context(
@@ -37,6 +42,8 @@ def create_app_context(
     if config is None:
         config = Config.load()
     config.sessions_path.mkdir(parents=True, exist_ok=True)
+
+    _log.info("AppContext created, storage=%s", config.storage_path)
 
     custom_dirs = []
     if config.custom_experts_path.exists():
@@ -70,7 +77,11 @@ def tool_start_session(ctx: AppContext, project_path: str, name: str | None = No
 
 
 def tool_end_session(ctx: AppContext, session_id: str) -> dict:
-    return ctx.session_manager.end_session(session_id)
+    result = ctx.session_manager.end_session(session_id)
+    # Clean up rate limiter entries for this session
+    ctx.finding_limiter.reset_prefix(f"{session_id}:")
+    ctx.message_limiter.reset_prefix(f"{session_id}:")
+    return result
 
 
 def tool_get_session(ctx: AppContext, session_id: str) -> dict:
@@ -510,11 +521,13 @@ def tool_broadcast(
     from_agent: str,
     content: str,
 ) -> dict:
-    """Broadcast a message to all agents in the session."""
-    mbus = ctx.session_manager.get_message_bus(session_id)
-    mbus.register_agent(from_agent)
-    msg = mbus.send_broadcast(session_id, from_agent, content)
-    return msg.to_dict()
+    """Broadcast a message to all agents in the session.
+
+    Thin wrapper around tool_send_message with message_type='broadcast'.
+    """
+    return tool_send_message(
+        ctx, session_id, from_agent, "*", content, message_type="broadcast",
+    )
 
 
 # --- MCP Server wiring ---
@@ -542,18 +555,23 @@ async def _notify_resource_subscribers(
 ) -> None:
     """Notify all MCP subscribers that a resource has been updated."""
     uri_str = f"reviewswarm://sessions/{session_id}/{resource_type}"
-    sessions = app.resource_subscriptions.get(uri_str, set())
-    if not sessions:
+    with app._subs_lock:
+        sessions = app.resource_subscriptions.get(uri_str, set())
+        snapshot = list(sessions)
+    if not snapshot:
         return
 
     stale = set()
-    for mcp_session in sessions:
+    for mcp_session in snapshot:
         try:
             await mcp_session.send_resource_updated(uri_str)
         except Exception:
             stale.add(mcp_session)
-    for s in stale:
-        sessions.discard(s)
+    if stale:
+        with app._subs_lock:
+            live = app.resource_subscriptions.get(uri_str, set())
+            for s in stale:
+                live.discard(s)
 
 
 def create_mcp_server():
@@ -717,14 +735,13 @@ def create_mcp_server():
         _inject_pending(app, session_id, expert_role, result)
         return json.dumps(result)
 
-    @mcp.tool(name="get_findings", description="Get findings from the shared board. Supports pagination (limit/offset). Pass caller_role to get pending messages.")
+    @mcp.tool(name="get_findings", description="Get findings from the shared board. Supports pagination (limit/offset). Use get_inbox to check pending messages.")
     def _get_findings(
         session_id: str,
         file: str = "", severity: str = "", category: str = "",
         expert_role: str = "", status: str = "",
         min_confidence: float = 0.0,
         limit: int = 0, offset: int = 0,
-        caller_role: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         import json
@@ -737,11 +754,7 @@ def create_mcp_server():
             min_confidence=min_confidence if min_confidence > 0 else None,
             limit=limit, offset=offset,
         )
-        # Wrap list result with pending notifications
-        if caller_role:
-            wrapper = {"findings": result}
-            _inject_pending(app, session_id, caller_role, wrapper)
-            return json.dumps(wrapper)
+        # Always return array of findings
         return json.dumps(result)
 
     @mcp.tool(name="react", description="React to another expert's finding")
@@ -784,7 +797,7 @@ def create_mcp_server():
         return json.dumps(result)
 
     @mcp.tool(name="get_summary", description="Get aggregated summary report")
-    def _get_summary(session_id: str, format: str = "markdown", ctx: Optional[Context] = None) -> str:
+    def _get_summary(session_id: str, format: str = "", ctx: Optional[Context] = None) -> str:
         app = _get_app(ctx)
         return tool_get_summary(app, session_id, fmt=format or None)
 
@@ -1053,9 +1066,10 @@ def create_mcp_server():
                     request_ctx = low_level.request_context
                     session = request_ctx.session
                     app = request_ctx.lifespan_context
-                    if uri_str not in app.resource_subscriptions:
-                        app.resource_subscriptions[uri_str] = set()
-                    app.resource_subscriptions[uri_str].add(session)
+                    with app._subs_lock:
+                        if uri_str not in app.resource_subscriptions:
+                            app.resource_subscriptions[uri_str] = set()
+                        app.resource_subscriptions[uri_str].add(session)
                 except Exception:
                     pass
 
@@ -1066,8 +1080,9 @@ def create_mcp_server():
                     request_ctx = low_level.request_context
                     session = request_ctx.session
                     app = request_ctx.lifespan_context
-                    if uri_str in app.resource_subscriptions:
-                        app.resource_subscriptions[uri_str].discard(session)
+                    with app._subs_lock:
+                        if uri_str in app.resource_subscriptions:
+                            app.resource_subscriptions[uri_str].discard(session)
                 except Exception:
                     pass
     except Exception:
@@ -1076,11 +1091,11 @@ def create_mcp_server():
     return mcp
 
 
-def _resolve_agent_id(ctx, expert_role: str) -> str:
+def _resolve_agent_id(ctx: object, expert_role: str) -> str:
     """Auto-generate agent_id from MCP connection context + expert_role.
     Uses request_id as a stable per-connection identifier."""
     try:
-        rid = ctx.request_id or "unknown"
+        rid = getattr(ctx, "request_id", None) or "unknown"
         conn_id = str(rid)[:8]
     except Exception:
         conn_id = "unknown"

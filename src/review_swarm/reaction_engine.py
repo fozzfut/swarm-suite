@@ -7,7 +7,10 @@ import threading
 from pathlib import Path
 
 from .finding_store import FindingStore
+from .logging_config import get_logger
 from .models import Finding, Reaction, ReactionType, Status, now_iso
+
+_log = get_logger("reaction_engine")
 
 
 class ReactionEngine:
@@ -79,6 +82,11 @@ class ReactionEngine:
                     self._store.add_related(finding.id, reaction.related_finding_id)
                     self._store.add_related(reaction.related_finding_id, finding.id)
 
+            _log.info(
+                "Reaction %s on %s by %s: %s",
+                reaction.id, finding.id, reaction.expert_role, reaction.reaction.value,
+            )
+
             # 6. Recompute status
             self._recompute_status(finding)
 
@@ -116,4 +124,8 @@ class ReactionEngine:
             new_status = Status.OPEN
 
         if finding.status != new_status:
+            _log.info(
+                "Finding %s status %s → %s",
+                finding.id, finding.status.value, new_status.value,
+            )
             self._store.update_status(finding.id, new_status)

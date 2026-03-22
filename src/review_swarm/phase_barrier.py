@@ -10,10 +10,15 @@ Persisted to phases.json in the session directory.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from pathlib import Path
 
+from .logging_config import get_logger
 from .models import now_iso
+
+_log = get_logger("phase_barrier")
 
 
 class PhaseBarrier:
@@ -132,8 +137,23 @@ class PhaseBarrier:
                 str(k): v for k, v in self._phase_completions.items()
             },
         }
-        with open(self._path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+        except Exception:
+            os.close(tmp_fd)
+            os.unlink(tmp_path)
+            raise
+        try:
+            with fh:
+                json.dump(data, fh, indent=2)
+            os.replace(tmp_path, str(self._path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _load(self) -> None:
         if not self._path.exists():
@@ -147,5 +167,5 @@ class PhaseBarrier:
             self._phase_completions = {
                 int(k): v for k, v in data.get("phases", {}).items()
             }
-        except (json.JSONDecodeError, KeyError, ValueError):
-            pass  # start fresh on corrupt file
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            _log.warning("Corrupt phases file %s, starting fresh: %s", self._path, exc)

@@ -32,6 +32,8 @@ class Config:
     max_sessions: int = 50
     default_format: str = "markdown"
     session_timeout_hours: int = 24
+    max_events_per_session: int = 50_000
+    max_messages_per_session: int = 10_000
     consensus: ConsensusConfig = field(default_factory=ConsensusConfig)
     experts: ExpertsConfig = field(default_factory=ExpertsConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -60,9 +62,21 @@ class Config:
             raise ValueError(
                 f"Invalid config ({path}):\n" + "\n".join(f"  - {e}" for e in errors)
             )
-        consensus = ConsensusConfig(**data.get("consensus", {}))
-        experts = ExpertsConfig(**data.get("experts", {}))
-        rate_limit = RateLimitConfig(**data.get("rate_limit", {}))
+        consensus_data = data.get("consensus", {})
+        consensus = ConsensusConfig(
+            confirm_threshold=consensus_data.get("confirm_threshold", 2),
+            auto_close_duplicates=consensus_data.get("auto_close_duplicates", True),
+        )
+        experts_data = data.get("experts", {})
+        experts = ExpertsConfig(
+            custom_dir=experts_data.get("custom_dir", "~/.review-swarm/custom-experts"),
+            auto_suggest=experts_data.get("auto_suggest", True),
+        )
+        rate_limit_data = data.get("rate_limit", {})
+        rate_limit = RateLimitConfig(
+            max_findings_per_minute=rate_limit_data.get("max_findings_per_minute", 60),
+            max_messages_per_minute=rate_limit_data.get("max_messages_per_minute", 120),
+        )
         return cls(
             storage_dir=data.get("storage_dir", "~/.review-swarm"),
             max_sessions=data.get("max_sessions", 50),

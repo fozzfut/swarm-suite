@@ -6,6 +6,10 @@ import time
 import threading
 from collections import defaultdict
 
+from .logging_config import get_logger
+
+_log = get_logger("rate_limiter")
+
 
 class RateLimiter:
     """Per-agent sliding window rate limiter.
@@ -31,6 +35,10 @@ class RateLimiter:
             calls = self._calls[agent_key]
 
             if len(calls) >= self._max_calls:
+                _log.warning(
+                    "Rate limit exceeded for %s: %d/%d in %.0fs",
+                    agent_key, len(calls), self._max_calls, self._window,
+                )
                 raise ValueError(
                     f"Rate limit exceeded for {agent_key}: "
                     f"max {self._max_calls} calls per {self._window}s"
@@ -44,3 +52,10 @@ class RateLimiter:
                 self._calls.pop(agent_key, None)
             else:
                 self._calls.clear()
+
+    def reset_prefix(self, prefix: str) -> None:
+        """Remove all entries whose key starts with *prefix*."""
+        with self._lock:
+            keys = [k for k in self._calls if k.startswith(prefix)]
+            for k in keys:
+                del self._calls[k]

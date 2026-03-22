@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +41,10 @@ class SessionManager:
             session_id = f"sess-{today}-{seq:03d}"
 
             sess_dir = self._config.sessions_path / session_id
+            if sess_dir.exists():
+                # Fallback to UUID-based ID to avoid race collisions
+                session_id = f"sess-{today}-{uuid.uuid4().hex[:6]}"
+                sess_dir = self._config.sessions_path / session_id
             sess_dir.mkdir(parents=True, exist_ok=True)
 
             meta = {
@@ -59,6 +64,8 @@ class SessionManager:
             (sess_dir / "events.jsonl").write_text("", encoding="utf-8")
             (sess_dir / "messages.jsonl").write_text("", encoding="utf-8")
             (sess_dir / "phases.json").write_text("{}", encoding="utf-8")
+
+            _log.info("Session %s started for %s", session_id, project_path)
 
             # Auto-suggest experts if configured (spec requirement)
             if self._expert_profiler and self._config.experts.auto_suggest:
@@ -127,6 +134,11 @@ class SessionManager:
                 json.dumps(meta, indent=2), encoding="utf-8"
             )
 
+            _log.info("Session %s ended: %d findings", session_id, result["finding_count"])
+
+            # Flush any dirty findings to disk before clearing caches
+            store.flush_if_dirty()
+
             # Clear caches after all reads are done
             self._stores.pop(session_id, None)
             self._claims.pop(session_id, None)
@@ -160,7 +172,9 @@ class SessionManager:
             meta_file = sess_dir / "meta.json"
             if not meta_file.exists():
                 continue
-            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta = self._load_meta(sess_dir)
+            if meta.get("status") == "corrupt":
+                continue  # skip corrupt sessions
             # Auto-expire stale active sessions
             if meta.get("status") == "active":
                 self._auto_expire_if_stale(sess_dir, meta)
@@ -179,6 +193,7 @@ class SessionManager:
         from datetime import timedelta
         timeout = timedelta(hours=self._config.session_timeout_hours)
         if datetime.now(timezone.utc) - created_dt > timeout:
+            _log.info("Session %s expired (timeout)", meta.get("session_id", sess_dir.name))
             meta["status"] = "expired"
             meta["expired_at"] = now_iso()
             (sess_dir / "meta.json").write_text(
@@ -220,6 +235,7 @@ class SessionManager:
                 sess_dir = self._session_dir(session_id)
                 self._message_buses[session_id] = MessageBus(
                     session_id, sess_dir / "messages.jsonl",
+                    max_messages=self._config.max_messages_per_session,
                 )
             return self._message_buses[session_id]
 
@@ -238,6 +254,7 @@ class SessionManager:
                 sess_dir = self._session_dir(session_id)
                 self._event_buses[session_id] = SessionEventBus(
                     session_id, sess_dir / "events.jsonl",
+                    max_events=self._config.max_events_per_session,
                 )
             return self._event_buses[session_id]
 
@@ -273,7 +290,9 @@ class SessionManager:
             meta_file = sess_dir / "meta.json"
             if not meta_file.exists():
                 continue
-            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta = self._load_meta(sess_dir)
+            if meta.get("status") == "corrupt":
+                continue
             if meta.get("status") == "completed":
                 try:
                     shutil.rmtree(sess_dir)

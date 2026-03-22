@@ -159,6 +159,16 @@ class TestFindingStoreUpdateStatus:
         assert result is not None
         assert result.status == Status.CONFIRMED
 
+    def test_update_status_sets_dirty(self, tmp_path):
+        store = FindingStore(tmp_path / "findings.jsonl")
+        finding = _make_finding()
+        store.post(finding)
+        assert not store._dirty
+        store.update_status(finding.id, Status.CONFIRMED)
+        assert store._dirty
+        store.flush_if_dirty()
+        assert not store._dirty
+
 
 class TestFindingStoreLimit:
     def test_finding_limit(self, tmp_path):
@@ -257,8 +267,9 @@ class TestFindingStoreAtomicWrite:
         store.post(f1)
         store.post(f2)
 
-        # Trigger a flush via update_status (which calls _flush internally)
+        # Trigger a flush via update_status + flush_if_dirty
         store.update_status(f1.id, Status.CONFIRMED)
+        store.flush_if_dirty()
 
         # File must exist and contain valid JSONL
         assert jsonl_path.exists()
@@ -278,6 +289,7 @@ class TestFindingStoreAtomicWrite:
         store = FindingStore(jsonl_path)
         store.post(_make_finding())
         store.update_status(list(store._findings.keys())[0], Status.CONFIRMED)
+        store.flush_if_dirty()
 
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert tmp_files == [], f"Leftover temp files: {tmp_files}"
@@ -289,6 +301,7 @@ class TestFindingStoreAtomicWrite:
         f1 = _make_finding(title="Atomic test finding")
         store1.post(f1)
         store1.update_status(f1.id, Status.CONFIRMED)
+        store1.flush_if_dirty()
 
         # Reload from disk
         store2 = FindingStore(jsonl_path)
