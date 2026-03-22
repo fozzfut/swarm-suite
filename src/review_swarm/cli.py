@@ -342,12 +342,12 @@ def stats(session_id: str | None):
     else:
         # Aggregate across all sessions
         total_sessions = len(sessions)
-        by_status: Counter = Counter()
+        status_counts: Counter = Counter()
         for s in sessions:
-            by_status[s.get("status", "unknown")] += 1
+            status_counts[s.get("status", "unknown")] += 1
 
         click.echo(f"Total sessions: {total_sessions}")
-        for status, count in by_status.most_common():
+        for status, count in status_counts.most_common():
             click.echo(f"  {status}: {count}")
 
         active = [s for s in sessions if s.get("status") == "active"]

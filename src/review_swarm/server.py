@@ -586,8 +586,7 @@ def create_mcp_server():
         task: str = "",
         max_experts: int = 5,
         session_name: str = "",
-        # ctx default is None per FastMCP convention; framework injects the real value
-        ctx: Context = None,  # type: ignore[assignment]
+        ctx: Context = None,
     ) -> str:
         import json
         app = ctx.request_context.lifespan_context
