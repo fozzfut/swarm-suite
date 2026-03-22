@@ -52,7 +52,7 @@ class FindingStore:
             self._findings[finding.id] = finding
             self._by_file.setdefault(finding.file, []).append(finding.id)
             self._append(finding)
-            self._dirty = False
+            # Do NOT reset _dirty — there may be pending mutations from other findings
             _log.debug("Finding %s posted to %s", finding.id, self._path)
             return finding.id
 

@@ -207,7 +207,11 @@ class Orchestrator:
                 continue
             if f.suffix not in _SOURCE_EXTS:
                 continue
-            if any(part in _SKIP_DIRS for part in f.parts):
+            try:
+                rel_parts = f.relative_to(proj).parts
+            except ValueError:
+                continue
+            if any(part in _SKIP_DIRS for part in rel_parts):
                 continue
             try:
                 rel = str(f.relative_to(proj)).replace("\\", "/")

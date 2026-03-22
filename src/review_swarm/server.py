@@ -314,6 +314,7 @@ def tool_mark_fixed(
         })
     updated = store.get_by_id(finding_id)
     result = updated.to_dict() if updated else {"id": finding_id, "status": "fixed"}
+    store.flush_if_dirty()
     try:
         bus = ctx.session_manager.get_event_bus(session_id)
         bus.publish_sync(EventType.STATUS_CHANGED, {
@@ -357,6 +358,7 @@ def tool_bulk_update_status(
             updated += 1
         except KeyError:
             errors.append(fid)
+    store.flush_if_dirty()
     return {
         "updated": updated,
         "errors": errors,

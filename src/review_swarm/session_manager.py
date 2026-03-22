@@ -261,10 +261,15 @@ class SessionManager:
     def get_project_path(self, session_id: str) -> str:
         sess_dir = self._session_dir(session_id)
         meta = self._load_meta(sess_dir)
-        return meta["project_path"]
+        path = meta.get("project_path", "")
+        if not path:
+            raise KeyError(f"Session {session_id} has no project_path (corrupt metadata)")
+        return path
 
     def _session_dir(self, session_id: str) -> Path:
         d = self._config.sessions_path / session_id
+        if not d.resolve().is_relative_to(self._config.sessions_path.resolve()):
+            raise KeyError(f"Invalid session ID: {session_id}")
         if not d.exists():
             raise KeyError(f"Session {session_id} not found")
         return d

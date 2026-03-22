@@ -58,7 +58,11 @@ class ExpertProfiler:
         }
         for ext in source_exts:
             for f in proj.rglob(ext):
-                if any(part in skip_dirs for part in f.parts):
+                try:
+                    rel_parts = f.relative_to(proj).parts
+                except ValueError:
+                    continue
+                if any(part in skip_dirs for part in rel_parts):
                     continue
                 try:
                     file_contents[str(f.relative_to(proj))] = f.read_text(
