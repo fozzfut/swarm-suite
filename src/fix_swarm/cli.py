@@ -10,7 +10,7 @@ import click
 
 from . import __version__
 from .fix_applier import apply_plan, verify_fixes
-from .fix_planner import OverlapError, build_plan
+from .fix_planner import build_plan
 from .models import FixPlan, Severity
 from .report_parser import parse_report
 
@@ -22,6 +22,26 @@ SEVERITY_NAMES = [s.value for s in Severity]
 @click.version_option(__version__, prog_name="fix-swarm")
 def main() -> None:
     """FixSwarm -- Multi-agent code fixer for ReviewSwarm reports."""
+
+
+@main.command()
+@click.option("--port", default=8791, help="Port for SSE transport")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--transport", default="sse", type=click.Choice(["sse", "stdio"]))
+def serve(port: int, host: str, transport: str) -> None:
+    """Start the FixSwarm MCP server."""
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    )
+    from .server import create_mcp_server
+
+    mcp = create_mcp_server()
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport="sse", host=host, port=port)
 
 
 @main.command()
@@ -49,11 +69,7 @@ def plan(report: str, threshold: str, dry_run: bool, base_dir: str) -> None:
 
     click.echo(f"Parsed {len(findings)} finding(s) at severity >= {sev.value}\n")
 
-    try:
-        fix_plan = build_plan(findings, base_dir=base_dir)
-    except OverlapError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
+    fix_plan = build_plan(findings, base_dir=base_dir)
 
     if not fix_plan.actions:
         click.echo("No actionable fixes (only 'fix' suggestions generate actions).")
@@ -103,11 +119,7 @@ def apply(report: str, threshold: str, backup: bool, base_dir: str) -> None:
         click.echo("No findings matched the severity threshold.")
         return
 
-    try:
-        fix_plan = build_plan(findings, base_dir=base_dir)
-    except OverlapError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
+    fix_plan = build_plan(findings, base_dir=base_dir)
 
     if not fix_plan.actions:
         click.echo("No actionable fixes to apply.")
@@ -150,11 +162,7 @@ def verify(report: str, threshold: str, base_dir: str) -> None:
         click.echo("No findings matched the severity threshold.")
         return
 
-    try:
-        fix_plan = build_plan(findings, base_dir=base_dir)
-    except OverlapError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
+    fix_plan = build_plan(findings, base_dir=base_dir)
 
     if not fix_plan.actions:
         click.echo("No actionable fixes to verify.")

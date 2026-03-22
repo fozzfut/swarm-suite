@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from fix_swarm.fix_planner import OverlapError, build_plan
+from fix_swarm.fix_planner import build_plan
 from fix_swarm.models import FixActionType, Severity
 from fix_swarm.report_parser import ParsedFinding, parse_report
 
@@ -72,7 +72,7 @@ class TestBuildPlan:
         plan = build_plan(findings, base_dir=tmp_path)
         assert len(plan.actions) == 0
 
-    def test_overlap_detection(self, tmp_path: Path) -> None:
+    def test_overlap_deduplication(self, tmp_path: Path) -> None:
         src = tmp_path / "overlap.py"
         src.write_text("line1\nline2\nline3\nline4\n", encoding="utf-8")
         findings = [
@@ -103,8 +103,10 @@ class TestBuildPlan:
                 suggestion_detail="replaced B\n",
             ),
         ]
-        with pytest.raises(OverlapError):
-            build_plan(findings, base_dir=tmp_path)
+        plan = build_plan(findings, base_dir=tmp_path)
+        # Overlapping findings are deduplicated -- keep first, drop duplicate
+        assert len(plan.actions) == 1
+        assert plan.actions[0].finding_id == "f-ov1"
 
     def test_non_overlapping_same_file(self, tmp_path: Path) -> None:
         src = tmp_path / "multi.py"

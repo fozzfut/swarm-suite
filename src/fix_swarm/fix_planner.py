@@ -8,10 +8,6 @@ from .models import FixAction, FixActionType, FixPlan
 from .report_parser import ParsedFinding
 
 
-class OverlapError(Exception):
-    """Raised when two fix actions overlap in the same file."""
-
-
 def build_plan(
     findings: list[ParsedFinding],
     base_dir: str | Path = ".",
@@ -84,23 +80,32 @@ def build_plan(
         ))
 
     plan = FixPlan(actions=actions)
-    _validate_no_overlaps(plan)
-    return plan
+    return _deduplicate_overlaps(plan)
 
 
-def _validate_no_overlaps(plan: FixPlan) -> None:
-    """Raise OverlapError if any two actions in the same file have overlapping line ranges."""
+def _deduplicate_overlaps(plan: FixPlan) -> FixPlan:
+    """Deduplicate actions that overlap on the same file+line range.
+
+    When multiple ReviewSwarm experts report the same bug on the same lines,
+    keep the first (highest-priority) action and drop duplicates.
+    """
+    deduped: list[FixAction] = []
+
     for file_path in plan.files():
         file_actions = sorted(
             [a for a in plan.actions if a.file == file_path],
             key=lambda a: a.line_start,
         )
-        for i in range(len(file_actions) - 1):
-            current = file_actions[i]
-            nxt = file_actions[i + 1]
-            if current.line_end >= nxt.line_start:
-                raise OverlapError(
-                    f"Overlapping fixes in {file_path}: "
-                    f"{current.finding_id} (L{current.line_start}-{current.line_end}) "
-                    f"and {nxt.finding_id} (L{nxt.line_start}-{nxt.line_end})"
-                )
+        if not file_actions:
+            continue
+
+        kept = file_actions[0]
+        for nxt in file_actions[1:]:
+            if kept.line_end >= nxt.line_start:
+                # Overlap — skip the duplicate, keep the first
+                continue
+            deduped.append(kept)
+            kept = nxt
+        deduped.append(kept)
+
+    return FixPlan(actions=deduped)
