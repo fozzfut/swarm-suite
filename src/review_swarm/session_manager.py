@@ -280,10 +280,11 @@ class SessionManager:
         if not self._config.sessions_path.exists():
             return
         all_dirs = sorted(self._config.sessions_path.iterdir())
-        if len(all_dirs) <= self._config.max_sessions:
+        excess = len(all_dirs) - self._config.max_sessions
+        if excess <= 0:
             return
         for sess_dir in all_dirs:
-            if len(list(self._config.sessions_path.iterdir())) <= self._config.max_sessions:
+            if excess <= 0:
                 break
             if not sess_dir.is_dir():
                 continue
@@ -305,3 +306,4 @@ class SessionManager:
                 self._event_buses.pop(sid, None)
                 self._message_buses.pop(sid, None)
                 self._phase_barriers.pop(sid, None)
+                excess -= 1

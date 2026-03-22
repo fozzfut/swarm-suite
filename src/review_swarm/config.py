@@ -110,6 +110,10 @@ class Config:
                     t = c["confirm_threshold"]
                     if not isinstance(t, int) or t < 1:
                         errors.append(f"consensus.confirm_threshold must be >= 1, got {t!r}")
+        if "session_timeout_hours" in data:
+            v = data["session_timeout_hours"]
+            if not isinstance(v, (int, float)) or v < 1:
+                errors.append(f"session_timeout_hours must be >= 1, got {v!r}")
         return errors
 
     def to_yaml(self) -> str:

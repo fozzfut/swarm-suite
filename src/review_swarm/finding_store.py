@@ -99,13 +99,13 @@ class FindingStore:
         if limit > 0:
             results = results[:limit]
 
-        return [copy.copy(f) for f in results]
+        return [copy.deepcopy(f) for f in results]
 
     def get_by_id(self, finding_id: str) -> Finding | None:
         """Return a finding by its ID, or None if not found."""
         with self._lock:
             f = self._findings.get(finding_id)
-            return copy.copy(f) if f is not None else None
+            return copy.deepcopy(f) if f is not None else None
 
     def count(self) -> int:
         """Return total number of findings."""

@@ -68,6 +68,9 @@ class MessageBus:
             self._messages_by_id[message.id] = message
             if len(self._messages) > self._max_messages:
                 self._messages = self._messages[-self._max_messages:]
+                # Rebuild index after trim
+                self._messages_by_id = {m.id: m for m in self._messages}
+                self._rebuild_inboxes()
             self._append_to_disk(message)
             _log.debug(
                 "Message %s: %s → %s (%s)",

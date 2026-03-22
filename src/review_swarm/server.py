@@ -322,7 +322,7 @@ def tool_mark_fixed(
             "new_status": "fixed",
             "fix_ref": fix_ref,
         })
-    except (KeyError, Exception):
+    except KeyError:
         pass
     return result
 
