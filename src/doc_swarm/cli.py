@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import traceback
 from pathlib import Path
 
 import click
 
 from . import __version__
+
+_log = logging.getLogger("doc_swarm.cli")
 
 
 @click.group()
@@ -83,8 +87,11 @@ def generate(project_path: str, scope: str, output: str, verify_only: bool):
         project_name = project.name
         index_page = gen.generate_index(pages)
         home_page = gen.generate_home(pages, project_name)
+        documented_sources = set()
+        for p in pages:
+            documented_sources.update(p.source_files)
         coverage_page = gen.generate_coverage_report(
-            modules, [p.path for p in pages],
+            modules, documented_sources,
         )
 
         session.add_page(index_page)
@@ -101,6 +108,7 @@ def generate(project_path: str, scope: str, output: str, verify_only: bool):
         click.echo(f"\nSession: {session.session_id}")
         click.echo("Done.")
     except Exception as exc:
+        _log.error("Command failed: %s", exc, exc_info=True)
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
 
@@ -132,6 +140,7 @@ def scan(project_path: str, scope: str):
             for func in pub_funcs:
                 click.echo(f"    def {func.get('name', '?')}()")
     except Exception as exc:
+        _log.error("Command failed: %s", exc, exc_info=True)
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
 
@@ -180,6 +189,7 @@ def verify(project_path: str, docs: str, scope: str):
                 if issue.file:
                     click.echo(f"      doc: {issue.file}")
     except Exception as exc:
+        _log.error("Command failed: %s", exc, exc_info=True)
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1)
 

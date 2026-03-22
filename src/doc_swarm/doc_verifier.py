@@ -161,19 +161,13 @@ class DocVerifier:
 
     def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
         """Parse YAML frontmatter from markdown text."""
-        if not text.startswith("---"):
+        match = re.match(r'\A---\s*\n(.*?)\n---\s*\n(.*)', text, re.DOTALL)
+        if not match:
             return {}, text
-
-        parts = text.split("---", 2)
-        if len(parts) < 3:
-            return {}, text
-
         try:
-            fm = yaml.safe_load(parts[1]) or {}
+            fm = yaml.safe_load(match.group(1)) or {}
             if not isinstance(fm, dict):
                 fm = {}
         except yaml.YAMLError:
             fm = {}
-
-        body = parts[2]
-        return fm, body
+        return fm, match.group(2)

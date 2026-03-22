@@ -75,6 +75,6 @@ class TestDocGenerator:
         modules = analyzer.scan("src/")
         gen = DocGenerator()
 
-        # Pretend we have docs for core
-        coverage = gen.generate_coverage_report(modules, ["api/core.md"])
+        # Pass actual source file path instead of doc path
+        coverage = gen.generate_coverage_report(modules, {"src/mylib/core.py"})
         assert "Documented" in coverage.content

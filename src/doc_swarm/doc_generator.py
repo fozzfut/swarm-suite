@@ -156,27 +156,23 @@ class DocGenerator:
     def generate_coverage_report(
         self,
         modules: dict[str, ModuleInfo],
-        existing_docs: list[str],
+        documented_source_files: set[str] | list[str],
     ) -> DocPage:
         """Generate a COVERAGE.md showing what's documented and what's not."""
         lines = ["# Documentation Coverage\n"]
 
-        documented = set()
-        for doc_path in existing_docs:
-            stem = Path(doc_path).stem
-            documented.add(stem)
+        documented = set(documented_source_files)
 
         covered = []
         missing = []
         for mod_path, info in sorted(modules.items()):
-            stem = Path(mod_path).stem
             has_public = (
                 any(c.get("is_public") for c in info.get("classes", []))
                 or any(f.get("is_public") for f in info.get("functions", []))
             )
             if not has_public:
                 continue
-            if stem in documented:
+            if mod_path in documented:
                 covered.append(mod_path)
             else:
                 missing.append(mod_path)

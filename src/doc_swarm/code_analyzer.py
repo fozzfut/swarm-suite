@@ -10,6 +10,8 @@ from .models import ClassInfo, FunctionInfo, ModuleInfo
 
 _log = logging.getLogger("doc_swarm.code_analyzer")
 
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
 _SKIP_DIRS = {
     "node_modules", ".venv", "__pycache__", ".git",
     "target", "build", "dist", "vendor", "bin", "obj",
@@ -55,6 +57,10 @@ class CodeAnalyzer:
                 continue
 
             rel = str(f.relative_to(self._root)).replace("\\", "/")
+
+            if f.stat().st_size > MAX_FILE_SIZE:
+                _log.warning("Skipping %s: file too large (%d bytes)", rel, f.stat().st_size)
+                continue
 
             if f.suffix == ".py":
                 try:
