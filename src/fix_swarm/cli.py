@@ -1,0 +1,181 @@
+"""CLI entry point for FixSwarm."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import click
+
+from . import __version__
+from .fix_applier import apply_plan, verify_fixes
+from .fix_planner import OverlapError, build_plan
+from .models import FixPlan, Severity
+from .report_parser import parse_report
+
+
+SEVERITY_NAMES = [s.value for s in Severity]
+
+
+@click.group()
+@click.version_option(__version__, prog_name="fix-swarm")
+def main() -> None:
+    """FixSwarm -- Multi-agent code fixer for ReviewSwarm reports."""
+
+
+@main.command()
+@click.argument("report", type=click.Path(exists=True))
+@click.option(
+    "--threshold",
+    type=click.Choice(SEVERITY_NAMES, case_sensitive=False),
+    default="medium",
+    help="Minimum severity to include (default: medium).",
+)
+@click.option("--dry-run", is_flag=True, help="Show plan without applying fixes.")
+@click.option(
+    "--base-dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=".",
+    help="Base directory for resolving file paths in findings.",
+)
+def plan(report: str, threshold: str, dry_run: bool, base_dir: str) -> None:
+    """Parse a ReviewSwarm report and display the fix plan."""
+    sev = Severity(threshold.lower())
+    findings = parse_report(report, threshold=sev)
+    if not findings:
+        click.echo("No findings matched the severity threshold.")
+        return
+
+    click.echo(f"Parsed {len(findings)} finding(s) at severity >= {sev.value}\n")
+
+    try:
+        fix_plan = build_plan(findings, base_dir=base_dir)
+    except OverlapError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if not fix_plan.actions:
+        click.echo("No actionable fixes (only 'fix' suggestions generate actions).")
+        return
+
+    click.echo(f"Fix plan: {len(fix_plan.actions)} action(s) across {len(fix_plan.files())} file(s)\n")
+    for action in fix_plan.actions:
+        click.echo(f"  [{action.action.value.upper()}] {action.file}:{action.line_start}-{action.line_end}")
+        click.echo(f"    Finding: {action.finding_id}")
+        click.echo(f"    Rationale: {action.rationale}")
+        if action.action.value == "replace":
+            click.echo(f"    Old: {_truncate(action.old_text)}")
+            click.echo(f"    New: {_truncate(action.new_text)}")
+        elif action.action.value == "insert":
+            click.echo(f"    Insert: {_truncate(action.new_text)}")
+        click.echo()
+
+    if dry_run:
+        click.echo("(dry-run -- no files modified)")
+        # Also compute diffs for display
+        results = apply_plan(fix_plan, base_dir=base_dir, dry_run=True)
+        for r in results:
+            if r.diff:
+                click.echo(r.diff)
+
+
+@main.command()
+@click.argument("report", type=click.Path(exists=True))
+@click.option(
+    "--threshold",
+    type=click.Choice(SEVERITY_NAMES, case_sensitive=False),
+    default="medium",
+    help="Minimum severity to include (default: medium).",
+)
+@click.option("--backup", is_flag=True, help="Create .bak backup before modifying files.")
+@click.option(
+    "--base-dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=".",
+    help="Base directory for resolving file paths in findings.",
+)
+def apply(report: str, threshold: str, backup: bool, base_dir: str) -> None:
+    """Parse a ReviewSwarm report and apply fixes to source files."""
+    sev = Severity(threshold.lower())
+    findings = parse_report(report, threshold=sev)
+    if not findings:
+        click.echo("No findings matched the severity threshold.")
+        return
+
+    try:
+        fix_plan = build_plan(findings, base_dir=base_dir)
+    except OverlapError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if not fix_plan.actions:
+        click.echo("No actionable fixes to apply.")
+        return
+
+    click.echo(f"Applying {len(fix_plan.actions)} fix(es) across {len(fix_plan.files())} file(s)...")
+    results = apply_plan(fix_plan, base_dir=base_dir, backup=backup)
+
+    ok = sum(1 for r in results if r.success)
+    fail = sum(1 for r in results if not r.success)
+    click.echo(f"\nDone: {ok} succeeded, {fail} failed.")
+
+    for r in results:
+        status = "OK" if r.success else "FAIL"
+        click.echo(f"  [{status}] {r.finding_id}" + (f"  -- {r.error}" if r.error else ""))
+
+    if fail:
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("report", type=click.Path(exists=True))
+@click.option(
+    "--threshold",
+    type=click.Choice(SEVERITY_NAMES, case_sensitive=False),
+    default="medium",
+    help="Minimum severity to include (default: medium).",
+)
+@click.option(
+    "--base-dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=".",
+    help="Base directory for resolving file paths in findings.",
+)
+def verify(report: str, threshold: str, base_dir: str) -> None:
+    """Check whether fixes from a report have been applied correctly."""
+    sev = Severity(threshold.lower())
+    findings = parse_report(report, threshold=sev)
+    if not findings:
+        click.echo("No findings matched the severity threshold.")
+        return
+
+    try:
+        fix_plan = build_plan(findings, base_dir=base_dir)
+    except OverlapError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if not fix_plan.actions:
+        click.echo("No actionable fixes to verify.")
+        return
+
+    results = verify_fixes(fix_plan, base_dir=base_dir)
+    ok = sum(1 for r in results if r.success)
+    fail = sum(1 for r in results if not r.success)
+    click.echo(f"Verification: {ok} passed, {fail} failed out of {len(results)} fix(es).")
+
+    for r in results:
+        status = "PASS" if r.success else "FAIL"
+        click.echo(f"  [{status}] {r.finding_id}" + (f"  -- {r.error}" if r.error else ""))
+
+    if fail:
+        sys.exit(1)
+
+
+def _truncate(text: str, max_len: int = 80) -> str:
+    """Truncate text for display, replacing newlines with spaces."""
+    flat = text.replace("\n", " ").strip()
+    if len(flat) > max_len:
+        return flat[: max_len - 3] + "..."
+    return flat
