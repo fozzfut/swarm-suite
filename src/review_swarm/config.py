@@ -8,6 +8,29 @@ from pathlib import Path
 import yaml
 
 
+def _resolve_storage_dir() -> str:
+    """Resolve storage dir: prefer ~/.swarm-kb/review, fallback to ~/.review-swarm."""
+    swarm_kb = Path("~/.swarm-kb/review").expanduser()
+    legacy = Path("~/.review-swarm").expanduser()
+    if swarm_kb.exists():
+        return str(swarm_kb)
+    if legacy.exists():
+        return str(legacy)
+    # Default to new path
+    return str(swarm_kb)
+
+
+def _resolve_experts_dir() -> str:
+    """Resolve experts dir: prefer ~/.swarm-kb/review/custom-experts, fallback to legacy."""
+    swarm_kb = Path("~/.swarm-kb/review/custom-experts").expanduser()
+    legacy = Path("~/.review-swarm/custom-experts").expanduser()
+    if swarm_kb.exists():
+        return str(swarm_kb)
+    if legacy.exists():
+        return str(legacy)
+    return str(swarm_kb)
+
+
 @dataclass
 class ConsensusConfig:
     confirm_threshold: int = 2
@@ -16,7 +39,7 @@ class ConsensusConfig:
 
 @dataclass
 class ExpertsConfig:
-    custom_dir: str = "~/.review-swarm/custom-experts"
+    custom_dir: str = field(default_factory=_resolve_experts_dir)
     auto_suggest: bool = True
 
 
@@ -28,7 +51,7 @@ class RateLimitConfig:
 
 @dataclass
 class Config:
-    storage_dir: str | Path = "~/.review-swarm"
+    storage_dir: str | Path = field(default_factory=_resolve_storage_dir)
     max_sessions: int = 50
     default_format: str = "markdown"
     session_timeout_hours: int = 24
@@ -52,11 +75,22 @@ class Config:
 
     @classmethod
     def load(cls, path: Path | None = None) -> Config:
+        # Try swarm-kb config first, then legacy
         if path is None:
-            path = Path("~/.review-swarm/config.yaml").expanduser()
+            swarm_kb_cfg = Path("~/.swarm-kb/config.yaml").expanduser()
+            legacy_cfg = Path("~/.review-swarm/config.yaml").expanduser()
+            if swarm_kb_cfg.exists():
+                path = swarm_kb_cfg
+            elif legacy_cfg.exists():
+                path = legacy_cfg
+            else:
+                return cls()
         if not path.exists():
             return cls()
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        # If loaded from swarm-kb config, look for review-specific section
+        if "review" in data and isinstance(data["review"], dict):
+            data = {**data["review"], **{k: v for k, v in data.items() if k != "review"}}
         errors = cls._validate(data)
         if errors:
             raise ValueError(
@@ -67,9 +101,10 @@ class Config:
             confirm_threshold=consensus_data.get("confirm_threshold", 2),
             auto_close_duplicates=consensus_data.get("auto_close_duplicates", True),
         )
+        default_experts_dir = _resolve_experts_dir()
         experts_data = data.get("experts", {})
         experts = ExpertsConfig(
-            custom_dir=experts_data.get("custom_dir", "~/.review-swarm/custom-experts"),
+            custom_dir=experts_data.get("custom_dir", default_experts_dir),
             auto_suggest=experts_data.get("auto_suggest", True),
         )
         rate_limit_data = data.get("rate_limit", {})
@@ -77,8 +112,9 @@ class Config:
             max_findings_per_minute=rate_limit_data.get("max_findings_per_minute", 60),
             max_messages_per_minute=rate_limit_data.get("max_messages_per_minute", 120),
         )
+        default_storage = _resolve_storage_dir()
         return cls(
-            storage_dir=data.get("storage_dir", "~/.review-swarm"),
+            storage_dir=data.get("storage_dir", default_storage),
             max_sessions=data.get("max_sessions", 50),
             default_format=data.get("default_format", "markdown"),
             session_timeout_hours=data.get("session_timeout_hours", 24),
