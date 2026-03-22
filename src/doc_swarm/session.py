@@ -11,7 +11,19 @@ from pathlib import Path
 
 from .models import DocIssue, DocPage, now_iso
 
-_STORAGE_DIR = Path("~/.doc-swarm").expanduser()
+
+def _resolve_storage_dir() -> Path:
+    """Prefer ~/.swarm-kb/doc, fallback to ~/.doc-swarm."""
+    swarm_kb = Path("~/.swarm-kb/doc").expanduser()
+    legacy = Path("~/.doc-swarm").expanduser()
+    if swarm_kb.exists():
+        return swarm_kb
+    if legacy.exists():
+        return legacy
+    return swarm_kb
+
+
+_STORAGE_DIR = _resolve_storage_dir()
 _log = logging.getLogger("doc_swarm.session")
 
 

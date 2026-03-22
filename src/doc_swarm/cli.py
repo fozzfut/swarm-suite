@@ -21,6 +21,25 @@ def main():
 
 
 @main.command()
+@click.option("--port", default=8789, help="Port for SSE transport")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--transport", default="sse", type=click.Choice(["sse", "stdio"]))
+def serve(port: int, host: str, transport: str):
+    """Start the DocSwarm MCP server."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    )
+    from .server import create_mcp_server
+
+    mcp = create_mcp_server()
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport="sse", host=host, port=port)
+
+
+@main.command()
 @click.argument("project_path", default=".")
 @click.option("--scope", default="", help="Subdirectory to scan (e.g., src/)")
 @click.option("--output", "-o", default="docs", help="Output directory for generated docs")
