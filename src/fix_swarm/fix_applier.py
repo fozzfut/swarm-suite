@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import difflib
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from .models import FixAction, FixActionType, FixPlan, FixResult
@@ -40,7 +42,16 @@ def apply_plan(
                 ))
             continue
 
-        original_text = source.read_text(encoding="utf-8")
+        try:
+            original_text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            for action in plan.actions_for_file(file_path):
+                results.append(FixResult(
+                    finding_id=action.finding_id,
+                    success=False,
+                    error=str(exc),
+                ))
+            continue
         lines = original_text.splitlines(keepends=True)
 
         if backup and not dry_run:
@@ -49,9 +60,27 @@ def apply_plan(
         # Actions are returned in descending line order, so applying
         # from the bottom up keeps earlier line numbers valid.
         actions = plan.actions_for_file(file_path)
+        original_lines = list(lines)  # snapshot for rollback
+        file_failed = False
         for action in actions:
             result = _apply_action(action, lines)
+            if not result.success:
+                # Rollback all changes for this file
+                lines = original_lines
+                results.append(result)
+                # Mark remaining actions as failed too
+                idx = actions.index(action)
+                for remaining in actions[idx + 1:]:
+                    results.append(FixResult(
+                        finding_id=remaining.finding_id,
+                        success=False,
+                        error="Skipped due to earlier failure in same file",
+                    ))
+                file_failed = True
+                break
             results.append(result)
+        if file_failed:
+            continue
 
         new_text = "".join(lines)
         # Compute unified diff for the whole file
@@ -68,7 +97,25 @@ def apply_plan(
                 break
 
         if not dry_run:
-            source.write_text(new_text, encoding="utf-8")
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=str(source.parent), suffix=".tmp",
+            )
+            try:
+                fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+            except Exception:
+                os.close(tmp_fd)
+                os.unlink(tmp_path)
+                raise
+            try:
+                with fh:
+                    fh.write(new_text)
+                os.replace(tmp_path, str(source))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
     return results
 
@@ -147,10 +194,14 @@ def verify_fixes(
             continue
 
         content = source.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        start = max(0, action.line_start - 1 - 5)
+        end = min(len(lines), action.line_end + 5)
+        window = "\n".join(lines[start:end])
 
         if action.action == FixActionType.DELETE:
-            # old_text should be gone
-            if action.old_text.strip() and action.old_text.strip() in content:
+            # old_text should be gone from the window
+            if action.old_text.strip() and action.old_text.strip() in window:
                 results.append(FixResult(
                     finding_id=action.finding_id,
                     success=False,
@@ -161,9 +212,9 @@ def verify_fixes(
                     finding_id=action.finding_id, success=True,
                 ))
         else:
-            # new_text should be present
+            # new_text should be present in the window
             check_text = action.new_text.strip()
-            if check_text and check_text in content:
+            if check_text and check_text in window:
                 results.append(FixResult(
                     finding_id=action.finding_id, success=True,
                 ))

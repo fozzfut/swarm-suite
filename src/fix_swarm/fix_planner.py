@@ -36,7 +36,11 @@ def build_plan(
         if not source_path.is_file():
             continue
 
-        lines = source_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        try:
+            text = source_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        lines = text.splitlines(keepends=True)
 
         # Clamp line range to file bounds (1-indexed in findings)
         start = max(1, finding.line_start)
@@ -47,9 +51,9 @@ def build_plan(
         old_text = "".join(lines[start - 1 : end])
 
         # Build the new_text from the suggestion_detail.
-        # If suggestion_detail is non-empty, use it as the replacement text.
-        # Otherwise, fall back to the expected field.
-        new_text = finding.suggestion_detail or finding.expected or ""
+        # Only concrete code from suggestion_detail is safe to use;
+        # finding.expected is natural language and must not be injected.
+        new_text = finding.suggestion_detail or ""
 
         if not new_text:
             # Nothing concrete to replace with -- skip.
