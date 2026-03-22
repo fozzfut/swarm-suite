@@ -18,8 +18,19 @@ from arch_swarm.models import (
     Verdict,
 )
 
-# Directory for persisting session transcripts
-_SESSION_DIR = Path(os.environ.get("ARCHSWARM_SESSIONS", ".archswarm_sessions"))
+def _resolve_session_dir() -> Path:
+    """Prefer ~/.swarm-kb/arch/sessions, fallback to env or local."""
+    swarm_kb = Path("~/.swarm-kb/arch/sessions").expanduser()
+    if swarm_kb.exists():
+        return swarm_kb
+    env_dir = os.environ.get("ARCHSWARM_SESSIONS")
+    if env_dir:
+        return Path(env_dir)
+    # Default to swarm-kb path
+    return swarm_kb
+
+
+_SESSION_DIR = _resolve_session_dir()
 
 
 def _ensure_session_dir() -> Path:
@@ -31,6 +42,26 @@ def _ensure_session_dir() -> Path:
 @click.version_option(package_name="arch-swarm-ai")
 def main() -> None:
     """ArchSwarm -- multi-agent architecture brainstorming."""
+
+
+@main.command()
+@click.option("--port", default=8790, help="Port for SSE transport")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--transport", default="sse", type=click.Choice(["sse", "stdio"]))
+def serve(port: int, host: str, transport: str) -> None:
+    """Start the ArchSwarm MCP server."""
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    )
+    from .server import create_mcp_server
+
+    mcp = create_mcp_server()
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport="sse", host=host, port=port)
 
 
 # -----------------------------------------------------------------------
