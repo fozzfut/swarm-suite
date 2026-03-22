@@ -5,7 +5,7 @@ description = "Collaborative AI code review MCP server -- shared whiteboard for 
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "fozzfut" },
+    { name = "Ilya Sidorov" },
 ]
 readme = "README.md"
 keywords = ["mcp", "code-review", "ai", "agents", "collaborative", "llm"]
