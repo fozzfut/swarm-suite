@@ -1,6 +1,6 @@
 [project]
 name = "review-swarm"
-version = "0.3.7"
+version = "0.3.8"
 description = "Collaborative AI code review MCP server -- shared whiteboard for multi-agent code review via MCP"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -23,7 +23,7 @@ dependencies = [
     "mcp>=1.6,<2",
     "click>=8.0,<9",
     "pyyaml>=6.0,<8",
-    "swarm-kb>=0.1.1",
+    "swarm-kb>=0.2.0",
 ]
 
 [project.urls]

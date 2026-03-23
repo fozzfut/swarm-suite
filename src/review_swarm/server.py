@@ -1,4 +1,4 @@
-"""MCP Server with 26 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
+"""MCP Server with 28 tool handlers, MCP Resources, subscriptions, event bus, and agent messaging."""
 
 import threading
 from dataclasses import dataclass, field
@@ -532,6 +532,175 @@ def tool_broadcast(
     )
 
 
+# --- Architectural Decision Awareness ---
+
+def _load_accepted_decisions() -> list | None:
+    """Load accepted decisions from swarm-kb. Returns None if unavailable."""
+    try:
+        from swarm_kb.decision_store import DecisionStore
+        from swarm_kb.config import SuiteConfig
+        config = SuiteConfig.load()
+        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        return store.query(status="accepted")
+    except (ImportError, Exception):
+        return None
+
+
+def _load_recent_debates() -> list | None:
+    """Load recent resolved debates from swarm-kb. Returns None if unavailable."""
+    try:
+        from swarm_kb.debate_store import DebateStore
+        from swarm_kb.config import SuiteConfig
+        config = SuiteConfig.load()
+        store = DebateStore(config.debates_path / "debates.jsonl")
+        return store.query(status="resolved")
+    except (ImportError, Exception):
+        return None
+
+
+def _decision_matches_finding(decision: object, finding_dict: dict) -> tuple[bool, str]:
+    """Check if a decision is related to a finding. Returns (match, risk_level)."""
+    # Extract decision attributes safely
+    d_tags = set(getattr(decision, "tags", []) or [])
+    d_files = set(getattr(decision, "files", []) or [])
+    d_categories = set(getattr(decision, "categories", []) or [])
+    d_title = (getattr(decision, "title", "") or "").lower()
+    d_rationale = (getattr(decision, "rationale", "") or "").lower()
+
+    # Extract finding attributes
+    f_tags = set(finding_dict.get("tags", []) or [])
+    f_file = finding_dict.get("file", "")
+    f_category = finding_dict.get("category", "")
+    f_title = (finding_dict.get("title", "") or "").lower()
+
+    score = 0
+
+    # Tag overlap
+    tag_overlap = d_tags & f_tags
+    if tag_overlap:
+        score += 3
+
+    # File path match (finding file starts with or matches any decision file pattern)
+    for df in d_files:
+        if f_file == df or f_file.startswith(df.rstrip("/") + "/"):
+            score += 2
+            break
+
+    # Category match
+    if f_category and f_category in d_categories:
+        score += 2
+
+    # Title keyword overlap (at least 2 shared words of length >= 4)
+    d_words = {w for w in d_title.split() if len(w) >= 4}
+    f_words = {w for w in f_title.split() if len(w) >= 4}
+    word_overlap = d_words & f_words
+    if len(word_overlap) >= 2:
+        score += 2
+    elif len(word_overlap) == 1:
+        score += 1
+
+    if score == 0:
+        return False, "low"
+
+    if score >= 5:
+        risk = "high"
+    elif score >= 3:
+        risk = "medium"
+    else:
+        risk = "low"
+
+    return True, risk
+
+
+def tool_check_decision_compliance(ctx: AppContext, session_id: str) -> dict:
+    """Check review findings against accepted architectural decisions."""
+    decisions = _load_accepted_decisions()
+    if decisions is None:
+        return {"error": "swarm-kb not available"}
+
+    store = ctx.session_manager.get_finding_store(session_id)
+    findings = [f.to_dict() for f in store.get()]
+
+    if not decisions:
+        return {"results": [], "message": "No accepted architectural decisions found."}
+
+    results = []
+    for decision in decisions:
+        related = []
+        highest_risk = "low"
+        for f_dict in findings:
+            matched, risk = _decision_matches_finding(decision, f_dict)
+            if matched:
+                related.append({
+                    "finding_id": f_dict.get("id", ""),
+                    "title": f_dict.get("title", ""),
+                    "file": f_dict.get("file", ""),
+                    "severity": f_dict.get("severity", ""),
+                    "violation_risk": risk,
+                })
+                if risk == "high" or (risk == "medium" and highest_risk == "low"):
+                    highest_risk = risk
+
+        if related:
+            results.append({
+                "decision_title": getattr(decision, "title", ""),
+                "decision_rationale": getattr(decision, "rationale", ""),
+                "related_findings": related,
+                "violation_risk": highest_risk,
+            })
+
+    return {"results": results, "total_decisions_checked": len(decisions)}
+
+
+def tool_get_arch_context(project_path: str = "") -> dict:
+    """Load architectural decisions and recent debates for review context."""
+    decisions = _load_accepted_decisions()
+    if decisions is None:
+        return {"error": "swarm-kb not available"}
+
+    debates = _load_recent_debates()
+
+    active_decisions = []
+    for d in (decisions or []):
+        active_decisions.append({
+            "title": getattr(d, "title", ""),
+            "rationale": getattr(d, "rationale", ""),
+            "tags": getattr(d, "tags", []) or [],
+            "files": getattr(d, "files", []) or [],
+            "categories": getattr(d, "categories", []) or [],
+            "created_at": getattr(d, "created_at", ""),
+        })
+
+    recent_debates = []
+    for db in (debates or []):
+        recent_debates.append({
+            "title": getattr(db, "title", ""),
+            "resolution": getattr(db, "resolution", ""),
+            "tags": getattr(db, "tags", []) or [],
+            "resolved_at": getattr(db, "resolved_at", ""),
+        })
+
+    decision_titles = [d["title"] for d in active_decisions if d["title"]]
+    guidance_parts = []
+    if decision_titles:
+        titles_str = "; ".join(decision_titles)
+        guidance_parts.append(
+            f"Review experts should check code against these architectural decisions: {titles_str}."
+        )
+    if recent_debates:
+        guidance_parts.append(
+            "Recent debates have been resolved -- see recent_debates for context on contentious areas."
+        )
+    if not guidance_parts:
+        guidance_parts.append("No architectural decisions or debates found.")
+
+    return {
+        "active_decisions": active_decisions,
+        "recent_debates": recent_debates,
+        "guidance": " ".join(guidance_parts),
+    }
+
+
 # --- MCP Server wiring ---
 
 def _inject_pending(app: AppContext, session_id: str, expert_role: str, result: dict) -> dict:
@@ -577,7 +746,7 @@ async def _notify_resource_subscribers(
 
 
 def create_mcp_server():
-    """Create and configure the MCP server with all 26 tools."""
+    """Create and configure the MCP server with all 28 tools."""
     from mcp.server.fastmcp import FastMCP, Context
     from contextlib import asynccontextmanager
     from collections.abc import AsyncIterator
@@ -1054,6 +1223,27 @@ def create_mcp_server():
         await _notify_resource_subscribers(app, session_id, "events")
 
         return json.dumps(result)
+
+    # ── Architectural Decision Awareness Tools ─────────────────────
+
+    @mcp.tool(
+        name="check_decision_compliance",
+        description="Check review findings against accepted architectural decisions and flag potential violations.",
+    )
+    def _check_decision_compliance(session_id: str, ctx: Optional[Context] = None) -> str:
+        import json
+        app = _get_app(ctx)
+        result = tool_check_decision_compliance(app, session_id)
+        return json.dumps(result, ensure_ascii=False)
+
+    @mcp.tool(
+        name="get_arch_context",
+        description="Load architectural decisions and recent debates to provide context for review experts.",
+    )
+    def _get_arch_context(project_path: str = "", ctx: Optional[Context] = None) -> str:
+        import json
+        result = tool_get_arch_context(project_path=project_path)
+        return json.dumps(result, ensure_ascii=False)
 
     # ── MCP Subscription Handlers ────────────────────────────────────
 
