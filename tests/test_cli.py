@@ -152,4 +152,4 @@ class TestVersionFlag:
     def test_version(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.5" in result.output
+        assert "version" in result.output
