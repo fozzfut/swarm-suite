@@ -127,8 +127,6 @@ def create_mcp_server():
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            from .arch_adapter import extract_debate_findings, analyze_project_for_arch_findings
-
             mgr = _get_mgr(ctx)
             session_id = mgr.start_session(
                 project_path=project_path,
@@ -150,23 +148,58 @@ def create_mcp_server():
 
             # Load findings from arch debate session if provided
             if arch_session:
+                arch_findings = []
                 try:
-                    arch_findings = extract_debate_findings(arch_session)
-                    for af in arch_findings:
-                        mgr.add_finding(session_id, af.to_finding_dict())
-                    arch_finding_count += len(arch_findings)
+                    from swarm_kb.finding_reader import FindingReader
+                    from swarm_kb.config import SuiteConfig
+                    config = SuiteConfig.load()
+                    arch_reader = FindingReader(config.tool_sessions_path("arch") / arch_session)
+                    if arch_reader.exists():
+                        arch_findings = arch_reader.search(status="open")
+                except ImportError:
+                    arch_findings = []
                 except Exception as exc:
-                    _log.warning("Failed to load arch debate findings from %s: %s", arch_session, exc)
+                    _log.warning("swarm-kb arch finding lookup failed for %s: %s", arch_session, exc)
+                    arch_findings = []
 
-            # Run arch analysis on project when no review source is given
+                # Fallback to arch_adapter if swarm-kb returned nothing
+                if not arch_findings:
+                    try:
+                        from .arch_adapter import extract_debate_findings
+                        adapter_findings = extract_debate_findings(arch_session)
+                        for af in adapter_findings:
+                            arch_findings.append(af.to_finding_dict())
+                    except Exception as exc:
+                        _log.warning("arch_adapter fallback failed for %s: %s", arch_session, exc)
+
+                for af in arch_findings:
+                    mgr.add_finding(session_id, af if isinstance(af, dict) else af.to_finding_dict())
+                arch_finding_count += len(arch_findings)
+
+            # Search for arch findings when no review source is given
             if project_path and not review_session:
+                arch_findings = []
                 try:
-                    arch_findings = analyze_project_for_arch_findings(project_path)
-                    for af in arch_findings:
-                        mgr.add_finding(session_id, af.to_finding_dict())
-                    arch_finding_count += len(arch_findings)
-                except Exception as exc:
-                    _log.warning("Failed to run arch analysis on %s: %s", project_path, exc)
+                    from swarm_kb.finding_reader import search_all_findings
+                    from swarm_kb.config import SuiteConfig
+                    config = SuiteConfig.load()
+                    arch_findings = search_all_findings(config, tool="arch", status="open")
+                except (ImportError, Exception):
+                    arch_findings = []
+
+                # Fallback to arch_adapter if swarm-kb returned nothing
+                if not arch_findings:
+                    try:
+                        from .arch_adapter import analyze_project_for_arch_findings
+                        adapter_findings = analyze_project_for_arch_findings(project_path)
+                        for af in adapter_findings:
+                            arch_findings.append(af.to_finding_dict())
+                    except Exception as exc:
+                        _log.warning("arch_adapter fallback failed for %s: %s", project_path, exc)
+
+                for af in arch_findings:
+                    mgr.add_finding(session_id, af if isinstance(af, dict) else af.to_finding_dict())
+                arch_finding_count += len(arch_findings)
 
             return _ok({
                 "session_id": session_id,
@@ -1213,6 +1246,34 @@ def create_mcp_server():
             })
         except Exception as exc:
             return _err(str(exc))
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Knowledge Base Integration
+    # ═══════════════════════════════════════════════════════════════════
+
+    @mcp.tool(name="load_decisions", description="Load active architectural decisions to guide fix strategy.")
+    def _load_decisions(session_id: str = "", project_path: str = "", ctx: Optional[Context] = None) -> str:
+        try:
+            from swarm_kb.decision_store import DecisionStore
+            from swarm_kb.config import SuiteConfig
+            config = SuiteConfig.load()
+            store = DecisionStore(config.decisions_path / "decisions.jsonl")
+            decisions = store.query(status="accepted", project_path=project_path)
+            return json.dumps([d.to_dict() for d in decisions])
+        except (ImportError, Exception) as exc:
+            return json.dumps({"error": f"Cannot load decisions: {exc}"})
+
+    @mcp.tool(name="load_debates", description="Load debate history for context on architectural decisions.")
+    def _load_debates(project_path: str = "", status: str = "", ctx: Optional[Context] = None) -> str:
+        try:
+            from swarm_kb.debate_store import DebateStore
+            from swarm_kb.config import SuiteConfig
+            config = SuiteConfig.load()
+            store = DebateStore(config.debates_path / "debates.jsonl")
+            debates = store.query(status=status, project_path=project_path)
+            return json.dumps([d.to_dict() for d in debates])
+        except (ImportError, Exception) as exc:
+            return json.dumps({"error": f"Cannot load debates: {exc}"})
 
     return mcp
 
