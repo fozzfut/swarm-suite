@@ -798,26 +798,15 @@ def create_mcp_server():
             "findings_posted": findings_count,
         })
 
-    @mcp.tool(
-        name="arch_debate",
-        description=(
-            "Start a multi-agent architecture debate on a design topic. "
-            "Agents propose, critique, vote, and resolve. Returns transcript."
-        ),
-    )
-    def _arch_debate(
-        project_path: str,
-        topic: str,
-        scope: str = "",
-        ctx: Optional[Context] = None,
-    ) -> str:
+    # ------------------------------------------------------------------
+    # Local fallback debate (uses arch_swarm.debate when swarm-kb
+    # is not installed)
+    # ------------------------------------------------------------------
+
+    def _arch_debate_local(project_path, topic, scope, analysis, context):
         from .agents import ALL_ROLES
-        from .code_scanner import scan_project, format_analysis
         from .debate import DebateSession
         from .models import Verdict
-
-        analysis = scan_project(project_path, scope=scope or None)
-        context = format_analysis(analysis)
 
         ds = DebateSession()
         ds.start_debate(topic=topic, context=context)
@@ -851,7 +840,7 @@ def create_mcp_server():
         decision = ds.resolve()
         transcript = ds.get_transcript()
 
-        # Save to swarm-kb arch sessions
+        # Save to swarm-kb arch sessions directory
         session_dir = Path("~/.swarm-kb/arch/sessions").expanduser()
         session_dir.mkdir(parents=True, exist_ok=True)
         sess_dir = session_dir / ds.session.id
@@ -872,76 +861,114 @@ def create_mcp_server():
         except OSError as exc:
             _log.warning("Failed to save debate session: %s", exc)
 
-        # --- Post architectural findings to swarm-kb -----------------------
+        # Post findings to swarm-kb
         findings_count = _post_findings_to_kb(analysis, ds.session.id)
-
-        # --- Post debate record to swarm-kb --------------------------------
-        debate_record_id = ""
-        try:
-            from swarm_kb.debate_store import DebateStore
-            from swarm_kb.config import SuiteConfig
-
-            config = SuiteConfig.load()
-            debate_store = DebateStore(config.debates_path / "debates.jsonl")
-            debate_record = debate_store.append(
-                topic=topic,
-                source_tool="arch",
-                source_session=ds.session.id,
-                project_path=str(Path(project_path).resolve()),
-                status="resolved",
-                proposals=[
-                    {
-                        "author": p.author,
-                        "title": p.title,
-                        "description": p.description[:200],
-                    }
-                    for p in ds.session.proposals
-                ],
-                winning_proposal=decision.title if decision else "",
-                participant_count=len(ALL_ROLES),
-                vote_tally=ds.session.tally_votes(),
-                tags=[],
-            )
-            debate_record_id = debate_record.id
-            _log.info("Debate record %s posted to swarm-kb", debate_record.id)
-        except ImportError:
-            _log.warning("swarm-kb not installed; skipping debate record post")
-        except Exception as exc:
-            _log.warning("Failed to post debate record to swarm-kb: %s", exc)
-
-        # --- Post accepted decision to swarm-kb ----------------------------
-        try:
-            if decision and decision.status.value == "accepted":
-                from swarm_kb.decision_store import DecisionStore
-                from swarm_kb.config import SuiteConfig as _SC
-
-                dec_config = _SC.load()
-                dec_store = DecisionStore(
-                    dec_config.decisions_path / "decisions.jsonl"
-                )
-                adr = dec_store.append(
-                    title=decision.title,
-                    status="accepted",
-                    rationale=decision.rationale,
-                    context=f"Debate topic: {topic}",
-                    consequences=[],
-                    source_tool="arch",
-                    source_session=ds.session.id,
-                    debate_id=debate_record_id,
-                    project_path=str(Path(project_path).resolve()),
-                    tags=[],
-                )
-                _log.info("Decision %s posted to swarm-kb", adr.id)
-        except ImportError:
-            _log.warning("swarm-kb not installed; skipping decision post")
-        except Exception as exc:
-            _log.warning("Failed to post decision to swarm-kb: %s", exc)
 
         return json.dumps({
             "session_id": ds.session.id,
             "topic": topic,
             "decision": decision.title if decision else None,
             "findings_posted": findings_count,
+            "transcript": transcript,
+        })
+
+    # ------------------------------------------------------------------
+    # Main debate tool
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        name="arch_debate",
+        description=(
+            "Start a multi-agent architecture debate on a design topic. "
+            "Agents propose, critique, vote, and resolve. Returns transcript."
+        ),
+    )
+    def _arch_debate(
+        project_path: str,
+        topic: str,
+        scope: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        from .agents import ALL_ROLES
+        from .code_scanner import scan_project, format_analysis
+
+        analysis = scan_project(project_path, scope=scope or None)
+        context = format_analysis(analysis)
+
+        # Use swarm-kb debate engine
+        try:
+            from swarm_kb.debate_engine import DebateEngine
+            from swarm_kb.config import SuiteConfig
+            config = SuiteConfig.load()
+            engine = DebateEngine(config.debates_path / "active")
+        except ImportError:
+            # Fallback to local debate if swarm-kb not available
+            return _arch_debate_local(project_path, topic, scope, analysis, context)
+
+        debate = engine.start_debate(
+            topic=topic, context=context,
+            project_path=str(Path(project_path).resolve()),
+            source_tool="arch", source_session="",
+        )
+
+        # Generate proposals from each role using analysis data
+        for role in ALL_ROLES:
+            proposal_data = _generate_proposal_for_role(role, analysis, topic)
+            engine.propose(
+                debate_id=debate.id,
+                author=role.name,
+                title=proposal_data.title,
+                description=proposal_data.description,
+                pros=proposal_data.pros,
+                cons=proposal_data.cons,
+                trade_offs=proposal_data.trade_offs,
+            )
+
+        # Generate critiques
+        debate = engine.get_debate(debate.id)  # refresh
+        for role in ALL_ROLES:
+            for proposal in debate.proposals:
+                if proposal.author == role.name:
+                    continue
+                critique_data = _generate_critique_for_role(role, proposal, analysis)
+                engine.critique(
+                    debate_id=debate.id,
+                    proposal_id=proposal.id,
+                    critic=role.name,
+                    verdict=critique_data.verdict.value,
+                    reasoning=critique_data.reasoning,
+                    suggested_changes=critique_data.suggested_changes,
+                )
+
+        # Vote
+        debate = engine.get_debate(debate.id)
+        for role in ALL_ROLES:
+            own_proposal = next((p for p in debate.proposals if p.author == role.name), None)
+            for proposal in debate.proposals:
+                support = (own_proposal is not None and proposal.id == own_proposal.id)
+                if not support:
+                    own_critiques = [c for c in debate.critiques
+                                     if c.critic == role.name and c.proposal_id == proposal.id]
+                    support = bool(own_critiques and own_critiques[0].verdict.value == "support")
+                engine.vote(debate.id, role.name, proposal.id, support)
+
+        # Resolve
+        result = engine.resolve(debate.id)
+        transcript = engine.get_transcript(debate.id)
+
+        # Post findings to KB
+        try:
+            _post_findings_to_kb(analysis, debate.id)
+        except Exception as exc:
+            _log.warning("Failed to post findings: %s", exc)
+
+        decision_dict = result.get("decision", {})
+        decision_title = decision_dict.get("title") if isinstance(decision_dict, dict) else None
+
+        return json.dumps({
+            "session_id": debate.id,
+            "topic": topic,
+            "decision": decision_title,
             "transcript": transcript,
         })
 
@@ -972,6 +999,18 @@ def create_mcp_server():
         session_id: str,
         ctx: Optional[Context] = None,
     ) -> str:
+        # Try swarm-kb debate engine first
+        try:
+            from swarm_kb.debate_engine import DebateEngine
+            from swarm_kb.config import SuiteConfig
+            config = SuiteConfig.load()
+            engine = DebateEngine(config.debates_path / "active")
+            transcript = engine.get_transcript(session_id)
+            if transcript:
+                return transcript
+        except (ImportError, Exception):
+            pass
+        # Fallback to file-based transcript
         session_dir = Path("~/.swarm-kb/arch/sessions").expanduser()
         md_file = session_dir / session_id / "transcript.md"
         if not md_file.exists():
