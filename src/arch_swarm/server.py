@@ -879,8 +879,8 @@ def create_mcp_server():
     @mcp.tool(
         name="arch_debate",
         description=(
-            "Start a multi-agent architecture debate on a design topic. "
-            "Agents propose, critique, vote, and resolve. Returns transcript."
+            "(Quick) Run an automated architecture debate with simulated agents. "
+            "For real multi-agent debates, use orchestrate_debate instead."
         ),
     )
     def _arch_debate(
@@ -971,6 +971,210 @@ def create_mcp_server():
             "decision": decision_title,
             "transcript": transcript,
         })
+
+    # ------------------------------------------------------------------
+    # Orchestrated debate -- returns a plan for AI agents
+    # ------------------------------------------------------------------
+
+    @mcp.tool(
+        name="orchestrate_debate",
+        description=(
+            "Plan a multi-agent architecture debate. Scans the project, starts a debate "
+            "in swarm-kb, and returns step-by-step instructions for AI agents to propose, "
+            "critique, vote, and resolve. Agents do the actual analysis."
+        ),
+    )
+    def _orchestrate_debate(
+        project_path: str,
+        topic: str,
+        scope: str = "",
+        max_agents: int = 5,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        from .agents import ALL_ROLES
+        from .code_scanner import scan_project, format_analysis
+
+        # 1. Scan project
+        analysis = scan_project(project_path, scope=scope or None)
+        context = format_analysis(analysis)
+        resolved_path = str(Path(project_path).resolve())
+
+        # 2. Post findings to swarm-kb
+        import uuid
+        temp_session = "orch-" + uuid.uuid4().hex[:12]
+        _post_findings_to_kb(analysis, temp_session)
+
+        # 3. Start a debate via swarm-kb's DebateEngine
+        debate_id: str
+        try:
+            from swarm_kb.debate_engine import DebateEngine
+            from swarm_kb.config import SuiteConfig
+            config = SuiteConfig.load()
+            engine = DebateEngine(config.debates_path / "active")
+            debate = engine.start_debate(
+                topic=topic, context=context,
+                project_path=resolved_path,
+                source_tool="arch", source_session="",
+            )
+            debate_id = debate.id
+        except ImportError:
+            _log.warning("swarm-kb not installed; generating local debate id")
+            debate_id = "dbt-" + secrets.token_hex(4)
+        except Exception as exc:
+            _log.warning("Failed to start swarm-kb debate: %s", exc)
+            debate_id = "dbt-" + secrets.token_hex(4)
+
+        # 4. Build context summary from analysis metrics
+        context_parts = [
+            f"{analysis.total_modules} modules",
+            f"{analysis.total_lines} lines",
+        ]
+        top_complex = _top_n(analysis.complexity_scores, 3)
+        if top_complex:
+            for mod, score in top_complex:
+                context_parts.append(f"{mod}: complexity {score}")
+        top_coupling = sorted(
+            [(c.module, c.efferent) for c in analysis.coupling if c.efferent > 0],
+            key=lambda t: t[1], reverse=True,
+        )[:3]
+        if top_coupling:
+            coupling_strs = [f"{mod} (Ce={ce})" for mod, ce in top_coupling]
+            context_parts.append("Top coupling: " + ", ".join(coupling_strs))
+        cycles = _find_circular_deps(analysis.dependency_graph)
+        if cycles:
+            context_parts.append(f"{len(cycles)} circular dependency cycle(s)")
+        context_summary = ". ".join(context_parts) + "."
+
+        # 5. Select relevant expert roles (cap at max_agents)
+        capped = max(min(max_agents, len(ALL_ROLES)), 2)
+        selected_roles = ALL_ROLES[:capped]
+        agents = []
+        for role in selected_roles:
+            agents.append({
+                "role": role.name,
+                "profile": role.name.lower().replace(" ", "-").replace("-", "_"),
+                "focus_areas": list(role.focus_areas),
+            })
+
+        # 6. Build phased plan with per-agent instructions
+
+        # Phase 1: Research & Propose
+        phase1_instructions = []
+        for agent in agents:
+            phase1_instructions.append({
+                "agent_role": agent["role"],
+                "action": "propose",
+                "description": (
+                    f"Read the project files relevant to the topic. Analyze from a "
+                    f"{agent['role'].lower()} perspective. Then call kb_propose("
+                    f"debate_id='{debate_id}', author='{agent['role']}', "
+                    f"title='...', description='...detailed analysis...', "
+                    f"pros=[...], cons=[...]). Your proposal MUST reference specific "
+                    f"files, metrics, and code patterns you found."
+                ),
+                "context": context_summary,
+                "tools_to_use": ["kb_get_code_map", "kb_propose"],
+            })
+
+        # Phase 2: Critique & Challenge
+        phase2_instructions = []
+        for agent in agents:
+            phase2_instructions.append({
+                "agent_role": agent["role"],
+                "action": "critique",
+                "description": (
+                    f"Call kb_get_debate('{debate_id}') to read all proposals. "
+                    f"For each OTHER agent's proposal, call kb_critique(debate_id="
+                    f"'{debate_id}', proposal_id=..., critic='{agent['role']}', "
+                    f"verdict='support'|'oppose'|'modify', reasoning='...specific "
+                    f"analysis...'). Your critique MUST address concrete claims in "
+                    f"the proposal."
+                ),
+                "tools_to_use": ["kb_get_debate", "kb_critique"],
+            })
+
+        # Phase 3: Vote
+        phase3_instructions = []
+        for agent in agents:
+            phase3_instructions.append({
+                "agent_role": agent["role"],
+                "action": "vote",
+                "description": (
+                    f"Call kb_get_debate('{debate_id}') to read the full debate "
+                    f"state. For each proposal, call kb_vote(debate_id='{debate_id}', "
+                    f"agent='{agent['role']}', proposal_id=..., support=True/False). "
+                    f"Vote based on your analysis AND the critiques you've read."
+                ),
+                "tools_to_use": ["kb_get_debate", "kb_vote"],
+            })
+
+        # Phase 4: Resolve
+        phase4_instructions = [{
+            "action": "resolve",
+            "description": (
+                f"Call kb_resolve_debate('{debate_id}'). This tallies votes, picks "
+                f"the winner, and saves the decision as an ADR in swarm-kb. Then "
+                f"call kb_get_transcript('{debate_id}') to get the full debate "
+                f"transcript."
+            ),
+            "tools_to_use": ["kb_resolve_debate", "kb_get_transcript"],
+        }]
+
+        phases = [
+            {
+                "phase": 1,
+                "name": "Research & Propose",
+                "description": (
+                    "Each agent reads the project code, analyzes the topic from "
+                    "their perspective, and submits a proposal."
+                ),
+                "instructions": phase1_instructions,
+            },
+            {
+                "phase": 2,
+                "name": "Critique & Challenge",
+                "description": (
+                    "Each agent reads all proposals and critiques them from their "
+                    "expertise. Must reference specific weaknesses."
+                ),
+                "instructions": phase2_instructions,
+            },
+            {
+                "phase": 3,
+                "name": "Vote",
+                "description": (
+                    "Each agent votes on proposals based on the full debate "
+                    "context (proposals + critiques)."
+                ),
+                "instructions": phase3_instructions,
+            },
+            {
+                "phase": 4,
+                "name": "Resolve",
+                "description": (
+                    "Tally votes and produce the final decision."
+                ),
+                "instructions": phase4_instructions,
+            },
+        ]
+
+        summary = (
+            f"Debate {debate_id} created. {len(agents)} agents will propose, "
+            f"critique, and vote. Execute the 4 phases in order. Each agent "
+            f"should READ CODE before proposing."
+        )
+
+        plan = {
+            "debate_id": debate_id,
+            "topic": topic,
+            "project_path": resolved_path,
+            "context_summary": context_summary,
+            "agents": agents,
+            "phases": phases,
+            "summary": summary,
+        }
+
+        return json.dumps(plan)
 
     @mcp.tool(
         name="arch_list_sessions",
