@@ -74,6 +74,14 @@ class SuiteConfig:
         return self.kb_root / "xrefs"
 
     @property
+    def decisions_path(self) -> Path:
+        return self.kb_root / "decisions"
+
+    @property
+    def debates_path(self) -> Path:
+        return self.kb_root / "debates"
+
+    @property
     def config_file(self) -> Path:
         return self.kb_root / "config.yaml"
 

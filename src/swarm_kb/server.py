@@ -5,10 +5,13 @@ import logging
 from typing import Optional
 
 from .bootstrap import bootstrap
-from .config import SuiteConfig
+from .config import SuiteConfig, TOOL_NAMES
 from .code_map.scanner import scan_project
 from .code_map.store import CodeMapStore
-from .finding_reader import search_all_findings, get_finding_reader
+from .debate_store import DebateStore
+from .decision_store import DecisionStore
+from .finding_reader import search_all_findings, get_finding_reader, FindingReader
+from .finding_writer import FindingWriter
 from .paths import code_map_path, project_hash_for
 from .session_meta import count_sessions, list_sessions
 from .xref import XRefLog
@@ -39,18 +42,23 @@ def create_mcp_server():
         name="kb_status",
         description=(
             "Get Swarm KB status: session counts per tool, "
-            "cross-reference count, storage root path."
+            "cross-reference count, decision count, debate count, "
+            "storage root path."
         ),
     )
     def _kb_status(ctx: Optional[Context] = None) -> str:
         config = _get_config(ctx)
         counts = count_sessions(config)
         xref_log = XRefLog(config.xrefs_path)
+        decision_store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        debate_store = DebateStore(config.debates_path / "debates.jsonl")
         return json.dumps({
             "kb_root": str(config.kb_root),
             "sessions": counts,
             "total_sessions": sum(counts.values()),
             "xrefs": xref_log.count(),
+            "decision_count": decision_store.count(),
+            "debate_count": debate_store.count(),
         }, indent=2)
 
     # ── kb_scan_project ──────────────────────────────────────────────
@@ -210,11 +218,13 @@ def create_mcp_server():
     @mcp.tool(
         name="kb_search_findings",
         description=(
-            "Search findings across all review sessions. "
-            "Filter by file, severity, status, min_confidence."
+            "Search findings across sessions. "
+            "Filter by tool (default: all tools), file, severity, "
+            "status, min_confidence."
         ),
     )
     def _kb_search_findings(
+        tool: str = "",
         file: str = "",
         severity: str = "",
         status: str = "",
@@ -222,14 +232,241 @@ def create_mcp_server():
         ctx: Optional[Context] = None,
     ) -> str:
         config = _get_config(ctx)
-        results = search_all_findings(
-            config,
-            file=file or None,
-            severity=severity or None,
-            status=status or None,
-            min_confidence=min_confidence if min_confidence > 0 else None,
+
+        # Determine which tools to search
+        if tool:
+            tools_to_search = [tool]
+        else:
+            tools_to_search = list(TOOL_NAMES)
+
+        all_results: list[dict] = []
+        for t in tools_to_search:
+            sessions_dir = config.tool_sessions_path(t)
+            if not sessions_dir.exists():
+                continue
+            for entry in sorted(sessions_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                reader = FindingReader(entry)
+                if not reader.exists():
+                    continue
+                findings = reader.search(
+                    file=file or None,
+                    severity=severity or None,
+                    status=status or None,
+                    min_confidence=min_confidence if min_confidence > 0 else None,
+                )
+                for f in findings:
+                    f["_tool"] = t
+                    f["_session_id"] = entry.name
+                all_results.extend(findings)
+
+        return json.dumps(all_results)
+
+    # ── kb_post_finding ──────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_post_finding",
+        description="Post a finding from any tool into shared KB storage.",
+    )
+    def _kb_post_finding(
+        tool: str,
+        session_id: str,
+        finding: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        try:
+            finding_data = json.loads(finding)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"error": f"Invalid JSON in finding: {exc}"})
+
+        writer = FindingWriter(tool, session_id, config)
+        finding_id = writer.post(finding_data)
+
+        # Return the posted finding with assigned ID
+        finding_data["id"] = finding_id
+        return json.dumps({"status": "posted", "finding": finding_data})
+
+    # ── kb_post_decision ─────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_post_decision",
+        description="Record an architectural decision (ADR).",
+    )
+    def _kb_post_decision(
+        title: str,
+        status: str = "accepted",
+        rationale: str = "",
+        context: str = "",
+        consequences: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        debate_id: str = "",
+        project_path: str = "",
+        tags: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+
+        # Parse comma-separated strings into lists
+        consequences_list: list[str] = []
+        if consequences:
+            try:
+                consequences_list = json.loads(consequences)
+            except json.JSONDecodeError:
+                consequences_list = [c.strip() for c in consequences.split(",") if c.strip()]
+
+        tags_list: list[str] = []
+        if tags:
+            try:
+                tags_list = json.loads(tags)
+            except json.JSONDecodeError:
+                tags_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+        decision = store.append(
+            title=title,
+            status=status,
+            rationale=rationale,
+            context=context,
+            consequences=consequences_list,
+            source_tool=source_tool,
+            source_session=source_session,
+            debate_id=debate_id,
+            project_path=project_path,
+            tags=tags_list,
         )
-        return json.dumps(results)
+        return json.dumps(decision.to_dict())
+
+    # ── kb_get_decisions ─────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_get_decisions",
+        description="Query architectural decisions.",
+    )
+    def _kb_get_decisions(
+        status: str = "",
+        source_tool: str = "",
+        tag: str = "",
+        project_path: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        decisions = store.query(
+            status=status,
+            source_tool=source_tool,
+            tag=tag,
+            project_path=project_path,
+        )
+        return json.dumps([d.to_dict() for d in decisions])
+
+    # ── kb_update_decision_status ────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_update_decision_status",
+        description="Update a decision's status.",
+    )
+    def _kb_update_decision_status(
+        decision_id: str,
+        new_status: str,
+        superseded_by: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        updated = store.update_status(decision_id, new_status, superseded_by=superseded_by)
+        if updated:
+            decision = store.get_by_id(decision_id)
+            return json.dumps({
+                "status": "updated",
+                "decision": decision.to_dict() if decision else None,
+            })
+        return json.dumps({"status": "not_found", "decision_id": decision_id})
+
+    # ── kb_post_debate ───────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_post_debate",
+        description="Record a debate result in shared KB.",
+    )
+    def _kb_post_debate(
+        topic: str,
+        source_tool: str,
+        source_session: str = "",
+        project_path: str = "",
+        status: str = "resolved",
+        proposals: str = "",
+        winning_proposal: str = "",
+        decision_id: str = "",
+        participant_count: int = 0,
+        vote_tally: str = "",
+        tags: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        store = DebateStore(config.debates_path / "debates.jsonl")
+
+        # Parse JSON strings into structured data
+        proposals_list: list[dict] = []
+        if proposals:
+            try:
+                proposals_list = json.loads(proposals)
+            except json.JSONDecodeError:
+                proposals_list = []
+
+        vote_tally_dict: dict = {}
+        if vote_tally:
+            try:
+                vote_tally_dict = json.loads(vote_tally)
+            except json.JSONDecodeError:
+                vote_tally_dict = {}
+
+        tags_list: list[str] = []
+        if tags:
+            try:
+                tags_list = json.loads(tags)
+            except json.JSONDecodeError:
+                tags_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+        record = store.append(
+            topic=topic,
+            source_tool=source_tool,
+            source_session=source_session,
+            project_path=project_path,
+            status=status,
+            proposals=proposals_list,
+            winning_proposal=winning_proposal,
+            decision_id=decision_id,
+            participant_count=participant_count,
+            vote_tally=vote_tally_dict,
+            tags=tags_list,
+        )
+        return json.dumps(record.to_dict())
+
+    # ── kb_get_debates ───────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_get_debates",
+        description="Query debates.",
+    )
+    def _kb_get_debates(
+        status: str = "",
+        source_tool: str = "",
+        project_path: str = "",
+        tag: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        store = DebateStore(config.debates_path / "debates.jsonl")
+        debates = store.query(
+            status=status,
+            source_tool=source_tool,
+            project_path=project_path,
+            tag=tag,
+        )
+        return json.dumps([d.to_dict() for d in debates])
 
     # ── kb_migrate ───────────────────────────────────────────────────
 

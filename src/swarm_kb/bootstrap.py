@@ -54,6 +54,8 @@ def _ensure_dirs(config: SuiteConfig) -> None:
         config.kb_root,
         config.code_map_path,
         config.xrefs_path,
+        config.decisions_path,
+        config.debates_path,
     ]
     for tool in TOOL_NAMES:
         dirs.append(config.tool_sessions_path(tool))
