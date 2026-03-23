@@ -47,6 +47,16 @@ _EXPERT_MAP = {
     "compat": "compatibility-fix",
     "migration": "compatibility-fix",
     "backwards": "compatibility-fix",
+    "architecture": "refactoring",
+    "coupling": "refactoring",
+    "circular-dependency": "refactoring",
+    "complexity": "refactoring",
+    "bloated-module": "refactoring",
+    "instability": "refactoring",
+    "modularity": "refactoring",
+    "srp": "refactoring",
+    "arch-decision": "refactoring",
+    "bottleneck": "performance-fix",
 }
 
 
@@ -107,15 +117,18 @@ def create_mcp_server():
 
     @mcp.tool(
         name="start_session",
-        description="Start a multi-agent fix session from a review session or report.",
+        description="Start a multi-agent fix session from a review session, arch session, or report.",
     )
     def _start_session(
         review_session: str = "",
+        arch_session: str = "",
         project_path: str = ".",
         name: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
+            from .arch_adapter import extract_debate_findings, analyze_project_for_arch_findings
+
             mgr = _get_mgr(ctx)
             session_id = mgr.start_session(
                 project_path=project_path,
@@ -125,6 +138,7 @@ def create_mcp_server():
 
             # Load findings from review session if provided
             finding_count = 0
+            arch_finding_count = 0
             if review_session:
                 try:
                     findings = _load_findings_from_review(review_session)
@@ -134,11 +148,33 @@ def create_mcp_server():
                 except Exception as exc:
                     _log.warning("Failed to load findings from review session %s: %s", review_session, exc)
 
+            # Load findings from arch debate session if provided
+            if arch_session:
+                try:
+                    arch_findings = extract_debate_findings(arch_session)
+                    for af in arch_findings:
+                        mgr.add_finding(session_id, af.to_finding_dict())
+                    arch_finding_count += len(arch_findings)
+                except Exception as exc:
+                    _log.warning("Failed to load arch debate findings from %s: %s", arch_session, exc)
+
+            # Run arch analysis on project when no review source is given
+            if project_path and not review_session:
+                try:
+                    arch_findings = analyze_project_for_arch_findings(project_path)
+                    for af in arch_findings:
+                        mgr.add_finding(session_id, af.to_finding_dict())
+                    arch_finding_count += len(arch_findings)
+                except Exception as exc:
+                    _log.warning("Failed to run arch analysis on %s: %s", project_path, exc)
+
             return _ok({
                 "session_id": session_id,
                 "review_session": review_session,
+                "arch_session": arch_session,
                 "project_path": project_path,
                 "finding_count": finding_count,
+                "arch_finding_count": arch_finding_count,
                 "status": "active",
             })
         except Exception as exc:
@@ -218,6 +254,17 @@ def create_mcp_server():
                 if expert not in expert_findings:
                     expert_findings[expert] = []
                 expert_findings[expert].append(f.get("id", ""))
+
+            # Ensure "refactoring" expert is included when arch findings are present
+            has_arch_findings = any(
+                "architecture" in f.get("category", "").lower()
+                or "architecture" in [t.lower() for t in f.get("tags", [])]
+                or "refactoring" in [t.lower() for t in f.get("tags", [])]
+                for f in findings
+            )
+            if has_arch_findings and "refactoring" not in expert_counts:
+                expert_counts["refactoring"] = 0
+                expert_findings["refactoring"] = []
 
             # Build recommendations sorted by finding count (descending)
             recommendations = []

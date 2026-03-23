@@ -79,6 +79,16 @@ class FixExpertProfiler:
             "style": "refactoring",
             "design": "refactoring",
             "duplication": "refactoring",
+            "architecture": "refactoring",
+            "coupling": "refactoring",
+            "circular-dependency": "refactoring",
+            "complexity": "refactoring",
+            "bloated-module": "refactoring",
+            "instability": "refactoring",
+            "modularity": "refactoring",
+            "srp": "refactoring",
+            "arch-decision": "refactoring",
+            "bottleneck": "performance-fix",
         }
 
         # Score each expert based on how many findings match
