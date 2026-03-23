@@ -8,6 +8,7 @@ from .bootstrap import bootstrap
 from .config import SuiteConfig, TOOL_NAMES
 from .code_map.scanner import scan_project
 from .code_map.store import CodeMapStore
+from .debate_engine import DebateEngine
 from .debate_store import DebateStore
 from .decision_store import DecisionStore
 from .finding_reader import search_all_findings, get_finding_reader, FindingReader
@@ -21,18 +22,29 @@ _log = logging.getLogger("swarm_kb.server")
 
 def create_mcp_server():
     """Create and configure the swarm-kb MCP server."""
+    from dataclasses import dataclass as _dataclass
     from mcp.server.fastmcp import FastMCP, Context
     from contextlib import asynccontextmanager
     from collections.abc import AsyncIterator
 
+    @_dataclass
+    class _LifespanState:
+        config: SuiteConfig
+        debate_engine: DebateEngine
+
     @asynccontextmanager
-    async def lifespan(server: FastMCP) -> AsyncIterator[SuiteConfig]:
+    async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
         config = bootstrap()
-        yield config
+        engine = DebateEngine(config.debates_path / "active")
+        yield _LifespanState(config=config, debate_engine=engine)
 
     def _get_config(ctx: Optional[Context]) -> SuiteConfig:
         assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context
+        return ctx.request_context.lifespan_context.config
+
+    def _get_debate_engine(ctx: Optional[Context]) -> DebateEngine:
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.debate_engine
 
     mcp = FastMCP("SwarmKB", lifespan=lifespan)
 
@@ -52,6 +64,7 @@ def create_mcp_server():
         xref_log = XRefLog(config.xrefs_path)
         decision_store = DecisionStore(config.decisions_path / "decisions.jsonl")
         debate_store = DebateStore(config.debates_path / "debates.jsonl")
+        engine = _get_debate_engine(ctx)
         return json.dumps({
             "kb_root": str(config.kb_root),
             "sessions": counts,
@@ -59,6 +72,7 @@ def create_mcp_server():
             "xrefs": xref_log.count(),
             "decision_count": decision_store.count(),
             "debate_count": debate_store.count(),
+            "active_debates": engine.count(status="open"),
         }, indent=2)
 
     # ── kb_scan_project ──────────────────────────────────────────────
@@ -467,6 +481,248 @@ def create_mcp_server():
             tag=tag,
         )
         return json.dumps([d.to_dict() for d in debates])
+
+    # ── kb_start_debate ──────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_start_debate",
+        description="Start a new debate. Any tool can initiate.",
+    )
+    def _kb_start_debate(
+        topic: str,
+        context: str = "",
+        project_path: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+            debate = engine.start_debate(
+                topic=topic,
+                context=context,
+                project_path=project_path,
+                source_tool=source_tool,
+                source_session=source_session,
+            )
+            return json.dumps(debate.to_dict())
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_propose ───────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_propose",
+        description="Submit a proposal to an open debate.",
+    )
+    def _kb_propose(
+        debate_id: str,
+        author: str,
+        title: str,
+        description: str,
+        pros: str = "",
+        cons: str = "",
+        trade_offs: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+
+            pros_list: list[str] = []
+            if pros:
+                try:
+                    pros_list = json.loads(pros)
+                except json.JSONDecodeError:
+                    pros_list = [p.strip() for p in pros.split(",") if p.strip()]
+
+            cons_list: list[str] = []
+            if cons:
+                try:
+                    cons_list = json.loads(cons)
+                except json.JSONDecodeError:
+                    cons_list = [c.strip() for c in cons.split(",") if c.strip()]
+
+            trade_offs_list: list[str] = []
+            if trade_offs:
+                try:
+                    trade_offs_list = json.loads(trade_offs)
+                except json.JSONDecodeError:
+                    trade_offs_list = [t.strip() for t in trade_offs.split(",") if t.strip()]
+
+            proposal_id = engine.propose(
+                debate_id=debate_id,
+                author=author,
+                title=title,
+                description=description,
+                pros=pros_list,
+                cons=cons_list,
+                trade_offs=trade_offs_list,
+            )
+            return json.dumps({"proposal_id": proposal_id, "debate_id": debate_id})
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_critique ──────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_critique",
+        description="Critique an existing proposal in a debate.",
+    )
+    def _kb_critique(
+        debate_id: str,
+        proposal_id: str,
+        critic: str,
+        verdict: str,
+        reasoning: str,
+        suggested_changes: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+
+            changes_list: list[str] = []
+            if suggested_changes:
+                try:
+                    changes_list = json.loads(suggested_changes)
+                except json.JSONDecodeError:
+                    changes_list = [c.strip() for c in suggested_changes.split(",") if c.strip()]
+
+            critique_id = engine.critique(
+                debate_id=debate_id,
+                proposal_id=proposal_id,
+                critic=critic,
+                verdict=verdict,
+                reasoning=reasoning,
+                suggested_changes=changes_list,
+            )
+            return json.dumps({"critique_id": critique_id, "debate_id": debate_id})
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_vote ──────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_vote",
+        description="Vote on a proposal in a debate.",
+    )
+    def _kb_vote(
+        debate_id: str,
+        agent: str,
+        proposal_id: str,
+        support: bool = True,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+            engine.vote(
+                debate_id=debate_id,
+                agent=agent,
+                proposal_id=proposal_id,
+                support=support,
+            )
+            return json.dumps({
+                "status": "voted",
+                "debate_id": debate_id,
+                "agent": agent,
+                "proposal_id": proposal_id,
+                "support": support,
+            })
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_resolve_debate ────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_resolve_debate",
+        description=(
+            "Resolve a debate: tally votes, pick winner, generate decision. "
+            "Also auto-posts the decision to the DecisionStore."
+        ),
+    )
+    def _kb_resolve_debate(
+        debate_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+            result = engine.resolve(debate_id)
+
+            # Auto-post the decision to DecisionStore
+            decision_data = result.get("decision", {})
+            if decision_data and decision_data.get("status") == "accepted":
+                config = _get_config(ctx)
+                dec_store = DecisionStore(config.decisions_path / "decisions.jsonl")
+                debate = engine.get_debate(debate_id)
+                dec_record = dec_store.append(
+                    title=decision_data.get("title", ""),
+                    status="accepted",
+                    rationale=decision_data.get("rationale", ""),
+                    context=debate.context if debate else "",
+                    debate_id=debate_id,
+                    source_tool=debate.source_tool if debate else "",
+                    source_session=debate.source_session if debate else "",
+                    project_path=debate.project_path if debate else "",
+                )
+                result["decision_record_id"] = dec_record.id
+
+            return json.dumps(result)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_get_debate ────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_get_debate",
+        description=(
+            "Get full debate state including proposals, critiques, votes."
+        ),
+    )
+    def _kb_get_debate(
+        debate_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+            debate = engine.get_debate(debate_id)
+            if debate is None:
+                return json.dumps({"error": f"Debate {debate_id!r} not found"})
+            return json.dumps(debate.to_dict())
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_get_transcript ────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_get_transcript",
+        description="Get markdown transcript of a debate.",
+    )
+    def _kb_get_transcript(
+        debate_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+            transcript = engine.get_transcript(debate_id)
+            return transcript
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── kb_cancel_debate ─────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_cancel_debate",
+        description="Cancel an open debate.",
+    )
+    def _kb_cancel_debate(
+        debate_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            engine = _get_debate_engine(ctx)
+            engine.cancel(debate_id)
+            return json.dumps({"status": "cancelled", "debate_id": debate_id})
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
 
     # ── kb_migrate ───────────────────────────────────────────────────
 
