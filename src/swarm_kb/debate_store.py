@@ -60,12 +60,12 @@ class DebateRecord:
             source_tool=d.get("source_tool", ""),
             source_session=d.get("source_session", ""),
             status=d.get("status", "open"),
-            proposals=d.get("proposals", []),
+            proposals=list(d.get("proposals", [])),
             winning_proposal=d.get("winning_proposal", ""),
             decision_id=d.get("decision_id", ""),
             participant_count=d.get("participant_count", 0),
-            vote_tally=d.get("vote_tally", {}),
-            tags=d.get("tags", []),
+            vote_tally=dict(d.get("vote_tally", {})),
+            tags=list(d.get("tags", [])),
         )
 
 

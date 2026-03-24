@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import secrets
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -59,12 +61,12 @@ class Decision:
             status=d.get("status", "proposed"),
             rationale=d.get("rationale", ""),
             context=d.get("context", ""),
-            consequences=d.get("consequences", []),
+            consequences=list(d.get("consequences", [])),
             source_tool=d.get("source_tool", ""),
             source_session=d.get("source_session", ""),
             debate_id=d.get("debate_id", ""),
             project_path=d.get("project_path", ""),
-            tags=d.get("tags", []),
+            tags=list(d.get("tags", [])),
             superseded_by=d.get("superseded_by", ""),
         )
 
@@ -92,6 +94,27 @@ class DecisionStore:
                 except Exception as exc:
                     _log.warning("Skipping corrupt line in %s: %s", self._path, exc)
 
+    def _atomic_write(self) -> None:
+        """Rewrite the JSONL file atomically via tempfile + os.replace."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        content = "\n".join(json.dumps(d.to_dict()) for d in self._entries) + "\n"
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+            with fh:
+                fh.write(content)
+            os.replace(tmp_path, str(self._path))
+        except Exception:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
     def append(self, **kwargs: object) -> Decision:
         """Create and persist a new decision."""
         decision = Decision(
@@ -101,10 +124,8 @@ class DecisionStore:
         )
 
         with self._lock:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(decision.to_dict()) + "\n")
             self._entries.append(decision)
+            self._atomic_write()
 
         _log.info("Decision %s: %s (%s)", decision.id, decision.title, decision.status)
         return decision
@@ -157,10 +178,8 @@ class DecisionStore:
             if not found:
                 return False
 
-            # Rewrite file with updated entries
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            lines = [json.dumps(d.to_dict()) for d in self._entries]
-            self._path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # Rewrite file with updated entries atomically
+            self._atomic_write()
 
         _log.info("Decision %s status -> %s", decision_id, new_status)
         return True

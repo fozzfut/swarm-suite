@@ -13,11 +13,16 @@ stages are available as context for later stages.
 """
 
 import json
+import logging
+import os
 import secrets
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+_log = logging.getLogger("swarm_kb.pipeline")
 
 class StageStatus:
     PENDING = "pending"
@@ -135,7 +140,7 @@ class Pipeline:
     id: str = ""
     project_path: str = ""
     created_at: str = ""
-    current_stage: str = "arch"
+    current_stage: str = "spec"
     stages: dict[str, StageState] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -146,8 +151,9 @@ class Pipeline:
         if not self.stages:
             for stage in STAGE_ORDER:
                 self.stages[stage] = StageState(stage=stage)
-            self.stages["arch"].status = StageStatus.ACTIVE
-            self.stages["arch"].started_at = self.created_at
+            # Default: start at spec (first stage)
+            self.stages["spec"].status = StageStatus.ACTIVE
+            self.stages["spec"].started_at = self.created_at
 
     def get_current(self) -> StageState:
         return self.stages[self.current_stage]
@@ -176,6 +182,8 @@ class Pipeline:
             return False
         target_idx = STAGE_ORDER.index(stage)
         current_idx = STAGE_ORDER.index(self.current_stage)
+        if target_idx <= current_idx:
+            return False  # cannot go backward
 
         # Mark skipped stages
         for i in range(current_idx, target_idx):
@@ -207,7 +215,7 @@ class Pipeline:
             id=d.get("id", ""),
             project_path=d.get("project_path", ""),
             created_at=d.get("created_at", ""),
-            current_stage=d.get("current_stage", "arch"),
+            current_stage=d.get("current_stage", "spec"),
             stages=stages,
         )
 
@@ -298,7 +306,23 @@ class PipelineManager:
     def _save(self, pipeline_id: str) -> None:
         pipe = self._pipelines[pipeline_id]
         path = self._dir / f"{pipeline_id}.json"
-        path.write_text(json.dumps(pipe.to_dict(), indent=2), encoding="utf-8")
+        content = json.dumps(pipe.to_dict(), indent=2)
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+            with fh:
+                fh.write(content)
+            os.replace(tmp_path, str(path))
+        except Exception:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _load_all(self) -> None:
         for f in self._dir.glob("pipe-*.json"):
@@ -306,5 +330,5 @@ class PipelineManager:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 pipe = Pipeline.from_dict(data)
                 self._pipelines[pipe.id] = pipe
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.warning("Failed to load pipeline %s: %s", f, exc)

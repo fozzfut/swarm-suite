@@ -34,13 +34,23 @@ def create_mcp_server():
         config: SuiteConfig
         debate_engine: DebateEngine
         pipeline_manager: PipelineManager
+        decision_store: DecisionStore
+        debate_store: DebateStore
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
         config = bootstrap()
         engine = DebateEngine(config.debates_path / "active")
         pipe_mgr = PipelineManager(config.pipelines_path)
-        yield _LifespanState(config=config, debate_engine=engine, pipeline_manager=pipe_mgr)
+        dec_store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        dbt_store = DebateStore(config.debates_path / "debates.jsonl")
+        yield _LifespanState(
+            config=config,
+            debate_engine=engine,
+            pipeline_manager=pipe_mgr,
+            decision_store=dec_store,
+            debate_store=dbt_store,
+        )
 
     def _get_config(ctx: Optional[Context]) -> SuiteConfig:
         assert ctx is not None, "MCP Context not injected"
@@ -53,6 +63,14 @@ def create_mcp_server():
     def _get_pipeline_manager(ctx: Optional[Context]) -> PipelineManager:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.pipeline_manager
+
+    def _get_decision_store(ctx: Optional[Context]) -> DecisionStore:
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.decision_store
+
+    def _get_debate_store(ctx: Optional[Context]) -> DebateStore:
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.debate_store
 
     mcp = FastMCP("SwarmKB", lifespan=lifespan)
 
@@ -70,8 +88,8 @@ def create_mcp_server():
         config = _get_config(ctx)
         counts = count_sessions(config)
         xref_log = XRefLog(config.xrefs_path)
-        decision_store = DecisionStore(config.decisions_path / "decisions.jsonl")
-        debate_store = DebateStore(config.debates_path / "debates.jsonl")
+        decision_store = _get_decision_store(ctx)
+        debate_store = _get_debate_store(ctx)
         engine = _get_debate_engine(ctx)
         pipe_mgr = _get_pipeline_manager(ctx)
         pipelines = pipe_mgr.list_all()
@@ -334,8 +352,7 @@ def create_mcp_server():
         tags: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        config = _get_config(ctx)
-        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        store = _get_decision_store(ctx)
 
         # Parse comma-separated strings into lists
         consequences_list: list[str] = []
@@ -379,8 +396,7 @@ def create_mcp_server():
         project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        config = _get_config(ctx)
-        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        store = _get_decision_store(ctx)
         decisions = store.query(
             status=status,
             source_tool=source_tool,
@@ -401,8 +417,7 @@ def create_mcp_server():
         superseded_by: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        config = _get_config(ctx)
-        store = DecisionStore(config.decisions_path / "decisions.jsonl")
+        store = _get_decision_store(ctx)
         updated = store.update_status(decision_id, new_status, superseded_by=superseded_by)
         if updated:
             decision = store.get_by_id(decision_id)
@@ -432,8 +447,7 @@ def create_mcp_server():
         tags: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        config = _get_config(ctx)
-        store = DebateStore(config.debates_path / "debates.jsonl")
+        store = _get_debate_store(ctx)
 
         # Parse JSON strings into structured data
         proposals_list: list[dict] = []
@@ -485,8 +499,7 @@ def create_mcp_server():
         tag: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        config = _get_config(ctx)
-        store = DebateStore(config.debates_path / "debates.jsonl")
+        store = _get_debate_store(ctx)
         debates = store.query(
             status=status,
             source_tool=source_tool,
@@ -663,8 +676,7 @@ def create_mcp_server():
             # Auto-post the decision to DecisionStore
             decision_data = result.get("decision", {})
             if decision_data and decision_data.get("status") == "accepted":
-                config = _get_config(ctx)
-                dec_store = DecisionStore(config.decisions_path / "decisions.jsonl")
+                dec_store = _get_decision_store(ctx)
                 debate = engine.get_debate(debate_id)
                 dec_record = dec_store.append(
                     title=decision_data.get("title", ""),
@@ -757,7 +769,7 @@ def create_mcp_server():
 
         # If not embedded/hardware project, skip spec stage
         if not include_spec:
-            pipe.skip_to("arch")
+            pipe_mgr.skip_to(pipe.id, "arch")
 
         first_stage = pipe.current_stage
         info = STAGE_INFO[first_stage]

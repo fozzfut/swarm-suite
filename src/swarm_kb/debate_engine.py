@@ -1,8 +1,11 @@
 """Shared debate engine -- any swarm tool can start, participate in, and resolve debates."""
 
+import copy
 import json
 import logging
+import os
 import secrets
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -62,9 +65,9 @@ class Proposal:
             author=d.get("author", ""),
             title=d.get("title", ""),
             description=d.get("description", ""),
-            pros=d.get("pros", []),
-            cons=d.get("cons", []),
-            trade_offs=d.get("trade_offs", []),
+            pros=list(d.get("pros", [])),
+            cons=list(d.get("cons", [])),
+            trade_offs=list(d.get("trade_offs", [])),
         )
 
 
@@ -104,7 +107,7 @@ class Critique:
             critic=d.get("critic", ""),
             verdict=verdict,
             reasoning=d.get("reasoning", ""),
-            suggested_changes=d.get("suggested_changes", []),
+            suggested_changes=list(d.get("suggested_changes", [])),
         )
 
 
@@ -153,7 +156,7 @@ class DebateDecision:
             title=d.get("title", ""),
             chosen_proposal_id=d.get("chosen_proposal_id", ""),
             rationale=d.get("rationale", ""),
-            dissenting_opinions=d.get("dissenting_opinions", []),
+            dissenting_opinions=list(d.get("dissenting_opinions", [])),
             status=d.get("status", "accepted"),
         )
 
@@ -431,7 +434,10 @@ class DebateEngine:
 
     def get_debate(self, debate_id: str) -> Optional[Debate]:
         with self._lock:
-            return self._debates.get(debate_id)
+            debate = self._debates.get(debate_id)
+            if debate is None:
+                return None
+            return copy.deepcopy(debate)
 
     def list_debates(
         self, status: str = "", source_tool: str = ""
@@ -533,9 +539,8 @@ class DebateEngine:
                 raise ValueError(f"Debate {debate_id!r} is not open (status={debate.status.value})")
             decision = debate.resolve()
             self._save(debate_id)
-
-        transcript = debate.get_transcript()
-        self._save_transcript(debate_id, transcript)
+            transcript = debate.get_transcript()
+            self._save_transcript(debate_id, transcript)
 
         decision_dict = decision.to_dict() if decision else {}
         _log.info("Resolved debate %s", debate_id)
@@ -557,9 +562,9 @@ class DebateEngine:
         """Get or generate a markdown transcript for a debate."""
         with self._lock:
             debate = self._debates.get(debate_id)
-        if debate is None:
-            raise ValueError(f"Debate {debate_id!r} not found")
-        return debate.get_transcript()
+            if debate is None:
+                raise ValueError(f"Debate {debate_id!r} not found")
+            return debate.get_transcript()
 
     # -- persistence --------------------------------------------------------
 
@@ -567,6 +572,7 @@ class DebateEngine:
         """Save debate state to ``<dir>/<debate_id>/debate.json``.
 
         Must be called while holding ``self._lock``.
+        Uses atomic write via tempfile + os.replace.
         """
         debate = self._debates.get(debate_id)
         if debate is None:
@@ -574,16 +580,48 @@ class DebateEngine:
         debate_dir = self._dir / debate_id
         debate_dir.mkdir(parents=True, exist_ok=True)
         path = debate_dir / "debate.json"
-        path.write_text(
-            json.dumps(debate.to_dict(), indent=2) + "\n", encoding="utf-8"
-        )
+        content = json.dumps(debate.to_dict(), indent=2) + "\n"
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(debate_dir), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+            with fh:
+                fh.write(content)
+            os.replace(tmp_path, str(path))
+        except Exception:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _save_transcript(self, debate_id: str, transcript: str) -> None:
-        """Save the markdown transcript alongside the debate JSON."""
+        """Save the markdown transcript alongside the debate JSON.
+
+        Uses atomic write via tempfile + os.replace.
+        """
         debate_dir = self._dir / debate_id
         debate_dir.mkdir(parents=True, exist_ok=True)
         path = debate_dir / "transcript.md"
-        path.write_text(transcript, encoding="utf-8")
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(debate_dir), suffix=".tmp")
+        try:
+            fh = os.fdopen(tmp_fd, "w", encoding="utf-8")
+            with fh:
+                fh.write(transcript)
+            os.replace(tmp_path, str(path))
+        except Exception:
+            try:
+                os.close(tmp_fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _load_all(self) -> None:
         """Load all debate directories on startup."""
