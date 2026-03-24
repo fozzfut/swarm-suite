@@ -99,7 +99,8 @@ def run_tests(test_command: str = "", base_dir: str = ".", timeout: int = 300) -
 
     # Build an argument list instead of passing a raw string to the shell.
     try:
-        args = shlex.split(test_command)
+        import platform
+        args = shlex.split(test_command, posix=(platform.system() != 'Windows'))
     except ValueError:
         return TestResult(
             command=test_command,

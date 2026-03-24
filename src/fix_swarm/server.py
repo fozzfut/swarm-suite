@@ -523,7 +523,7 @@ def create_mcp_server():
             reactions = proposal.get("reactions", [])
             approvals = sum(1 for r in reactions if r.get("reaction_type") == "approve")
             rejections = sum(1 for r in reactions if r.get("reaction_type") == "reject")
-            suggestions = sum(1 for r in reactions if r.get("reaction_type") == "suggest")
+            suggestions = sum(1 for r in reactions if r.get("reaction_type") == "suggest_alternative")
 
             return _ok({
                 "proposal_id": proposal_id,
@@ -578,7 +578,7 @@ def create_mcp_server():
                     action_type = FixActionType.REPLACE
 
                 actions.append(FixAction(
-                    finding_id=p.get("finding_id", p["proposal_id"]),
+                    finding_id=p.get("finding_id", p["id"]),
                     file=p["file"],
                     line_start=p["line_start"],
                     line_end=p["line_end"],
@@ -599,20 +599,20 @@ def create_mcp_server():
             applied_count = 0
             failed_count = 0
             for p in approved:
-                fid = p.get("finding_id", p["proposal_id"])
+                fid = p.get("finding_id", p["id"])
                 r = result_by_finding.get(fid)
                 if r and r.success:
-                    mgr.update_proposal_status(session_id, p["proposal_id"], ProposalStatus.APPLIED)
+                    mgr.update_proposal_status(session_id, p["id"], ProposalStatus.APPLIED)
                     applied_count += 1
                 elif r:
-                    mgr.update_proposal_status(session_id, p["proposal_id"], ProposalStatus.FAILED)
+                    mgr.update_proposal_status(session_id, p["id"], ProposalStatus.FAILED)
                     failed_count += 1
 
             # Auto-check syntax on modified files
             syntax_errors = []
             try:
                 from .regression_checker import check_syntax as _check_syn
-                modified_files = list({p["file"] for p in approved if result_by_finding.get(p.get("finding_id", p["proposal_id"])) and result_by_finding[p.get("finding_id", p["proposal_id"])].success})
+                modified_files = list({p["file"] for p in approved if result_by_finding.get(p.get("finding_id", p["id"])) and result_by_finding[p.get("finding_id", p["id"])].success})
                 if modified_files:
                     syntax_errors = _check_syn(modified_files, base_dir)
             except Exception as syn_exc:
@@ -721,7 +721,7 @@ def create_mcp_server():
                     action_type = FixActionType.REPLACE
 
                 actions.append(FixAction(
-                    finding_id=p.get("finding_id", p["proposal_id"]),
+                    finding_id=p.get("finding_id", p["id"]),
                     file=p["file"],
                     line_start=p["line_start"],
                     line_end=p["line_end"],
@@ -740,10 +740,10 @@ def create_mcp_server():
             # Update proposal statuses for verified fixes
             result_by_finding = {r.finding_id: r for r in results}
             for p in applied:
-                fid = p.get("finding_id", p["proposal_id"])
+                fid = p.get("finding_id", p["id"])
                 r = result_by_finding.get(fid)
                 if r and r.success:
-                    mgr.update_proposal_status(session_id, p["proposal_id"], ProposalStatus.VERIFIED)
+                    mgr.update_proposal_status(session_id, p["id"], ProposalStatus.VERIFIED)
 
             mgr.post_event(session_id, Event(
                 event_type=EventType.VERIFICATION_COMPLETE,
@@ -907,10 +907,8 @@ def create_mcp_server():
             known_experts.discard("")
 
             # Check which experts have completed this phase
-            phase_key = str(phase)
-            completed_experts = set()
-            if phase_key in phase_data:
-                completed_experts = set(phase_data[phase_key])
+            # phase_data is {expert_role: [list_of_phase_ints]}
+            completed_experts = {expert for expert, phases in phase_data.items() if phase in phases}
 
             pending_experts = known_experts - completed_experts
 
