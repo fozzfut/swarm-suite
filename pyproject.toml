@@ -1,6 +1,6 @@
 [project]
 name = "review-swarm"
-version = "0.3.9"
+version = "0.3.10"
 description = "Collaborative AI code review MCP server -- shared whiteboard for multi-agent code review via MCP"
 requires-python = ">=3.10"
 license = { text = "MIT" }

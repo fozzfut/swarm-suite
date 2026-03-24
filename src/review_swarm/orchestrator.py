@@ -186,9 +186,11 @@ class Orchestrator:
         # Determine base path and pattern
         if scope:
             # Check if scope is a specific file
-            scope_path = proj / scope
+            scope_path = (proj / scope).resolve()
+            if not scope_path.is_relative_to(proj):
+                return []  # scope escapes project
             if scope_path.is_file():
-                return [scope]
+                return [str(scope_path.relative_to(proj)).replace("\\", "/")]
 
             # Check if scope is a directory
             if scope_path.is_dir():
