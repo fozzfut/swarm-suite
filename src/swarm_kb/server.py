@@ -2,6 +2,7 @@
 
 import json
 import logging
+from pathlib import Path
 from typing import Optional
 
 from .bootstrap import bootstrap
@@ -872,6 +873,255 @@ def create_mcp_server():
         pipe_mgr = _get_pipeline_manager(ctx)
         pipelines = pipe_mgr.list_all()
         return json.dumps([p.to_dict() for p in pipelines], indent=2)
+
+    # ── kb_guide ─────────────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_guide",
+        description=(
+            "Show the Swarm Suite workflow guide. Detects project type "
+            "and shows the recommended pipeline with specific commands. "
+            "Call at the start of any project analysis."
+        ),
+    )
+    def _kb_guide(project_path: str = ".", ctx: Optional[Context] = None) -> str:
+        config = _get_config(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx)
+        pp = Path(project_path).resolve()
+
+        # ── Detect project type ──────────────────────────────────────
+        markers: dict[str, tuple[list[str], str]] = {
+            "python": (
+                ["pyproject.toml", "setup.py", "requirements.txt"],
+                "python -m pytest --tb=short -q",
+            ),
+            "node": (
+                ["package.json"],
+                "npm test",
+            ),
+            "go": (
+                ["go.mod"],
+                "go test ./...",
+            ),
+            "rust": (
+                ["Cargo.toml"],
+                "cargo test",
+            ),
+            "dotnet": (
+                [],  # handled by glob below
+                "dotnet test",
+            ),
+        }
+
+        detected_types: list[str] = []
+        test_commands: list[str] = []
+
+        for lang, (files, cmd) in markers.items():
+            if lang == "dotnet":
+                if any(pp.glob("*.csproj")) or any(pp.glob("**/*.csproj")):
+                    detected_types.append(lang)
+                    test_commands.append(cmd)
+                continue
+            for fname in files:
+                if (pp / fname).exists():
+                    detected_types.append(lang)
+                    test_commands.append(cmd)
+                    break
+
+        if detected_types:
+            project_type = ", ".join(detected_types)
+            test_command = "; ".join(test_commands)
+        else:
+            project_type = "unknown"
+            test_command = "echo 'No test runner detected -- configure manually'"
+
+        # ── Check for active pipeline ────────────────────────────────
+        pp_str = str(pp)
+        all_pipelines = pipe_mgr.list_all()
+        active_pipeline = None
+        for p in all_pipelines:
+            p_resolved = str(Path(p.project_path).resolve())
+            if p_resolved == pp_str:
+                current = p.get_current()
+                if current.status == "active":
+                    active_pipeline = p
+                    break
+
+        pipeline_status_obj = None
+        if active_pipeline:
+            info = STAGE_INFO[active_pipeline.current_stage]
+            pipeline_status_obj = {
+                "id": active_pipeline.id,
+                "stage": active_pipeline.current_stage,
+                "stage_name": info["name"],
+                "status": "active",
+            }
+
+        # ── Count existing sessions ──────────────────────────────────
+        session_counts: dict[str, int] = {}
+        for tool_name in TOOL_NAMES:
+            sessions_dir = config.tool_sessions_path(tool_name)
+            if sessions_dir.exists():
+                session_counts[tool_name] = sum(
+                    1 for e in sessions_dir.iterdir() if e.is_dir()
+                )
+            else:
+                session_counts[tool_name] = 0
+
+        total_sessions = sum(session_counts.values())
+
+        # ── Build pipeline status string for the guide ───────────────
+        if active_pipeline:
+            info = STAGE_INFO[active_pipeline.current_stage]
+            pipeline_display = (
+                f"**ACTIVE** -- Pipeline `{active_pipeline.id}` "
+                f"at Stage: {info['name']} (`{active_pipeline.current_stage}`)"
+            )
+        else:
+            pipeline_display = "None"
+
+        # ── Build guide ──────────────────────────────────────────────
+        # Preamble for active pipeline
+        active_preamble = ""
+        if active_pipeline:
+            info = STAGE_INFO[active_pipeline.current_stage]
+            actions_md = "\n".join(f"  - {a}" for a in info["actions"])
+            active_preamble = f"""
+> **You have an active pipeline at Stage: {info['name']}** (`{active_pipeline.current_stage}`)
+> Pipeline ID: `{active_pipeline.id}`
+>
+> **What to do next:**
+{actions_md}
+
+---
+
+"""
+
+        # Session notice
+        session_notice = ""
+        if total_sessions > 0 and not active_pipeline:
+            session_notice = (
+                f"\n> Found **{total_sessions}** existing session(s) "
+                f"(arch: {session_counts.get('arch', 0)}, "
+                f"review: {session_counts.get('review', 0)}, "
+                f"fix: {session_counts.get('fix', 0)}, "
+                f"doc: {session_counts.get('doc', 0)}). "
+                f"Consider starting a pipeline to organize the workflow.\n\n---\n\n"
+            )
+
+        guide = f"""{active_preamble}{session_notice}# Swarm Suite \u2014 Pipeline Guide
+
+## Your Project
+- **Path:** {project_path}
+- **Type:** {project_type}
+- **Test command:** `{test_command}`
+- **Active pipeline:** {pipeline_display}
+
+## Workflow
+
+### Stage 1: Architecture Analysis
+Analyze the project structure before looking at code details.
+
+```
+arch_analyze("{project_path}")
+```
+- Reviews: coupling, complexity, circular dependencies, module structure
+- Findings are saved to swarm-kb automatically
+
+For design questions, start a real multi-agent debate:
+```
+orchestrate_debate("{project_path}", topic="<your question>")
+```
+- 5-10 expert agents will analyze code and debate
+- Result: architectural decision (ADR) saved to swarm-kb
+
+**When done:** Review findings. Approve valid ones, dismiss false positives.
+```
+kb_advance_pipeline("<pipeline_id>")
+```
+
+---
+
+### Stage 2: Code Review
+Multi-expert review informed by architectural decisions from Stage 1.
+
+```
+orchestrate_review("{project_path}")
+```
+- 13 experts: security, performance, threading, error-handling, etc.
+- Experts automatically receive ADRs as context
+- Phase 1: experts review files independently
+- Phase 2: experts cross-check each other's findings
+
+**When done:** Review findings. `kb_advance_pipeline("<pipeline_id>")`
+
+---
+
+### Stage 3: Fix
+Apply fixes for confirmed issues from both arch and review stages.
+
+```
+snapshot_tests("<session_id>")        \u2190 save test baseline FIRST
+start_session(review_session="...", arch_session="...")
+```
+- 8 fix experts: refactoring, security-fix, performance-fix, etc.
+- Experts propose fixes \u2192 cross-review \u2192 consensus \u2192 apply
+- Only approved fixes are applied
+
+**When done:** `kb_advance_pipeline("<pipeline_id>")`
+
+---
+
+### Stage 4: Regression Check
+Verify fixes didn't break anything.
+
+```
+check_regression("<session_id>")
+```
+- Syntax validation on modified files
+- Test suite comparison (before vs after)
+- Re-scan for new issues
+
+If regression detected \u2192 investigate, fix, re-check.
+
+**When done:** `kb_advance_pipeline("<pipeline_id>")` \u2192 Pipeline complete!
+
+---
+
+### Stage 5: Documentation
+Update docs to reflect changes.
+
+```
+doc_verify("{project_path}")          \u2190 find stale docs
+doc_generate("{project_path}")        \u2190 update API docs
+```
+
+**When done:** `kb_advance_pipeline("<pipeline_id>")` \u2192 Pipeline complete!
+
+---
+
+## Quick Start
+
+To begin the full pipeline:
+```
+kb_start_pipeline("{project_path}")
+```
+
+Or run individual tools without a pipeline \u2014 they work independently too.
+
+## Key Principle
+Each stage has a **user gate** \u2014 you review results and decide when to advance.
+No automatic progression. You control the pace.
+"""
+
+        return json.dumps({
+            "project_path": project_path,
+            "project_type": project_type,
+            "test_command": test_command,
+            "active_pipeline": pipeline_status_obj,
+            "existing_sessions": session_counts,
+            "guide": guide,
+        }, indent=2)
 
     # ── kb_migrate ───────────────────────────────────────────────────
 
