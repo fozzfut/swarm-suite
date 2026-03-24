@@ -16,6 +16,11 @@ from .finding_reader import search_all_findings, get_finding_reader, FindingRead
 from .finding_writer import FindingWriter
 from .paths import code_map_path, project_hash_for
 from .pipeline import PipelineManager, STAGE_INFO, STAGE_ORDER
+from .quality_gate import (
+    GateThresholds, RoundMetrics,
+    compute_round_metrics, check_gate,
+    load_thresholds, save_thresholds,
+)
 from .session_meta import count_sessions, list_sessions
 from .xref import XRefLog
 
@@ -1113,6 +1118,10 @@ start_session(review_session="...", arch_session="...")
 - 8 fix experts: refactoring, security-fix, performance-fix, etc.
 - Experts propose fixes \u2192 cross-review \u2192 consensus \u2192 apply
 - Only approved fixes are applied
+- **Quality Gate:** After each fix iteration, run `kb_check_quality_gate(findings, fixes_applied, regressions, history)`
+  - `recommendation="continue"` \u2192 fix more, re-review, re-check gate
+  - `recommendation="stop_clean"` \u2192 advance to verify stage
+  - `recommendation="stop_circuit_breaker"` \u2192 STOP, review manually (fix cycle is unstable)
 
 **When done:** `kb_advance_pipeline("<pipeline_id>")`
 
@@ -1123,10 +1132,12 @@ Verify fixes didn't break anything.
 
 ```
 check_regression("<session_id>")
+kb_check_quality_gate(findings, fixes_applied, regressions, history)
 ```
 - Syntax validation on modified files
 - Test suite comparison (before vs after)
 - Re-scan for new issues
+- Quality gate confirms stability before advancing
 
 If regression detected \u2192 investigate, fix, re-check.
 
@@ -1174,6 +1185,121 @@ No automatic progression. You control the pace.
             "active_pipeline": pipeline_status_obj,
             "existing_sessions": session_counts,
             "guide": guide,
+        }, indent=2)
+
+    # ── kb_check_quality_gate ─────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_check_quality_gate",
+        description=(
+            "Check if the review-fix cycle meets quality thresholds. "
+            "Pass findings from the current review round. Returns: passed, "
+            "circuit breaker status, and recommendation (continue/stop)."
+        ),
+    )
+    def _kb_check_quality_gate(
+        findings: str,           # JSON array of finding dicts
+        fixes_applied: int = 0,
+        regressions: int = 0,
+        history: str = "",       # JSON array of previous RoundMetrics dicts
+        thresholds: str = "",    # JSON object of custom thresholds (optional)
+        ctx: Optional[Context] = None,
+    ) -> str:
+        try:
+            findings_list = json.loads(findings)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"error": f"Invalid findings JSON: {exc}"})
+
+        metrics = compute_round_metrics(
+            findings_list,
+            fixes_applied=fixes_applied,
+            regressions=regressions,
+        )
+
+        # Parse history
+        history_list: list[RoundMetrics] = []
+        if history:
+            try:
+                raw_history = json.loads(history)
+                for h in raw_history:
+                    rm = RoundMetrics()
+                    for k, v in h.items():
+                        if hasattr(rm, k):
+                            setattr(rm, k, v)
+                    history_list.append(rm)
+            except json.JSONDecodeError as exc:
+                return json.dumps({"error": f"Invalid history JSON: {exc}"})
+
+        # Parse thresholds or load from config
+        gate_thresholds: GateThresholds
+        if thresholds:
+            try:
+                raw_thresholds = json.loads(thresholds)
+                gate_thresholds = GateThresholds.from_dict(raw_thresholds)
+            except json.JSONDecodeError as exc:
+                return json.dumps({"error": f"Invalid thresholds JSON: {exc}"})
+        else:
+            config = _get_config(ctx)
+            gate_path = config.kb_root / "quality_gate.json"
+            gate_thresholds = load_thresholds(gate_path)
+
+        result = check_gate(metrics, history=history_list, thresholds=gate_thresholds)
+        return json.dumps(result.to_dict(), indent=2)
+
+    # ── kb_configure_quality_gate ─────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_configure_quality_gate",
+        description=(
+            "Configure quality gate thresholds for a project. "
+            "Saves to ~/.swarm-kb/quality_gate.json"
+        ),
+    )
+    def _kb_configure_quality_gate(
+        max_critical: int = 0,
+        max_high: int = 0,
+        max_medium: int = 3,
+        max_weighted_score: int = 8,
+        consecutive_clean_rounds: int = 2,
+        max_iterations: int = 7,
+        max_regression_rate: float = 0.10,
+        max_stale_rounds: int = 3,
+        score_increase_limit: int = 2,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        gate_thresholds = GateThresholds(
+            max_critical=max_critical,
+            max_high=max_high,
+            max_medium=max_medium,
+            max_weighted_score=max_weighted_score,
+            consecutive_clean_rounds=consecutive_clean_rounds,
+            max_regression_rate=max_regression_rate,
+            max_iterations=max_iterations,
+            max_stale_rounds=max_stale_rounds,
+            score_increase_limit=score_increase_limit,
+        )
+        gate_path = config.kb_root / "quality_gate.json"
+        save_thresholds(gate_thresholds, gate_path)
+        return json.dumps({
+            "status": "saved",
+            "path": str(gate_path),
+            "thresholds": gate_thresholds.to_dict(),
+        }, indent=2)
+
+    # ── kb_get_quality_gate ──────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_get_quality_gate",
+        description="Get current quality gate thresholds.",
+    )
+    def _kb_get_quality_gate(ctx: Optional[Context] = None) -> str:
+        config = _get_config(ctx)
+        gate_path = config.kb_root / "quality_gate.json"
+        gate_thresholds = load_thresholds(gate_path)
+        return json.dumps({
+            "path": str(gate_path),
+            "thresholds": gate_thresholds.to_dict(),
         }, indent=2)
 
     # ── kb_read_document ──────────────────────────────────────────────
