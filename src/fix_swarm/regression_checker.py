@@ -76,19 +76,17 @@ def check_syntax(files: list[str], base_dir: str = ".") -> list[dict]:
 def run_tests(test_command: str = "", base_dir: str = ".", timeout: int = 300) -> TestResult:
     """Run project test suite. Auto-detects pytest/npm/go/cargo if no command given.
 
-    Security: Auto-detected commands use ``shell=False`` with an argument list.
-    User-provided commands are parsed via :func:`shlex.split` to avoid
-    ``shell=True``.  Callers that expose ``test_command`` to untrusted input
-    should validate or restrict the value before passing it here.
+    Security: User-provided commands are parsed via :func:`shlex.split` and run
+    with ``shell=False``.  Auto-detected commands use ``shell=True`` for
+    Windows compatibility (npm/go/cargo/dotnet are batch scripts on Windows).
+    Callers that expose ``test_command`` to untrusted input should validate or
+    restrict the value before passing it here.
     """
-    import shlex
-
     base = Path(base_dir)
 
-    auto_detected = False
+    user_provided = bool(test_command)
     if not test_command:
         test_command = _detect_test_command(base)
-        auto_detected = True
 
     if not test_command:
         return TestResult(
@@ -97,22 +95,31 @@ def run_tests(test_command: str = "", base_dir: str = ".", timeout: int = 300) -
             stdout="No test framework detected. Skipping.",
         )
 
-    # Build an argument list instead of passing a raw string to the shell.
-    try:
+    if user_provided:
+        # User command: use shlex for safety, shell=False
+        import shlex
         import platform
-        args = shlex.split(test_command, posix=(platform.system() != 'Windows'))
-    except ValueError:
-        return TestResult(
-            command=test_command,
-            exit_code=-1,
-            stderr="Invalid command syntax",
-            passed=False,
-        )
+        try:
+            args = shlex.split(test_command, posix=(platform.system() != 'Windows'))
+        except ValueError:
+            return TestResult(
+                command=test_command,
+                exit_code=-1,
+                stderr="Invalid command syntax",
+                passed=False,
+            )
+        use_shell = False
+        cmd = args
+    else:
+        # Auto-detected: safe known commands, use shell=True for Windows compat
+        # (npm, go, cargo, dotnet are batch scripts on Windows)
+        use_shell = True
+        cmd = test_command
 
     start = time.time()
     try:
         result = subprocess.run(
-            args, shell=False, cwd=str(base),
+            cmd, shell=use_shell, cwd=str(base),
             capture_output=True, text=True, timeout=timeout,
         )
         duration = time.time() - start

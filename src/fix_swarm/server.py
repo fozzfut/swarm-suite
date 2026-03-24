@@ -563,8 +563,10 @@ def create_mcp_server():
             if not approved:
                 return _ok({"status": "no_approved", "message": "No approved proposals to apply"})
 
-            # Convert proposals to FixActions
+            # Convert proposals to FixActions, tracking which proposal
+            # produced each action so we can match results by index.
             actions = []
+            proposal_for_action: list[dict] = []  # parallel to actions
             for p in approved:
                 old_text = p.get("old_text", "")
                 new_text = p.get("new_text", "")
@@ -587,6 +589,7 @@ def create_mcp_server():
                     new_text=new_text,
                     rationale=p.get("rationale", ""),
                 ))
+                proposal_for_action.append(p)
 
             if not actions:
                 return _ok({"status": "no_actions", "message": "Approved proposals produced no actionable fixes"})
@@ -594,25 +597,27 @@ def create_mcp_server():
             plan = FixPlan(actions=actions)
             results = apply_plan(plan, base_dir=base_dir, backup=backup)
 
-            # Update proposal statuses based on results
-            result_by_finding = {r.finding_id: r for r in results}
+            # Match results to proposals by index (avoids finding_id collisions)
             applied_count = 0
             failed_count = 0
-            for p in approved:
-                fid = p.get("finding_id", p["id"])
-                r = result_by_finding.get(fid)
-                if r and r.success:
-                    mgr.update_proposal_status(session_id, p["id"], ProposalStatus.APPLIED)
-                    applied_count += 1
-                elif r:
-                    mgr.update_proposal_status(session_id, p["id"], ProposalStatus.FAILED)
-                    failed_count += 1
+            applied_proposals: list[dict] = []
+            for i, result in enumerate(results):
+                if i < len(proposal_for_action):
+                    p = proposal_for_action[i]
+                    pid = p["id"]
+                    if result.success:
+                        mgr.update_proposal_status(session_id, pid, ProposalStatus.APPLIED)
+                        applied_count += 1
+                        applied_proposals.append(p)
+                    else:
+                        mgr.update_proposal_status(session_id, pid, ProposalStatus.FAILED)
+                        failed_count += 1
 
             # Auto-check syntax on modified files
             syntax_errors = []
             try:
                 from .regression_checker import check_syntax as _check_syn
-                modified_files = list({p["file"] for p in approved if result_by_finding.get(p.get("finding_id", p["id"])) and result_by_finding[p.get("finding_id", p["id"])].success})
+                modified_files = list({p["file"] for p in applied_proposals})
                 if modified_files:
                     syntax_errors = _check_syn(modified_files, base_dir)
             except Exception as syn_exc:
@@ -900,10 +905,8 @@ def create_mcp_server():
             phase_data = mgr.get_phase_data(session_id)
             claims = mgr.get_claims(session_id)
 
-            # Determine known experts from claims
-            known_experts = set()
-            for c in claims:
-                known_experts.add(c.get("expert_role", ""))
+            # Determine known experts from claims (only active ones)
+            known_experts = {c["expert_role"] for c in claims if c.get("status") == "active"}
             known_experts.discard("")
 
             # Check which experts have completed this phase
@@ -1215,8 +1218,10 @@ def create_mcp_server():
             from .regression_checker import check_regression
             mgr = _get_mgr(ctx)
 
-            # Get modified files from applied proposals
-            proposals = mgr.get_proposals(session_id, status="applied")
+            # Get modified files from applied and verified proposals
+            applied = mgr.get_proposals(session_id, status="applied")
+            verified = mgr.get_proposals(session_id, status="verified")
+            proposals = applied + verified
             modified_files = list({p["file"] for p in proposals})
 
             if not modified_files:
