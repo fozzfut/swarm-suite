@@ -1,6 +1,7 @@
 """Pipeline orchestration -- defines the standard Swarm Suite workflow.
 
 Stages:
+  0. spec    -- Hardware spec analysis (SpecSwarm) [optional, for embedded projects]
   1. arch    -- Architecture analysis (ArchSwarm)
   2. review  -- Code review (ReviewSwarm)
   3. fix     -- Apply fixes (FixSwarm)
@@ -24,9 +25,23 @@ class StageStatus:
     COMPLETED = "completed"
     SKIPPED = "skipped"
 
-STAGE_ORDER = ["arch", "review", "fix", "verify", "doc"]
+STAGE_ORDER = ["spec", "arch", "review", "fix", "verify", "doc"]
 
 STAGE_INFO = {
+    "spec": {
+        "name": "Hardware Spec Analysis",
+        "tool": "spec-swarm",
+        "description": "Analyze datasheets, register maps, and hardware documentation. Extract pin configs, protocols (CAN, SPI, I2C, EtherCAT, Modbus, etc.), timing constraints, memory layout, and power specs.",
+        "actions": [
+            "1. Run spec_start_session(project_path) to begin",
+            "2. Run spec_ingest(session_id, document_path) for each datasheet/document",
+            "3. Run spec_check_conflicts(session_id) to find pin/bus/power conflicts",
+            "4. Run spec_export_for_arch(session_id) to post constraints to swarm-kb",
+            "5. Review extracted specs — correct any parsing errors",
+            "6. Call kb_advance_pipeline(pipeline_id) when ready for architecture analysis",
+        ],
+        "optional": True,
+    },
     "arch": {
         "name": "Architecture Analysis",
         "tool": "arch-swarm",

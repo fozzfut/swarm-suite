@@ -743,21 +743,32 @@ def create_mcp_server():
         name="kb_start_pipeline",
         description=(
             "Start a new analysis pipeline for a project. "
-            "Always begins with architecture analysis."
+            "Set include_spec=True for embedded/hardware projects "
+            "to begin with datasheet/spec analysis before architecture."
         ),
     )
     def _kb_start_pipeline(
         project_path: str,
+        include_spec: bool = False,
         ctx: Optional[Context] = None,
     ) -> str:
         pipe_mgr = _get_pipeline_manager(ctx)
         pipe = pipe_mgr.start(project_path)
-        info = STAGE_INFO["arch"]
+
+        # If not embedded/hardware project, skip spec stage
+        if not include_spec:
+            pipe.skip_to("arch")
+
+        first_stage = pipe.current_stage
+        info = STAGE_INFO[first_stage]
+        msg = ("Pipeline started. Begin with hardware spec analysis."
+               if first_stage == "spec"
+               else "Pipeline started. Begin with architecture analysis.")
         return json.dumps({
             "pipeline_id": pipe.id,
-            "current_stage": "arch",
+            "current_stage": first_stage,
             "stage_name": info["name"],
-            "message": "Pipeline started. Begin with architecture analysis.",
+            "message": msg,
             "actions": info["actions"],
             "pipeline": pipe.to_dict(),
         }, indent=2)
@@ -911,6 +922,10 @@ def create_mcp_server():
                 [],  # handled by glob below
                 "dotnet test",
             ),
+            "embedded/c": (
+                ["CMakeLists.txt", "Makefile", "platformio.ini"],
+                "make test",
+            ),
         }
 
         detected_types: list[str] = []
@@ -1019,6 +1034,24 @@ def create_mcp_server():
 
 ## Workflow
 
+### Stage 0: Hardware Spec Analysis (embedded projects)
+*Skip this stage for pure software projects.*
+
+```
+kb_start_pipeline("{project_path}", include_spec=True)
+spec_start_session("{project_path}")
+spec_ingest(session_id, "path/to/datasheet.pdf")
+```
+- Parses datasheets, reference manuals, application notes
+- Extracts: register maps, pin configs, protocols (CAN, SPI, I2C, EtherCAT, Modbus, etc.)
+- Extracts: timing constraints, power specs, memory layout
+- `spec_check_conflicts()` finds pin/bus/power conflicts
+- `spec_export_for_arch()` posts hardware constraints to swarm-kb
+
+**When done:** Review specs. `kb_advance_pipeline("<pipeline_id>")`
+
+---
+
 ### Stage 1: Architecture Analysis
 Analyze the project structure before looking at code details.
 
@@ -1102,10 +1135,17 @@ doc_generate("{project_path}")        \u2190 update API docs
 
 ## Quick Start
 
-To begin the full pipeline:
+**For embedded/hardware projects:**
+```
+kb_start_pipeline("{project_path}", include_spec=True)
+```
+Starts at Stage 0 (spec analysis) \u2192 ingest datasheets \u2192 architecture \u2192 review \u2192 fix \u2192 verify \u2192 docs.
+
+**For software projects:**
 ```
 kb_start_pipeline("{project_path}")
 ```
+Starts at Stage 1 (architecture) \u2192 review \u2192 fix \u2192 verify \u2192 docs.
 
 Or run individual tools without a pipeline \u2014 they work independently too.
 
