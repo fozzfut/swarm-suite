@@ -590,6 +590,8 @@ def create_mcp_server():
                 trade_offs=trade_offs_list,
             )
             return json.dumps({"proposal_id": proposal_id, "debate_id": debate_id})
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
@@ -627,6 +629,8 @@ def create_mcp_server():
                 suggested_changes=changes_list,
             )
             return json.dumps({"critique_id": critique_id, "debate_id": debate_id})
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
@@ -658,6 +662,8 @@ def create_mcp_server():
                 "proposal_id": proposal_id,
                 "support": support,
             })
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
@@ -696,6 +702,8 @@ def create_mcp_server():
                 result["decision_record_id"] = dec_record.id
 
             return json.dumps(result)
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
@@ -715,8 +723,10 @@ def create_mcp_server():
             engine = _get_debate_engine(ctx)
             debate = engine.get_debate(debate_id)
             if debate is None:
-                return json.dumps({"error": f"Debate {debate_id!r} not found"})
+                raise ValueError(f"Debate {debate_id!r} not found")
             return json.dumps(debate.to_dict())
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
@@ -734,6 +744,8 @@ def create_mcp_server():
             engine = _get_debate_engine(ctx)
             transcript = engine.get_transcript(debate_id)
             return transcript
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
@@ -751,6 +763,8 @@ def create_mcp_server():
             engine = _get_debate_engine(ctx)
             engine.cancel(debate_id)
             return json.dumps({"status": "cancelled", "debate_id": debate_id})
+        except ValueError:
+            raise
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 
