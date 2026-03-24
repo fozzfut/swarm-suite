@@ -138,10 +138,19 @@ ReviewSwarm produces a **recommendation report**. It never modifies your code. W
 ## Install
 
 ```bash
-pip install review-swarm
+uv tool install review-swarm
 ```
 
-From source:
+Upgrade:
+
+```bash
+uv tool upgrade review-swarm
+```
+
+> Need uv? See [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
+> For the full swarm suite (ReviewSwarm + ArchSwarm + DocSwarm + FixSwarm + SpecSwarm + SwarmKB), see [INSTALL.md](INSTALL.md).
+
+From source (development):
 
 ```bash
 git clone https://github.com/fozzfut/review-swarm.git
