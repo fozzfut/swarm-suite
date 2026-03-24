@@ -659,11 +659,22 @@ def create_mcp_server():
                         "timestamp": _now_iso(),
                     })
 
+            # Auto-check syntax on modified files
+            syntax_errors = []
+            try:
+                from .regression_checker import check_syntax as _check_syn
+                modified_files = list({p["file"] for p in approved if result_by_finding.get(p.get("finding_id", p["proposal_id"])) and result_by_finding[p.get("finding_id", p["proposal_id"])].success})
+                if modified_files:
+                    syntax_errors = _check_syn(modified_files, base_dir)
+            except Exception as syn_exc:
+                _log.warning("Post-apply syntax check failed: %s", syn_exc)
+
             return _ok({
                 "status": "completed",
                 "applied": applied_count,
                 "failed": failed_count,
                 "results": [r.to_dict() for r in results],
+                "syntax_errors": syntax_errors,
             })
         except Exception as exc:
             return _err(str(exc))
@@ -1274,6 +1285,72 @@ def create_mcp_server():
             return json.dumps([d.to_dict() for d in debates])
         except (ImportError, Exception) as exc:
             return json.dumps({"error": f"Cannot load debates: {exc}"})
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Regression Checking
+    # ═══════════════════════════════════════════════════════════════════
+
+    @mcp.tool(name="snapshot_tests", description="Run tests and save as 'before' baseline. Call BEFORE applying fixes.")
+    def _snapshot_tests(session_id: str, base_dir: str = ".", test_command: str = "", ctx: Optional[Context] = None) -> str:
+        try:
+            from .regression_checker import run_tests
+            mgr = _get_mgr(ctx)
+            result = run_tests(test_command=test_command, base_dir=base_dir)
+            # Store in session
+            with mgr._lock:
+                if session_id in mgr._sessions:
+                    mgr._sessions[session_id]["tests_before"] = result.to_dict()
+                    mgr._save_session(session_id)
+            return _ok({"status": "snapshot_saved", "tests_passed": result.passed, **result.to_dict()})
+        except Exception as exc:
+            return _err(str(exc))
+
+    @mcp.tool(name="run_tests", description="Run project test suite. Auto-detects pytest/npm/go/cargo.")
+    def _run_tests(base_dir: str = ".", test_command: str = "", ctx: Optional[Context] = None) -> str:
+        try:
+            from .regression_checker import run_tests
+            result = run_tests(test_command=test_command, base_dir=base_dir)
+            return _ok(result.to_dict())
+        except Exception as exc:
+            return _err(str(exc))
+
+    @mcp.tool(name="check_regression", description="Full regression check on applied fixes: syntax validation, test comparison, re-scan. Call AFTER applying fixes.")
+    def _check_regression(session_id: str, base_dir: str = ".", test_command: str = "", ctx: Optional[Context] = None) -> str:
+        try:
+            from .regression_checker import check_regression
+            mgr = _get_mgr(ctx)
+
+            # Get modified files from applied proposals
+            proposals = mgr.get_proposals(session_id, status="applied")
+            modified_files = list({p["file"] for p in proposals})
+
+            if not modified_files:
+                return _ok({"status": "no_applied_fixes", "overall_ok": True})
+
+            # Get pre-fix test baseline
+            session = mgr.get_session(session_id)
+            tests_before = session.get("tests_before")
+
+            report = check_regression(
+                modified_files=modified_files,
+                base_dir=base_dir,
+                test_command=test_command,
+                tests_before=tests_before,
+            )
+
+            return _ok(report.to_dict())
+        except Exception as exc:
+            return _err(str(exc))
+
+    @mcp.tool(name="check_syntax", description="Quick syntax check on specific files. Use after individual fix application.")
+    def _check_syntax(files: str, base_dir: str = ".", ctx: Optional[Context] = None) -> str:
+        try:
+            from .regression_checker import check_syntax
+            file_list = [f.strip() for f in files.split(",") if f.strip()]
+            errors = check_syntax(file_list, base_dir)
+            return _ok({"ok": len(errors) == 0, "errors": errors})
+        except Exception as exc:
+            return _err(str(exc))
 
     return mcp
 
