@@ -155,6 +155,8 @@ class SessionManager:
     def get_session(self, session_id: str) -> dict:
         with self._lock:
             sess_dir = self._session_dir(session_id)
+            if not sess_dir.exists():
+                raise ValueError(f"Session {session_id!r} not found")
             meta = self._load_meta(sess_dir)
             store = self.get_finding_store(session_id)
             claims = self.get_claim_registry(session_id)
