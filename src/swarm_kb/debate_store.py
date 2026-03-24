@@ -121,17 +121,15 @@ class DebateStore:
         """Query debates with optional filters."""
         with self._lock:
             results = list(self._entries)
-
-        if status:
-            results = [r for r in results if r.status == status]
-        if source_tool:
-            results = [r for r in results if r.source_tool == source_tool]
-        if project_path:
-            results = [r for r in results if r.project_path == project_path]
-        if tag:
-            results = [r for r in results if tag in r.tags]
-
-        return [copy.deepcopy(r) for r in results]
+            if status:
+                results = [r for r in results if r.status == status]
+            if source_tool:
+                results = [r for r in results if r.source_tool == source_tool]
+            if project_path:
+                results = [r for r in results if r.project_path == project_path]
+            if tag:
+                results = [r for r in results if tag in r.tags]
+            return [copy.deepcopy(r) for r in results]
 
     def get_by_id(self, debate_id: str) -> DebateRecord | None:
         """Get a specific debate by ID."""

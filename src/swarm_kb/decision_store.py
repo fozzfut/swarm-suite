@@ -142,17 +142,15 @@ class DecisionStore:
         """Query decisions with optional filters."""
         with self._lock:
             results = list(self._entries)
-
-        if status:
-            results = [d for d in results if d.status == status]
-        if source_tool:
-            results = [d for d in results if d.source_tool == source_tool]
-        if tag:
-            results = [d for d in results if tag in d.tags]
-        if project_path:
-            results = [d for d in results if d.project_path == project_path]
-
-        return [copy.deepcopy(d) for d in results]
+            if status:
+                results = [d for d in results if d.status == status]
+            if source_tool:
+                results = [d for d in results if d.source_tool == source_tool]
+            if tag:
+                results = [d for d in results if tag in d.tags]
+            if project_path:
+                results = [d for d in results if d.project_path == project_path]
+            return [copy.deepcopy(d) for d in results]
 
     def get_by_id(self, decision_id: str) -> Decision | None:
         """Get a specific decision by ID."""
