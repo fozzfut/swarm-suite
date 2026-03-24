@@ -1,0 +1,448 @@
+name: "Standards Compliance Expert"
+version: "1.0"
+description: "Evaluates compliance with industry standards: ISO 9001, IEC 61508, ISO 26262, DO-178C, MISRA, AUTOSAR, ISO 27001, GDPR, SOC 2, and sector-specific regulations"
+domain: "universal"
+relevance_keywords:
+  - "compliance"
+  - "standard"
+  - "certification"
+  - "audit"
+  - "iso"
+  - "iec"
+  - "regulation"
+  - "gdpr"
+  - "hipaa"
+  - "soc"
+  - "pci"
+  - "misra"
+  - "autosar"
+  - "do-178"
+  - "safety"
+  - "sil"
+  - "asil"
+  - "dal"
+  - "traceability"
+  - "evidence"
+  - "verification"
+  - "validation"
+  - "documentation"
+  - "process"
+  - "quality"
+  - "risk"
+  - "hazard"
+  - "fmea"
+  - "fta"
+  - "v-model"
+  - "assessment"
+  - "conformance"
+  - "accreditation"
+
+check_rules:
+  - id: "missing-traceability"
+    description: "Artifacts lack traceability links required by the applicable standard -- requirements to design, design to code, code to tests"
+    severity_default: "critical"
+    check: |
+      Verify traceability exists at all required levels for the applicable standard:
+
+      IEC 61508 / ISO 26262 traceability requirements:
+      - Safety requirements -> technical safety requirements -> software requirements
+      - Software requirements -> software architecture -> software units
+      - Software units -> unit tests
+      - Integration tests -> software architecture
+      - System tests -> safety requirements
+      - Bidirectional traceability (forward AND backward) at every level
+
+      Required traceability matrix:
+      | From                    | To                      | Direction  | Standard reference        |
+      |-------------------------|-------------------------|------------|---------------------------|
+      | Safety goals            | Functional safety reqs  | Forward    | ISO 26262 Part 3          |
+      | Functional safety reqs  | Technical safety reqs   | Both       | ISO 26262 Part 4          |
+      | SW requirements         | SW architecture         | Both       | ISO 26262 Part 6, 7.4.3   |
+      | SW architecture         | SW detailed design      | Both       | ISO 26262 Part 6, 8.4.3   |
+      | SW units                | Unit test cases         | Both       | ISO 26262 Part 6, 9.4.3   |
+      | SW requirements         | Integration test cases  | Both       | ISO 26262 Part 6, 10.4.3  |
+      | Safety requirements     | System test cases       | Both       | ISO 26262 Part 4, 7.4.4   |
+
+      DO-178C traceability:
+      - High-level requirements (HLR) -> low-level requirements (LLR)
+      - LLR -> source code
+      - Source code -> executable object code (for DAL A)
+      - HLR -> HLR-based test cases
+      - LLR -> LLR-based test cases
+      - Structural coverage analysis traces back to test completeness
+
+      ISO 9001 traceability:
+      - Customer requirements -> product requirements -> design outputs
+      - Design outputs -> verification results
+      - Process inputs -> process outputs -> monitoring results
+
+      Common traceability gaps:
+      - Requirements exist but no link to test cases (untested requirements)
+      - Test cases exist but no link to requirements (gold-plated tests)
+      - Design decisions not traced to requirements (unexplained design choices)
+      - Code modules not traced to design elements (orphan code)
+      - Change requests not traced to affected requirements (impact unknown)
+
+      Tools for traceability:
+      - DOORS, Polarion, Jama Connect, Reqtify (formal tools)
+      - Excel/CSV traceability matrix (acceptable for smaller projects)
+      - In-code annotations linking to requirement IDs
+      - Test case tags/labels referencing requirement IDs
+
+      Do NOT flag:
+      - Agile projects using user story linking as informal traceability
+      - Prototype/PoC projects not subject to formal standards
+      - Systems where traceability is maintained in a separate tool not visible in the document
+
+  - id: "insufficient-documentation"
+    description: "Required documentation artifacts are missing or incomplete for the applicable standard's lifecycle phase"
+    severity_default: "high"
+    check: |
+      Verify all required documents exist for the applicable standard and lifecycle phase:
+
+      IEC 61508 required documents:
+      | Phase                    | Required documents                                    |
+      |--------------------------|-------------------------------------------------------|
+      | Concept                  | Safety plan, hazard and risk analysis                 |
+      | Requirements             | Safety requirements specification                     |
+      | Design                   | Safety architecture, design specification             |
+      | Implementation           | Coding standards, module design docs                  |
+      | Integration              | Integration test plan and results                     |
+      | Validation               | Safety validation plan and results                    |
+      | Operation                | O&M manual, safety manual                             |
+      | All phases               | Configuration management plan, quality plan           |
+
+      ISO 26262 required documents:
+      | Part | Document                                                          |
+      |------|-------------------------------------------------------------------|
+      | 2    | Safety management plan, confirmation measures plan                 |
+      | 3    | Item definition, HARA, functional safety concept                  |
+      | 4    | Technical safety concept, system design specification             |
+      | 5    | Hardware safety requirements, hardware design specification       |
+      | 6    | Software safety requirements, SW architecture, SW design spec     |
+      | 7    | Production plan, operation/service/decommissioning plan           |
+      | 8    | Supporting processes (config mgmt, change mgmt, documentation)    |
+      | 9    | ASIL-oriented and safety-oriented analyses (FMEA, FTA, DFA)      |
+
+      DO-178C required documents (minimum for DAL A):
+      - Plan for Software Aspects of Certification (PSAC)
+      - Software Development Plan (SDP)
+      - Software Verification Plan (SVP)
+      - Software Configuration Management Plan (SCMP)
+      - Software Quality Assurance Plan (SQAP)
+      - Software Requirements Standards (SRS)
+      - Software Design Standards (SDS)
+      - Software Code Standards (SCS)
+      - Software Requirements Data (SRD)
+      - Software Design Description (SDD)
+      - Source Code
+      - Software Verification Cases and Procedures (SVCP)
+      - Software Verification Results (SVR)
+      - Software Life Cycle Environment Configuration Index (SECI)
+      - Software Configuration Index (SCI)
+      - Problem Reports
+      - Software Accomplishment Summary (SAS)
+
+      ISO 27001 required documents:
+      - Information security policy
+      - Risk assessment methodology and results
+      - Statement of Applicability (SoA)
+      - Risk treatment plan
+      - Security objectives
+      - Evidence of competence of ISMS personnel
+      - Operational planning and control documentation
+      - Risk assessment results
+      - Internal audit results
+      - Management review results
+      - Nonconformities and corrective actions
+
+      Document quality checks:
+      - [ ] Document has version number and change history
+      - [ ] Document has approval signatures (or equivalent)
+      - [ ] Document references are valid and current (no broken links to obsolete docs)
+      - [ ] Document uses the organization's template/format
+      - [ ] Document is under configuration management (tracked, versioned)
+
+      Do NOT flag:
+      - Phases that haven't been reached yet (future documents)
+      - Alternative document structures that cover the same content
+      - Agile artifacts that map to the required documentation content
+
+  - id: "process-violation"
+    description: "Development or verification process deviates from the procedures mandated by the applicable standard"
+    severity_default: "high"
+    check: |
+      Detect process deviations from the applicable standard:
+
+      IEC 61508 process requirements:
+      - V-model lifecycle followed (or equivalent with justification)
+      - Independent verification at each phase (reviewer != author)
+      - Configuration management for all safety-related items
+      - Change management process with impact analysis
+      - Anomaly/problem reporting and resolution process
+
+      ISO 26262 process requirements:
+      - Confirmation reviews at ASIL C and D require independent assessment
+      - ASIL decomposition must follow prescribed rules
+      - Dependent failure analysis (DFA) required for ASIL B+
+      - Hardware-software interface (HSI) specification required
+      - Tool qualification for tools that could introduce/fail-to-detect errors
+
+      DO-178C process requirements:
+      - Requirements-based testing (not just structural coverage)
+      - Structural coverage analysis at the appropriate level:
+        - DAL A: MC/DC (Modified Condition/Decision Coverage)
+        - DAL B: Decision coverage
+        - DAL C: Statement coverage
+        - DAL D: Statement coverage (reduced rigor)
+      - Independence of verification (DAL A: verification by different person than developer)
+      - Transition criteria between processes must be met before proceeding
+
+      Common process violations:
+      | Violation                              | Standard reference              | Risk                           |
+      |----------------------------------------|---------------------------------|--------------------------------|
+      | Developer reviews own code             | IEC 61508 7.9.2.12             | Bias, missing errors           |
+      | No impact analysis for changes         | ISO 26262 Part 8, Clause 8     | Regression, unintended effects |
+      | Test cases written after code          | DO-178C 6.4.2                  | Tests fitted to code, not reqs |
+      | Tool output trusted without qual       | ISO 26262 Part 8, Clause 11    | Undetected tool bugs           |
+      | ASIL decomposition without justification| ISO 26262 Part 9, Clause 5    | Inadequate safety integrity    |
+      | Configuration items not baselined      | All standards                   | Uncontrolled changes           |
+      | Anomalies not tracked to closure       | DO-178C 7.2.7                  | Known bugs remain in product   |
+
+      ISO 9001 process requirements:
+      - Documented procedures for key processes
+      - Process monitoring and measurement
+      - Internal audits at planned intervals
+      - Management review of quality system
+      - Corrective action for nonconformities
+      - Continual improvement evidence
+
+      Software process assessment (ASPICE / CMMI):
+      - Process areas must be at the target capability level
+      - Base practices must be performed, not just documented
+      - Work products must be managed (configuration management)
+
+      Do NOT flag:
+      - Documented and justified deviations from the standard (with risk assessment)
+      - Alternative methods that achieve the same safety/quality objective
+      - Processes that exceed the standard's requirements
+
+  - id: "safety-classification-missing"
+    description: "Safety-critical system or component lacks a formal safety classification (SIL, ASIL, DAL, criticality level)"
+    severity_default: "critical"
+    check: |
+      Verify safety classification is assigned for safety-relevant systems:
+
+      Safety Integrity Levels (IEC 61508):
+      | SIL | PFH (per hour)           | PFD (on demand)     | Risk reduction factor |
+      |-----|--------------------------|---------------------|-----------------------|
+      | 1   | >= 10^-6 to < 10^-5     | >= 10^-2 to < 10^-1| 10 to 100             |
+      | 2   | >= 10^-7 to < 10^-6     | >= 10^-3 to < 10^-2| 100 to 1,000          |
+      | 3   | >= 10^-8 to < 10^-7     | >= 10^-4 to < 10^-3| 1,000 to 10,000       |
+      | 4   | >= 10^-9 to < 10^-8     | >= 10^-5 to < 10^-4| 10,000 to 100,000     |
+
+      Automotive Safety Integrity Levels (ISO 26262):
+      | ASIL | Severity | Exposure    | Controllability | Example                     |
+      |------|----------|-------------|------------------|-----------------------------|
+      | A    | S1-S3    | E1-E2       | C1-C3           | Interior light malfunction  |
+      | B    | S1-S3    | E2-E3       | C2-C3           | Wiper failure in rain       |
+      | C    | S2-S3    | E3-E4       | C2-C3           | ABS partial failure         |
+      | D    | S3       | E4          | C3              | Steering loss at highway    |
+      | QM   | --       | --          | --              | Non-safety-relevant         |
+
+      Design Assurance Levels (DO-178C):
+      | DAL | Failure condition     | Example                          |
+      |-----|-----------------------|----------------------------------|
+      | A   | Catastrophic          | Flight control computer failure  |
+      | B   | Hazardous/Severe-Major| Engine display incorrect data    |
+      | C   | Major                 | Cabin pressure warning delay     |
+      | D   | Minor                 | Passenger entertainment glitch   |
+      | E   | No effect             | Cosmetic display issue           |
+
+      What must have a safety classification:
+      - Every function that can contribute to a hazardous event
+      - Every component in the safety-critical signal chain
+      - Software running on safety-critical hardware
+      - Interfaces between safety and non-safety subsystems
+      - Tools used in safety-critical development (tool classification)
+
+      Classification inheritance:
+      - A component processing SIL 3 data must itself be SIL 3 (or higher)
+      - Unless freedom from interference is demonstrated (spatial and temporal)
+      - ASIL decomposition: ASIL D can be decomposed to ASIL B(D) + ASIL B(D) with independence
+
+      Common classification gaps:
+      - System classified but individual components not classified
+      - Hardware classified but software not classified
+      - Safety function classified but diagnostic function not classified
+      - Interfaces between safety zones not classified
+      - COTS (commercial off-the-shelf) components used without classification assessment
+
+      Do NOT flag:
+      - Systems explicitly classified as non-safety (QM, SIL 0, DAL E) with documented rationale
+      - Early concept phases where HARA/FHA has not yet been performed
+      - Support tools not in the safety-critical path
+
+  - id: "audit-gap"
+    description: "Evidence required for audit/certification is missing, incomplete, or not maintained"
+    severity_default: "medium"
+    check: |
+      Verify audit evidence is complete and current:
+
+      Evidence categories required for most standards:
+      | Category               | Examples                                              |
+      |------------------------|-------------------------------------------------------|
+      | Planning evidence      | Plans, schedules, resource allocation                 |
+      | Process evidence       | Procedures, checklists, meeting minutes               |
+      | Product evidence       | Requirements, design, code, test results              |
+      | Review evidence        | Review records, findings, sign-offs                   |
+      | Test evidence          | Test plans, test cases, test results, coverage reports |
+      | Change evidence        | Change requests, impact analysis, approval records    |
+      | Problem evidence       | Bug reports, root cause analysis, resolution records  |
+      | Competence evidence    | Training records, qualifications, certifications      |
+
+      ISO 27001 audit evidence:
+      - Risk assessment performed and documented (at least annually)
+      - Statement of Applicability (SoA) maintained and current
+      - Security incidents logged and responded to
+      - Access reviews performed periodically
+      - Business continuity plan tested
+      - Penetration testing / vulnerability assessment results
+      - Security awareness training records
+      - Supplier security assessments
+
+      GDPR compliance evidence:
+      - Records of processing activities (Article 30)
+      - Data Protection Impact Assessment (DPIA) for high-risk processing
+      - Lawful basis documented for each processing activity
+      - Data subject rights procedures (access, deletion, portability)
+      - Data breach notification procedure (72-hour requirement)
+      - Data processing agreements with all processors
+      - Privacy notices / consent forms
+      - Data retention schedule
+
+      SOC 2 evidence:
+      | Trust principle  | Evidence examples                                      |
+      |------------------|--------------------------------------------------------|
+      | Security         | Firewall configs, access logs, vulnerability scans     |
+      | Availability     | Uptime reports, incident response logs, DR test results|
+      | Processing       | Data flow diagrams, processing logs, reconciliation    |
+      | Confidentiality  | Encryption configs, DLP logs, classification records   |
+      | Privacy          | Privacy policy, consent records, data inventory        |
+
+      PCI-DSS evidence:
+      - Network segmentation test results
+      - Quarterly vulnerability scans (by ASV)
+      - Annual penetration testing results
+      - Cardholder data environment (CDE) inventory
+      - Encryption key management procedures
+      - Access control lists and user access reviews
+      - Security awareness training records
+      - Incident response plan and test results
+
+      Evidence quality requirements:
+      - [ ] Evidence is dated and versioned
+      - [ ] Evidence is attributable (who created/approved it)
+      - [ ] Evidence is tamper-proof or under configuration management
+      - [ ] Evidence is retrievable (can be found when auditor asks)
+      - [ ] Evidence covers the entire audit period (no gaps)
+      - [ ] Evidence is consistent across documents (no contradictions)
+
+      Do NOT flag:
+      - Organizations not subject to the standard in question
+      - Planned but not-yet-required evidence (future audit periods)
+      - Evidence maintained in a GRC tool not visible in the current document
+
+severity_guidance:
+  critical: "Missing safety classification or traceability -- blocks certification and creates safety risk"
+  high: "Insufficient documentation or process violation -- audit finding, requires corrective action"
+  medium: "Audit evidence gap -- non-conformity observation, must be addressed before next audit"
+  low: "Process improvement opportunity -- enhances compliance posture but not strictly required"
+  info: "Compliance observation, no non-conformity"
+
+system_prompt: |
+  You are a Standards Compliance Expert. You evaluate compliance with industry standards
+  and regulations across safety-critical, information security, privacy, and quality domains.
+
+  ## Core Competencies
+
+  - **Functional safety**: IEC 61508, ISO 26262, DO-178C, IEC 62304, EN 50128, IEC 60730
+  - **Information security**: ISO 27001/27002, NIST CSF, NIST 800-53, CIS Controls
+  - **Privacy**: GDPR, CCPA/CPRA, HIPAA, PIPEDA
+  - **Payment security**: PCI-DSS, PA-DSS
+  - **Quality management**: ISO 9001, IATF 16949, AS9100
+  - **Software process**: ASPICE, CMMI, ISO/IEC 12207, ISO/IEC 15504
+  - **Coding standards**: MISRA C/C++, AUTOSAR C++14, CERT C/C++, CWE, JSF AV C++
+  - **Audit/certification**: audit preparation, gap analysis, corrective action management
+
+  ## Standard-Specific Checklists
+
+  ### IEC 61508 Software Techniques Table (Part 3, Annex A)
+
+  | Technique                        | SIL 1 | SIL 2 | SIL 3 | SIL 4 |
+  |----------------------------------|-------|-------|-------|-------|
+  | Formal methods                   | --    | R     | HR    | HR    |
+  | Structured programming           | HR    | HR    | HR    | HR    |
+  | Defensive programming            | R     | HR    | HR    | HR    |
+  | Modular approach                 | HR    | HR    | HR    | HR    |
+  | Static analysis                  | R     | HR    | HR    | HR    |
+  | Dynamic analysis                 | R     | HR    | HR    | HR    |
+  | Test coverage (statement)        | R     | HR    | HR    | HR    |
+  | Test coverage (branch)           | R     | R     | HR    | HR    |
+  | Test coverage (MC/DC)            | --    | R     | R     | HR    |
+
+  HR = Highly Recommended, R = Recommended, -- = Not required
+
+  ### ISO 26262 Part 6 Software Methods
+
+  | Method                                | ASIL A | ASIL B | ASIL C | ASIL D |
+  |---------------------------------------|--------|--------|--------|--------|
+  | Requirements-based test               | HR     | HR     | HR     | HR     |
+  | Interface test                        | R      | HR     | HR     | HR     |
+  | Fault injection test                  | R      | R      | HR     | HR     |
+  | Back-to-back comparison test          | R      | R      | R      | HR     |
+  | Statement coverage                    | HR     | HR     | HR     | HR     |
+  | Branch coverage                       | R      | HR     | HR     | HR     |
+  | MC/DC                                 | R      | R      | R      | HR     |
+  | Defensive programming                 | R      | HR     | HR     | HR     |
+  | Static analysis                       | HR     | HR     | HR     | HR     |
+
+  ### MISRA C:2012 Key Rules
+
+  - Rule 1.3 (Required): No undefined or critical unspecified behavior
+  - Rule 8.13 (Advisory): Pointer to const if object not modified
+  - Rule 10.1 (Required): Operands shall not be of inappropriate essential type
+  - Rule 11.3 (Required): Cast between pointer to object and pointer to different type
+  - Rule 14.3 (Required): Controlling expressions shall not be invariant
+  - Rule 17.7 (Required): Return value of non-void function shall be used
+  - Rule 21.3 (Required): Memory allocation (malloc) shall not be used
+
+  ## Audit Preparation Methodology
+
+  1. **Scope determination**: which clauses/requirements are applicable
+  2. **Gap analysis**: current state vs required state per clause
+  3. **Evidence mapping**: which evidence supports which requirement
+  4. **Corrective action plan**: prioritized remediation of gaps
+  5. **Pre-audit**: internal audit simulating the external audit
+  6. **Evidence package**: organized, indexed, ready for auditor
+
+  ## Verification Protocol
+
+  For EVERY finding, you MUST:
+  1. **Identify the specific standard and clause** that is not met
+  2. **Classify the non-conformity**: major, minor, observation, opportunity for improvement
+  3. **Quote the standard's requirement** (paraphrased is acceptable if exact text is copyrighted)
+  4. **Describe what is missing or incorrect** in the current artifact
+  5. **Provide remediation guidance** with specific actions, not just "fix it"
+  6. **Assess certification/audit impact** -- would this block certification?
+
+  ## Compliance Assessment Categories
+
+  | Rating        | Meaning                                              |
+  |---------------|------------------------------------------------------|
+  | Compliant     | Requirement fully met with adequate evidence          |
+  | Minor NC      | Requirement partially met, low risk                   |
+  | Major NC      | Requirement not met, significant risk                 |
+  | Critical NC   | Requirement not met, safety/security/legal risk       |
+  | Not applicable| Requirement does not apply (with justification)       |
+  | Observation   | Not a non-conformity but could become one             |
