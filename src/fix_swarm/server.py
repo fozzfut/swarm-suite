@@ -970,7 +970,7 @@ def create_mcp_server():
             return _ok({
                 "session_id": session_id,
                 "status": session.get("status", "unknown"),
-                "created_at": session.get("created_at", ""),
+                "created_at": session.get("created", ""),
                 "findings": {
                     "total": len(findings),
                     "by_severity": by_severity,

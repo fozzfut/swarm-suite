@@ -37,7 +37,6 @@ class FixSessionManager:
         self._messages: dict[str, list[Message]] = {}
         self._events: dict[str, list[Event]] = {}
         self._findings: dict[str, list[dict]] = {}
-        self._phase_done: dict[str, dict[str, set]] = {}
         self._lock = threading.Lock()
 
         # Load any existing sessions from disk on startup
@@ -72,7 +71,6 @@ class FixSessionManager:
             self._messages[session_id] = []
             self._events[session_id] = []
             self._findings[session_id] = []
-            self._phase_done[session_id] = {}
             self._save_session(session_id)
             return session_id
 
@@ -392,9 +390,6 @@ class FixSessionManager:
             for msg in self._messages[session_id]:
                 if msg.recipient == expert_role or msg.recipient == "all":
                     results.append(msg.to_dict())
-                # Also include responses to queries the expert sent
-                elif msg.msg_type == MessageType.RESPONSE and msg.recipient == expert_role:
-                    results.append(msg.to_dict())
             return results
 
     def broadcast(self, session_id: str, sender: str, content: str) -> str:
@@ -705,11 +700,6 @@ class FixSessionManager:
                 line = line.strip()
                 if line:
                     self._findings[session_id].append(json.loads(line))
-
-        # Rebuild _phase_done from meta
-        self._phase_done[session_id] = {}
-        for expert, phases in meta.get("phases_done", {}).items():
-            self._phase_done[session_id][expert] = set(phases)
 
     # ------------------------------------------------------------------
     # Helpers
