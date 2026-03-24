@@ -1163,6 +1163,76 @@ No automatic progression. You control the pace.
             "guide": guide,
         }, indent=2)
 
+    # ── kb_read_document ──────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_read_document",
+        description=(
+            "Parse a PDF, text, or CSV document into AI-readable structured format. "
+            "Extracts text, tables, headings, and metadata."
+        ),
+    )
+    def _kb_read_document(
+        document_path: str,
+        max_pages: int = 0,
+        output: str = "ai_readable",  # "ai_readable" | "structured" | "text_only"
+        ctx: Optional[Context] = None,
+    ) -> str:
+        from .doc_reader import parse_document
+        doc = parse_document(document_path, max_pages=max_pages)
+        if output == "ai_readable":
+            return doc.to_ai_readable()
+        elif output == "text_only":
+            return doc.full_text
+        else:
+            return json.dumps(doc.to_dict(), indent=2)
+
+    # ── kb_read_document_pages ────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_read_document_pages",
+        description=(
+            "Read specific pages from a PDF document. "
+            "Use for large documents where you only need a section."
+        ),
+    )
+    def _kb_read_document_pages(
+        document_path: str,
+        start_page: int = 1,
+        end_page: int = 10,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        from .doc_reader import parse_document
+        doc = parse_document(document_path, max_pages=end_page)
+        # Filter to requested page range
+        filtered_pages = [p for p in doc.pages if start_page <= p.page_number <= end_page]
+
+        parts = []
+        parts.append(f"# {doc.title or Path(document_path).name}")
+        parts.append(f"- Format: {doc.format}")
+        parts.append(f"- Total pages: {doc.total_pages}")
+        parts.append(f"- Showing pages: {start_page}-{min(end_page, doc.total_pages)}")
+        if doc.metadata:
+            for k, v in doc.metadata.items():
+                if v:
+                    parts.append(f"- {k}: {v}")
+        parts.append("")
+
+        for page in filtered_pages:
+            parts.append(f"\n--- Page {page.page_number} ---\n")
+            if page.headings:
+                for h in page.headings:
+                    parts.append(f"## {h}")
+            from .doc_reader import _clean_text, _table_to_markdown
+            clean = _clean_text(page.text)
+            if clean.strip():
+                parts.append(clean)
+            for i, table in enumerate(page.tables):
+                parts.append(f"\n**Table {i+1} (page {page.page_number}):**\n")
+                parts.append(_table_to_markdown(table))
+
+        return "\n".join(parts)
+
     # ── kb_migrate ───────────────────────────────────────────────────
 
     @mcp.tool(
