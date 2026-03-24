@@ -6,6 +6,17 @@ from typing import Optional
 from pathlib import Path
 from datetime import datetime, timezone
 
+from .models import (
+    Event,
+    EventType,
+    FixProposal,
+    Message,
+    MessageType,
+    ProposalStatus,
+    Reaction,
+    ReactionType,
+)
+
 _log = logging.getLogger("fix_swarm.server")
 
 # ── Expert mapping: finding categories/tags → fix expert profiles ──
@@ -389,37 +400,19 @@ def create_mcp_server():
     ) -> str:
         try:
             mgr = _get_mgr(ctx)
-            import uuid as _uuid
-            proposal_id = f"prop-{_uuid.uuid4().hex[:8]}"
+            proposal = FixProposal(
+                expert_role=expert_role,
+                finding_id=finding_id,
+                file=file,
+                line_start=line_start,
+                line_end=line_end,
+                old_text=old_text,
+                new_text=new_text,
+                rationale=rationale,
+                confidence=confidence,
+            )
 
-            proposal = {
-                "proposal_id": proposal_id,
-                "session_id": session_id,
-                "expert_role": expert_role,
-                "finding_id": finding_id,
-                "file": file,
-                "line_start": line_start,
-                "line_end": line_end,
-                "old_text": old_text,
-                "new_text": new_text,
-                "rationale": rationale,
-                "confidence": confidence,
-                "status": "proposed",
-                "created_at": _now_iso(),
-                "reactions": [],
-            }
-
-            mgr.add_proposal(session_id, proposal)
-
-            # Post event
-            mgr.post_event(session_id, {
-                "type": "FIX_PROPOSED",
-                "proposal_id": proposal_id,
-                "expert_role": expert_role,
-                "finding_id": finding_id,
-                "file": file,
-                "timestamp": _now_iso(),
-            })
+            proposal_id = mgr.add_proposal(session_id, proposal)
 
             return _ok({
                 "proposal_id": proposal_id,
@@ -477,67 +470,37 @@ def create_mcp_server():
         try:
             mgr = _get_mgr(ctx)
             rt = reaction_type.lower().strip()
-            if rt not in ("approve", "reject", "suggest"):
+            rt_map = {
+                "approve": ReactionType.APPROVE,
+                "reject": ReactionType.REJECT,
+                "suggest": ReactionType.SUGGEST_ALTERNATIVE,
+                "suggest_alternative": ReactionType.SUGGEST_ALTERNATIVE,
+                "request_evidence": ReactionType.REQUEST_EVIDENCE,
+            }
+            if rt not in rt_map:
                 return _err(f"Invalid reaction_type: {reaction_type}. Must be approve, reject, or suggest.")
 
-            import uuid as _uuid
-            reaction = {
-                "reaction_id": f"rxn-{_uuid.uuid4().hex[:8]}",
-                "proposal_id": proposal_id,
-                "expert_role": expert_role,
-                "reaction_type": rt,
-                "comment": comment,
-                "alternative_text": alternative_text,
-                "created_at": _now_iso(),
-            }
+            reaction = Reaction(
+                expert=expert_role,
+                reaction_type=rt_map[rt],
+                comment=comment,
+                alternative_text=alternative_text,
+            )
 
-            mgr.add_reaction(session_id, proposal_id, reaction)
+            # add_reaction handles consensus check internally
+            result = mgr.add_reaction(session_id, proposal_id, reaction)
 
-            # Check consensus and auto-update proposal status
-            proposal = mgr.get_proposal_by_id(session_id, proposal_id)
-            if proposal is None:
-                return _err(f"Proposal {proposal_id} not found")
+            if not result.get("ok"):
+                return _err(result.get("error", "Unknown error"))
 
-            reactions = proposal.get("reactions", [])
-            approvals = sum(1 for r in reactions if r.get("reaction_type") == "approve")
-            rejections = sum(1 for r in reactions if r.get("reaction_type") == "reject")
-
-            new_status = proposal.get("status", "proposed")
-            # Auto-approve if 2+ approvals and no rejections
-            if approvals >= 2 and rejections == 0:
-                new_status = "approved"
-                mgr.update_proposal_status(session_id, proposal_id, "approved")
-                mgr.post_event(session_id, {
-                    "type": "FIX_APPROVED",
-                    "proposal_id": proposal_id,
-                    "approvals": approvals,
-                    "timestamp": _now_iso(),
-                })
-            # Auto-reject if 2+ rejections
-            elif rejections >= 2:
-                new_status = "rejected"
-                mgr.update_proposal_status(session_id, proposal_id, "rejected")
-                mgr.post_event(session_id, {
-                    "type": "FIX_REJECTED",
-                    "proposal_id": proposal_id,
-                    "rejections": rejections,
-                    "timestamp": _now_iso(),
-                })
-
-            mgr.post_event(session_id, {
-                "type": "REACTION_ADDED",
-                "proposal_id": proposal_id,
-                "expert_role": expert_role,
-                "reaction_type": rt,
-                "timestamp": _now_iso(),
-            })
+            # Read back the proposal status after consensus check
+            proposal = result.get("proposal", {})
+            consensus = result.get("consensus", {})
 
             return _ok({
-                "reaction_id": reaction["reaction_id"],
                 "proposal_id": proposal_id,
-                "proposal_status": new_status,
-                "approvals": approvals,
-                "rejections": rejections,
+                "proposal_status": proposal.get("status", "proposed"),
+                "consensus": consensus,
             })
         except Exception as exc:
             return _err(str(exc))
@@ -639,25 +602,11 @@ def create_mcp_server():
                 fid = p.get("finding_id", p["proposal_id"])
                 r = result_by_finding.get(fid)
                 if r and r.success:
-                    mgr.update_proposal_status(session_id, p["proposal_id"], "applied")
+                    mgr.update_proposal_status(session_id, p["proposal_id"], ProposalStatus.APPLIED)
                     applied_count += 1
-                    mgr.post_event(session_id, {
-                        "type": "FIX_APPLIED",
-                        "proposal_id": p["proposal_id"],
-                        "finding_id": fid,
-                        "file": p["file"],
-                        "timestamp": _now_iso(),
-                    })
                 elif r:
-                    mgr.update_proposal_status(session_id, p["proposal_id"], "failed")
+                    mgr.update_proposal_status(session_id, p["proposal_id"], ProposalStatus.FAILED)
                     failed_count += 1
-                    mgr.post_event(session_id, {
-                        "type": "FIX_FAILED",
-                        "proposal_id": p["proposal_id"],
-                        "finding_id": fid,
-                        "error": r.error or "Unknown error",
-                        "timestamp": _now_iso(),
-                    })
 
             # Auto-check syntax on modified files
             syntax_errors = []
@@ -722,15 +671,7 @@ def create_mcp_server():
             results = apply_plan(plan, base_dir=base_dir)
 
             if results and results[0].success:
-                mgr.update_proposal_status(session_id, proposal_id, "applied")
-                mgr.post_event(session_id, {
-                    "type": "FIX_APPLIED",
-                    "proposal_id": proposal_id,
-                    "finding_id": action.finding_id,
-                    "file": proposal["file"],
-                    "override": True,
-                    "timestamp": _now_iso(),
-                })
+                mgr.update_proposal_status(session_id, proposal_id, ProposalStatus.APPLIED)
                 return _ok({
                     "status": "applied",
                     "proposal_id": proposal_id,
@@ -738,13 +679,7 @@ def create_mcp_server():
                 })
             else:
                 error_msg = results[0].error if results else "No result returned"
-                mgr.update_proposal_status(session_id, proposal_id, "failed")
-                mgr.post_event(session_id, {
-                    "type": "FIX_FAILED",
-                    "proposal_id": proposal_id,
-                    "error": error_msg,
-                    "timestamp": _now_iso(),
-                })
+                mgr.update_proposal_status(session_id, proposal_id, ProposalStatus.FAILED)
                 return _ok({
                     "status": "failed",
                     "proposal_id": proposal_id,
@@ -808,14 +743,12 @@ def create_mcp_server():
                 fid = p.get("finding_id", p["proposal_id"])
                 r = result_by_finding.get(fid)
                 if r and r.success:
-                    mgr.update_proposal_status(session_id, p["proposal_id"], "verified")
+                    mgr.update_proposal_status(session_id, p["proposal_id"], ProposalStatus.VERIFIED)
 
-            mgr.post_event(session_id, {
-                "type": "VERIFICATION_COMPLETE",
-                "passed": passed,
-                "failed": failed,
-                "timestamp": _now_iso(),
-            })
+            mgr.post_event(session_id, Event(
+                event_type=EventType.VERIFICATION_COMPLETE,
+                payload={"passed": passed, "failed": failed},
+            ))
 
             return _ok({
                 "status": "verified",
@@ -844,29 +777,17 @@ def create_mcp_server():
     ) -> str:
         try:
             mgr = _get_mgr(ctx)
-            import uuid as _uuid
-            msg = {
-                "message_id": f"msg-{_uuid.uuid4().hex[:8]}",
-                "session_id": session_id,
-                "sender": sender,
-                "recipient": recipient,
-                "content": content,
-                "context_id": context_id,
-                "read": False,
-                "created_at": _now_iso(),
-            }
-            mgr.add_message(session_id, msg)
-
-            mgr.post_event(session_id, {
-                "type": "MESSAGE_SENT",
-                "sender": sender,
-                "recipient": recipient,
-                "message_id": msg["message_id"],
-                "timestamp": _now_iso(),
-            })
+            msg = Message(
+                sender=sender,
+                recipient=recipient,
+                msg_type=MessageType.DIRECT,
+                content=content,
+                context_id=context_id,
+            )
+            message_id = mgr.add_message(session_id, msg)
 
             return _ok({
-                "message_id": msg["message_id"],
+                "message_id": message_id,
                 "sender": sender,
                 "recipient": recipient,
             })
@@ -884,23 +805,16 @@ def create_mcp_server():
     ) -> str:
         try:
             mgr = _get_mgr(ctx)
-            messages = mgr.get_messages(session_id)
-
-            # Filter to messages addressed to this expert (or broadcast)
-            inbox = [
-                m for m in messages
-                if (m.get("recipient") == expert_role or m.get("recipient") == "*")
-                and not m.get("read", False)
-            ]
+            messages = mgr.get_messages(session_id, recipient=expert_role)
 
             # Mark messages as read
-            for m in inbox:
-                mgr.mark_message_read(session_id, m["message_id"])
+            for m in messages:
+                mgr.mark_message_read(session_id, m.get("id", ""))
 
             return _ok({
                 "expert_role": expert_role,
-                "count": len(inbox),
-                "messages": inbox,
+                "count": len(messages),
+                "messages": messages,
             })
         except Exception as exc:
             return _err(str(exc))
@@ -917,30 +831,12 @@ def create_mcp_server():
     ) -> str:
         try:
             mgr = _get_mgr(ctx)
-            import uuid as _uuid
-            msg = {
-                "message_id": f"msg-{_uuid.uuid4().hex[:8]}",
-                "session_id": session_id,
-                "sender": sender,
-                "recipient": "*",
-                "content": content,
-                "context_id": "",
-                "read": False,
-                "created_at": _now_iso(),
-            }
-            mgr.add_message(session_id, msg)
-
-            mgr.post_event(session_id, {
-                "type": "BROADCAST",
-                "sender": sender,
-                "message_id": msg["message_id"],
-                "timestamp": _now_iso(),
-            })
+            message_id = mgr.broadcast(session_id, sender, content)
 
             return _ok({
-                "message_id": msg["message_id"],
+                "message_id": message_id,
                 "sender": sender,
-                "recipient": "*",
+                "recipient": "all",
             })
         except Exception as exc:
             return _err(str(exc))
@@ -967,13 +863,14 @@ def create_mcp_server():
             mgr = _get_mgr(ctx)
             mgr.mark_phase_done(session_id, expert_role, phase)
 
-            mgr.post_event(session_id, {
-                "type": "PHASE_DONE",
-                "expert_role": expert_role,
-                "phase": phase,
-                "phase_name": phase_names[phase],
-                "timestamp": _now_iso(),
-            })
+            mgr.post_event(session_id, Event(
+                event_type=EventType.PHASE_DONE,
+                payload={
+                    "expert_role": expert_role,
+                    "phase": phase,
+                    "phase_name": phase_names[phase],
+                },
+            ))
 
             return _ok({
                 "session_id": session_id,

@@ -74,11 +74,21 @@ def check_syntax(files: list[str], base_dir: str = ".") -> list[dict]:
 
 
 def run_tests(test_command: str = "", base_dir: str = ".", timeout: int = 300) -> TestResult:
-    """Run project test suite. Auto-detects pytest/npm/go/cargo if no command given."""
+    """Run project test suite. Auto-detects pytest/npm/go/cargo if no command given.
+
+    Security: Auto-detected commands use ``shell=False`` with an argument list.
+    User-provided commands are parsed via :func:`shlex.split` to avoid
+    ``shell=True``.  Callers that expose ``test_command`` to untrusted input
+    should validate or restrict the value before passing it here.
+    """
+    import shlex
+
     base = Path(base_dir)
 
+    auto_detected = False
     if not test_command:
         test_command = _detect_test_command(base)
+        auto_detected = True
 
     if not test_command:
         return TestResult(
@@ -87,10 +97,21 @@ def run_tests(test_command: str = "", base_dir: str = ".", timeout: int = 300) -
             stdout="No test framework detected. Skipping.",
         )
 
+    # Build an argument list instead of passing a raw string to the shell.
+    try:
+        args = shlex.split(test_command)
+    except ValueError:
+        return TestResult(
+            command=test_command,
+            exit_code=-1,
+            stderr="Invalid command syntax",
+            passed=False,
+        )
+
     start = time.time()
     try:
         result = subprocess.run(
-            test_command, shell=True, cwd=str(base),
+            args, shell=False, cwd=str(base),
             capture_output=True, text=True, timeout=timeout,
         )
         duration = time.time() - start

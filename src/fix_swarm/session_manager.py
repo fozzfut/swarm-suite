@@ -36,6 +36,8 @@ class FixSessionManager:
         self._claims: dict[str, list[FindingClaim]] = {}
         self._messages: dict[str, list[Message]] = {}
         self._events: dict[str, list[Event]] = {}
+        self._findings: dict[str, list[dict]] = {}
+        self._phase_done: dict[str, dict[str, set]] = {}
         self._lock = threading.Lock()
 
         # Load any existing sessions from disk on startup
@@ -69,6 +71,8 @@ class FixSessionManager:
             self._claims[session_id] = []
             self._messages[session_id] = []
             self._events[session_id] = []
+            self._findings[session_id] = []
+            self._phase_done[session_id] = {}
             self._save_session(session_id)
             return session_id
 
@@ -234,6 +238,7 @@ class FixSessionManager:
                 ProposalStatus.REJECTED: EventType.FIX_REJECTED,
                 ProposalStatus.APPLIED: EventType.FIX_APPLIED,
                 ProposalStatus.FAILED: EventType.FIX_FAILED,
+                ProposalStatus.VERIFIED: EventType.FIX_VERIFIED,
             }
             evt_type = event_map.get(status, EventType.FIX_PROPOSED)
             ev = Event(
@@ -467,6 +472,80 @@ class FixSessionManager:
             }
 
     # ------------------------------------------------------------------
+    # Findings
+    # ------------------------------------------------------------------
+
+    def add_finding(self, session_id: str, finding: dict) -> None:
+        """Store a finding from review/arch in the session."""
+        with self._lock:
+            self._require_session(session_id)
+            if session_id not in self._findings:
+                self._findings[session_id] = []
+            self._findings[session_id].append(finding)
+            self._save_session(session_id)
+
+    def get_findings(self, session_id: str) -> list[dict]:
+        """Get all findings for a session."""
+        with self._lock:
+            return list(self._findings.get(session_id, []))
+
+    # ------------------------------------------------------------------
+    # Proposal aliases (API compatibility with server.py)
+    # ------------------------------------------------------------------
+
+    def add_proposal(self, session_id: str, proposal: FixProposal) -> str:
+        """Add a proposal. Alias for propose_fix for API compat."""
+        return self.propose_fix(session_id, proposal)
+
+    def get_proposal_by_id(self, session_id: str, proposal_id: str) -> Optional[dict]:
+        """Get a single proposal by ID."""
+        with self._lock:
+            for p in self._proposals.get(session_id, []):
+                if p.id == proposal_id:
+                    return p.to_dict()
+            return None
+
+    # ------------------------------------------------------------------
+    # Message aliases (API compatibility with server.py)
+    # ------------------------------------------------------------------
+
+    def add_message(self, session_id: str, message: Message) -> str:
+        """Store a message."""
+        return self.send_message(session_id, message)
+
+    def get_messages(self, session_id: str, recipient: str = "") -> list[dict]:
+        """Get messages, optionally filtered by recipient."""
+        with self._lock:
+            self._require_session(session_id)
+            msgs = self._messages.get(session_id, [])
+            if recipient:
+                msgs = [m for m in msgs if m.recipient in (recipient, "all")]
+            return [m.to_dict() for m in msgs]
+
+    def mark_message_read(self, session_id: str, message_id: str) -> None:
+        """Mark a message as read (no-op for now, messages don't track read state)."""
+        pass
+
+    # ------------------------------------------------------------------
+    # Phase data (API compatibility with server.py)
+    # ------------------------------------------------------------------
+
+    def get_phase_data(self, session_id: str) -> dict:
+        """Get phase completion data.
+
+        Returns a dict keyed by expert_role -> sorted list of completed phases.
+        """
+        with self._lock:
+            meta = self._require_session(session_id)
+            phases = meta.get("phases_done", {})
+            return {expert: sorted(list(ps)) for expert, ps in phases.items()}
+
+    @property
+    def sessions_dir(self) -> Path:
+        """Base directory for sessions."""
+        return self._dir
+
+    # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
 
@@ -563,6 +642,11 @@ class FixSessionManager:
             for e in self._events.get(session_id, []):
                 f.write(json.dumps(e.to_dict()) + "\n")
 
+        # findings.jsonl
+        with open(sdir / "findings.jsonl", "w", encoding="utf-8") as f:
+            for finding in self._findings.get(session_id, []):
+                f.write(json.dumps(finding) + "\n")
+
     def _load_session(self, session_id: str) -> None:
         """Load session state from disk. Caller must hold ``self._lock``."""
         sdir = self._session_dir(session_id)
@@ -612,6 +696,20 @@ class FixSessionManager:
                 line = line.strip()
                 if line:
                     self._events[session_id].append(Event.from_dict(json.loads(line)))
+
+        # findings.jsonl
+        self._findings[session_id] = []
+        findings_path = sdir / "findings.jsonl"
+        if findings_path.exists():
+            for line in findings_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    self._findings[session_id].append(json.loads(line))
+
+        # Rebuild _phase_done from meta
+        self._phase_done[session_id] = {}
+        for expert, phases in meta.get("phases_done", {}).items():
+            self._phase_done[session_id][expert] = set(phases)
 
     # ------------------------------------------------------------------
     # Helpers

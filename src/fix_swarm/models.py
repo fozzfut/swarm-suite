@@ -58,6 +58,7 @@ class ProposalStatus(str, Enum):
     REJECTED = "rejected"
     APPLIED = "applied"
     FAILED = "failed"
+    VERIFIED = "verified"
 
 
 class ReactionType(str, Enum):
@@ -85,10 +86,15 @@ class EventType(str, Enum):
     FIX_REJECTED = "fix_rejected"
     FIX_APPLIED = "fix_applied"
     FIX_FAILED = "fix_failed"
+    FIX_VERIFIED = "fix_verified"
     REACTION_ADDED = "reaction_added"
     FINDING_CLAIMED = "finding_claimed"
     FINDING_RELEASED = "finding_released"
     MESSAGE = "message"
+    MESSAGE_SENT = "message_sent"
+    BROADCAST = "broadcast"
+    PHASE_DONE = "phase_done"
+    VERIFICATION_COMPLETE = "verification_complete"
     SESSION_ENDED = "session_ended"
 
 
