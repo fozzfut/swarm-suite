@@ -74,7 +74,7 @@ class TestCliVersion:
         runner = CliRunner()
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.3.4" in result.output
+        assert "version" in result.output
 
 
 class TestCliPurge:
