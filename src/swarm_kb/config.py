@@ -17,10 +17,11 @@ _DEFAULT_CONFIG: dict = {
     "code_map": {
         "cache_ttl_hours": 1,
         "skip_dirs": [
-            "node_modules", ".venv", "__pycache__", ".git",
+            "node_modules", ".venv", "venv", "__pycache__", ".git",
             "target", "build", "dist", "vendor", "bin", "obj",
             ".mypy_cache", ".pytest_cache", ".tox",
             ".eggs", "site-packages",
+            ".claude", ".worktrees",
         ],
         "max_file_size_mb": 5,
         "source_exts": [

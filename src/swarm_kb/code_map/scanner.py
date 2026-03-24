@@ -19,10 +19,11 @@ from .models import (
 _log = logging.getLogger("swarm_kb.code_map.scanner")
 
 _DEFAULT_SKIP_DIRS = {
-    "node_modules", ".venv", "__pycache__", ".git",
+    "node_modules", ".venv", "venv", "__pycache__", ".git",
     "target", "build", "dist", "vendor", "bin", "obj",
     ".mypy_cache", ".pytest_cache", ".tox",
     ".eggs", "site-packages",
+    ".claude", ".worktrees",
 }
 
 _DEFAULT_SOURCE_EXTS = {

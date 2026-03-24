@@ -434,7 +434,7 @@ class DebateEngine:
 
     def get_debate(self, debate_id: str) -> Optional[Debate]:
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 return None
             return copy.deepcopy(debate)
@@ -443,6 +443,7 @@ class DebateEngine:
         self, status: str = "", source_tool: str = ""
     ) -> list[Debate]:
         with self._lock:
+            self._refresh_from_disk()
             results = list(self._debates.values())
             if status:
                 results = [d for d in results if d.status.value == status]
@@ -462,7 +463,7 @@ class DebateEngine:
     ) -> str:
         """Add a proposal to an open debate. Returns proposal_id."""
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
             if debate.status != DebateStatus.OPEN:
@@ -495,7 +496,7 @@ class DebateEngine:
         except ValueError:
             raise ValueError(f"Invalid verdict {verdict!r}. Must be one of: support, oppose, modify")
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
             if debate.status != DebateStatus.OPEN:
@@ -517,7 +518,7 @@ class DebateEngine:
     ) -> None:
         """Cast a vote."""
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
             if debate.status != DebateStatus.OPEN:
@@ -532,7 +533,7 @@ class DebateEngine:
         Returns ``{"decision": {...}, "transcript": "..."}``.
         """
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
             if debate.status != DebateStatus.OPEN:
@@ -549,7 +550,7 @@ class DebateEngine:
     def cancel(self, debate_id: str) -> None:
         """Cancel an open debate."""
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
             if debate.status != DebateStatus.OPEN:
@@ -561,10 +562,58 @@ class DebateEngine:
     def get_transcript(self, debate_id: str) -> str:
         """Get or generate a markdown transcript for a debate."""
         with self._lock:
-            debate = self._debates.get(debate_id)
+            debate = self._get_or_load(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
             return debate.get_transcript()
+
+    # -- disk fallback ------------------------------------------------------
+
+    def _get_or_load(self, debate_id: str) -> Optional[Debate]:
+        """Return debate from memory, or try loading from disk on cache miss.
+
+        Must be called while holding ``self._lock``.
+        """
+        debate = self._debates.get(debate_id)
+        if debate is not None:
+            return debate
+        # Try loading from disk (created by another process)
+        debate_file = self._dir / debate_id / "debate.json"
+        if not debate_file.exists():
+            return None
+        try:
+            data = json.loads(debate_file.read_text(encoding="utf-8"))
+            debate = Debate.from_dict(data)
+            self._debates[debate.id] = debate
+            _log.info("Loaded debate %s from disk (created externally)", debate_id)
+            return debate
+        except Exception as exc:
+            _log.warning("Cannot load debate %s from disk: %s", debate_id, exc)
+            return None
+
+    def _refresh_from_disk(self) -> None:
+        """Scan disk for debates not yet in memory.
+
+        Must be called while holding ``self._lock``.
+        """
+        if not self._dir.exists():
+            return
+        for entry in self._dir.iterdir():
+            if not entry.is_dir():
+                continue
+            debate_id = entry.name
+            if debate_id in self._debates:
+                continue
+            debate_file = entry / "debate.json"
+            if not debate_file.exists():
+                continue
+            try:
+                data = json.loads(debate_file.read_text(encoding="utf-8"))
+                debate = Debate.from_dict(data)
+                self._debates[debate.id] = debate
+                _log.info("Discovered debate %s from disk", debate_id)
+            except Exception as exc:
+                _log.warning("Skipping corrupt debate in %s: %s", entry, exc)
 
     # -- persistence --------------------------------------------------------
 
@@ -644,6 +693,7 @@ class DebateEngine:
     def count(self, status: str = "") -> int:
         """Count debates, optionally filtered by status."""
         with self._lock:
+            self._refresh_from_disk()
             if not status:
                 return len(self._debates)
             return sum(
