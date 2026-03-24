@@ -1,5 +1,6 @@
 """Append-only decision log (ADR store) -- JSONL with thread lock."""
 
+import copy
 import json
 import logging
 import os
@@ -151,14 +152,14 @@ class DecisionStore:
         if project_path:
             results = [d for d in results if d.project_path == project_path]
 
-        return results
+        return [copy.deepcopy(d) for d in results]
 
     def get_by_id(self, decision_id: str) -> Decision | None:
         """Get a specific decision by ID."""
         with self._lock:
             for d in self._entries:
                 if d.id == decision_id:
-                    return d
+                    return copy.deepcopy(d)
         return None
 
     def update_status(

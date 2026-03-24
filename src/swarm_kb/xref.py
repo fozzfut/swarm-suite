@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import secrets
-import sys
 import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
@@ -65,29 +64,6 @@ class XRef:
             relation=d.get("relation", ""),
             metadata=d.get("metadata", {}),
         )
-
-
-def _file_lock(fh, exclusive: bool = True) -> None:
-    """Cross-platform file locking."""
-    if sys.platform == "win32":
-        import msvcrt
-        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK if exclusive else msvcrt.LK_NBRLCK, 1)
-    else:
-        import fcntl
-        fcntl.flock(fh, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-
-
-def _file_unlock(fh) -> None:
-    """Cross-platform file unlocking."""
-    if sys.platform == "win32":
-        import msvcrt
-        try:
-            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-    else:
-        import fcntl
-        fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 class XRefLog:

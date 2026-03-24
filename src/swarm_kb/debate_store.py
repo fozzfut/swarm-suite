@@ -1,5 +1,6 @@
 """Append-only debate log -- JSONL with thread lock."""
 
+import copy
 import json
 import logging
 import secrets
@@ -130,14 +131,14 @@ class DebateStore:
         if tag:
             results = [r for r in results if tag in r.tags]
 
-        return results
+        return [copy.deepcopy(r) for r in results]
 
     def get_by_id(self, debate_id: str) -> DebateRecord | None:
         """Get a specific debate by ID."""
         with self._lock:
             for r in self._entries:
                 if r.id == debate_id:
-                    return r
+                    return copy.deepcopy(r)
         return None
 
     def count(self) -> int:

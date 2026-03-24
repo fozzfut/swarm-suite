@@ -12,6 +12,7 @@ Each stage requires explicit user advancement. Findings from previous
 stages are available as context for later stages.
 """
 
+import copy
 import json
 import logging
 import os
@@ -240,11 +241,11 @@ class PipelineManager:
 
     def get(self, pipeline_id: str) -> Pipeline | None:
         with self._lock:
-            return self._pipelines.get(pipeline_id)
+            return copy.deepcopy(self._pipelines.get(pipeline_id))
 
     def list_all(self) -> list[Pipeline]:
         with self._lock:
-            return list(self._pipelines.values())
+            return [copy.deepcopy(p) for p in self._pipelines.values()]
 
     def advance(self, pipeline_id: str, notes: str = "") -> dict:
         """Advance pipeline to next stage (user gate)."""

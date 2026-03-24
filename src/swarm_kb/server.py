@@ -770,6 +770,7 @@ def create_mcp_server():
         # If not embedded/hardware project, skip spec stage
         if not include_spec:
             pipe_mgr.skip_to(pipe.id, "arch")
+        pipe = pipe_mgr.get(pipe.id)  # re-fetch after potential skip
 
         first_stage = pipe.current_stage
         info = STAGE_INFO[first_stage]

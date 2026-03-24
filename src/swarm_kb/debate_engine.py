@@ -444,11 +444,11 @@ class DebateEngine:
     ) -> list[Debate]:
         with self._lock:
             results = list(self._debates.values())
-        if status:
-            results = [d for d in results if d.status.value == status]
-        if source_tool:
-            results = [d for d in results if d.source_tool == source_tool]
-        return results
+            if status:
+                results = [d for d in results if d.status.value == status]
+            if source_tool:
+                results = [d for d in results if d.source_tool == source_tool]
+            return [copy.deepcopy(d) for d in results]
 
     def propose(
         self,
