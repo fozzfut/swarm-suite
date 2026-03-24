@@ -82,6 +82,10 @@ class SuiteConfig:
         return self.kb_root / "debates"
 
     @property
+    def pipelines_path(self) -> Path:
+        return self.kb_root / "pipelines"
+
+    @property
     def config_file(self) -> Path:
         return self.kb_root / "config.yaml"
 

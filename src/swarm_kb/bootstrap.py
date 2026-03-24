@@ -56,6 +56,7 @@ def _ensure_dirs(config: SuiteConfig) -> None:
         config.xrefs_path,
         config.decisions_path,
         config.debates_path,
+        config.pipelines_path,
     ]
     for tool in TOOL_NAMES:
         dirs.append(config.tool_sessions_path(tool))

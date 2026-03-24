@@ -14,6 +14,7 @@ from .decision_store import DecisionStore
 from .finding_reader import search_all_findings, get_finding_reader, FindingReader
 from .finding_writer import FindingWriter
 from .paths import code_map_path, project_hash_for
+from .pipeline import PipelineManager, STAGE_INFO, STAGE_ORDER
 from .session_meta import count_sessions, list_sessions
 from .xref import XRefLog
 
@@ -31,12 +32,14 @@ def create_mcp_server():
     class _LifespanState:
         config: SuiteConfig
         debate_engine: DebateEngine
+        pipeline_manager: PipelineManager
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
         config = bootstrap()
         engine = DebateEngine(config.debates_path / "active")
-        yield _LifespanState(config=config, debate_engine=engine)
+        pipe_mgr = PipelineManager(config.pipelines_path)
+        yield _LifespanState(config=config, debate_engine=engine, pipeline_manager=pipe_mgr)
 
     def _get_config(ctx: Optional[Context]) -> SuiteConfig:
         assert ctx is not None, "MCP Context not injected"
@@ -45,6 +48,10 @@ def create_mcp_server():
     def _get_debate_engine(ctx: Optional[Context]) -> DebateEngine:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.debate_engine
+
+    def _get_pipeline_manager(ctx: Optional[Context]) -> PipelineManager:
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.pipeline_manager
 
     mcp = FastMCP("SwarmKB", lifespan=lifespan)
 
@@ -65,6 +72,9 @@ def create_mcp_server():
         decision_store = DecisionStore(config.decisions_path / "decisions.jsonl")
         debate_store = DebateStore(config.debates_path / "debates.jsonl")
         engine = _get_debate_engine(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx)
+        pipelines = pipe_mgr.list_all()
+        active_pipelines = [p for p in pipelines if p.stages.get(p.current_stage) and p.stages[p.current_stage].status == "active"]
         return json.dumps({
             "kb_root": str(config.kb_root),
             "sessions": counts,
@@ -73,6 +83,8 @@ def create_mcp_server():
             "decision_count": decision_store.count(),
             "debate_count": debate_store.count(),
             "active_debates": engine.count(status="open"),
+            "pipeline_count": len(pipelines),
+            "active_pipelines": len(active_pipelines),
         }, indent=2)
 
     # ── kb_scan_project ──────────────────────────────────────────────
@@ -723,6 +735,143 @@ def create_mcp_server():
             return json.dumps({"status": "cancelled", "debate_id": debate_id})
         except Exception as exc:
             return json.dumps({"error": str(exc)})
+
+    # ── kb_start_pipeline ─────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_start_pipeline",
+        description=(
+            "Start a new analysis pipeline for a project. "
+            "Always begins with architecture analysis."
+        ),
+    )
+    def _kb_start_pipeline(
+        project_path: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe = pipe_mgr.start(project_path)
+        info = STAGE_INFO["arch"]
+        return json.dumps({
+            "pipeline_id": pipe.id,
+            "current_stage": "arch",
+            "stage_name": info["name"],
+            "message": "Pipeline started. Begin with architecture analysis.",
+            "actions": info["actions"],
+            "pipeline": pipe.to_dict(),
+        }, indent=2)
+
+    # ── kb_pipeline_status ─────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_pipeline_status",
+        description=(
+            "Get current pipeline status: which stage, "
+            "what's been done, what's next."
+        ),
+    )
+    def _kb_pipeline_status(
+        pipeline_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe = pipe_mgr.get(pipeline_id)
+        if pipe is None:
+            return json.dumps({"error": f"Pipeline {pipeline_id} not found"})
+
+        current = pipe.get_current()
+        info = STAGE_INFO[pipe.current_stage]
+        current_idx = STAGE_ORDER.index(pipe.current_stage)
+
+        completed = [s for s in STAGE_ORDER if pipe.stages[s].status == "completed"]
+        remaining = STAGE_ORDER[current_idx + 1:]
+
+        return json.dumps({
+            "pipeline_id": pipe.id,
+            "project_path": pipe.project_path,
+            "current_stage": pipe.current_stage,
+            "stage_name": info["name"],
+            "stage_status": current.status,
+            "completed_stages": completed,
+            "remaining_stages": remaining,
+            "actions": info["actions"],
+            "stage_stats": {
+                "session_ids": current.session_ids,
+                "approved_findings": current.approved_findings,
+                "dismissed_findings": current.dismissed_findings,
+            },
+            "pipeline": pipe.to_dict(),
+        }, indent=2)
+
+    # ── kb_advance_pipeline ────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_advance_pipeline",
+        description=(
+            "User gate: advance pipeline to the next stage. "
+            "Call after reviewing current stage results."
+        ),
+    )
+    def _kb_advance_pipeline(
+        pipeline_id: str,
+        notes: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        result = pipe_mgr.advance(pipeline_id, notes=notes)
+        return json.dumps(result, indent=2)
+
+    # ── kb_skip_stage ──────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_skip_stage",
+        description=(
+            "Skip to a specific pipeline stage "
+            "(e.g., skip arch and go straight to review)."
+        ),
+    )
+    def _kb_skip_stage(
+        pipeline_id: str,
+        stage: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        result = pipe_mgr.skip_to(pipeline_id, stage)
+        return json.dumps(result, indent=2)
+
+    # ── kb_update_stage ────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_update_stage",
+        description=(
+            "Update current stage stats: link session IDs, "
+            "record approved/dismissed finding counts."
+        ),
+    )
+    def _kb_update_stage(
+        pipeline_id: str,
+        session_id: str = "",
+        approved: int = 0,
+        dismissed: int = 0,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        result = pipe_mgr.update_stage_stats(
+            pipeline_id, session_id=session_id,
+            approved=approved, dismissed=dismissed,
+        )
+        return json.dumps(result, indent=2)
+
+    # ── kb_list_pipelines ──────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_list_pipelines",
+        description="List all pipelines.",
+    )
+    def _kb_list_pipelines(ctx: Optional[Context] = None) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        pipelines = pipe_mgr.list_all()
+        return json.dumps([p.to_dict() for p in pipelines], indent=2)
 
     # ── kb_migrate ───────────────────────────────────────────────────
 
