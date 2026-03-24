@@ -153,17 +153,18 @@ class SessionManager:
             return result
 
     def get_session(self, session_id: str) -> dict:
-        sess_dir = self._session_dir(session_id)
-        meta = self._load_meta(sess_dir)
-        store = self.get_finding_store(session_id)
-        claims = self.get_claim_registry(session_id)
-        return {
-            **meta,
-            "finding_count": store.count(),
-            "findings_by_severity": store.count_by_severity(),
-            "findings_by_status": store.count_by_status(),
-            "active_claims": len(claims.get_claims(session_id)),
-        }
+        with self._lock:
+            sess_dir = self._session_dir(session_id)
+            meta = self._load_meta(sess_dir)
+            store = self.get_finding_store(session_id)
+            claims = self.get_claim_registry(session_id)
+            return {
+                **meta,
+                "finding_count": store.count(),
+                "findings_by_severity": store.count_by_severity(),
+                "findings_by_status": store.count_by_status(),
+                "active_claims": len(claims.get_claims(session_id)),
+            }
 
     def list_sessions(self) -> list[dict]:
         sessions: list[dict] = []
