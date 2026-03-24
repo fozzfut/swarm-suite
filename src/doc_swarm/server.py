@@ -132,7 +132,9 @@ def create_mcp_server():
         from .doc_verifier import DocVerifier
 
         project = Path(project_path).resolve()
-        docs_path = project / docs_dir
+        docs_path = (project / docs_dir).resolve()
+        if not docs_path.is_relative_to(project):
+            return json.dumps({"error": "docs_dir must be within project directory"})
 
         if not docs_path.exists():
             return json.dumps({"error": f"Docs directory not found: {docs_path}"})
