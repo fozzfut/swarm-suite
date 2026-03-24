@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import secrets
 from dataclasses import dataclass, field
 from typing import Optional
@@ -101,6 +102,12 @@ def create_mcp_server():
     ) -> str:
         app = _get_app(ctx)
         session = app.store.get_session(session_id)
+
+        # Validate document_path exists and is a file
+        from pathlib import Path as _Path
+        doc_path = _Path(document_path)
+        if not doc_path.is_file():
+            return json.dumps({"error": f"File not found: {document_path}"})
 
         # Parse document
         from .doc_parser import parse_document
@@ -544,7 +551,6 @@ def create_mcp_server():
             for proto in spec.protocols:
                 if proto.protocol.upper() == "I2C" and proto.notes:
                     # Extract address from notes
-                    import re
                     addr_match = re.search(r"0x[0-9A-Fa-f]{2}", proto.notes)
                     if addr_match:
                         addr = addr_match.group(0).upper()
@@ -583,7 +589,6 @@ def create_mcp_server():
             for pwr in spec.power:
                 current_str = pwr.max_current
                 if current_str:
-                    import re
                     current_match = re.search(r"(\d+(?:\.\d+)?)\s*(mA|uA|A)", current_str)
                     if current_match:
                         val = float(current_match.group(1))

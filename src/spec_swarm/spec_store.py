@@ -89,47 +89,63 @@ class SpecStore:
 
     def get_session(self, session_id: str) -> SpecSession:
         """Get a session by ID. Raises KeyError if not found."""
-        if session_id not in self._sessions:
-            raise KeyError(f"Session not found: {session_id}")
-        return self._sessions[session_id]
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(f"Session {session_id} not found")
+            import copy
+            return copy.deepcopy(session)
 
     def list_sessions(self) -> list[dict]:
         """List all sessions with summary info."""
-        result = []
-        for sid, session in sorted(self._sessions.items()):
-            result.append({
-                "session_id": session.id,
-                "project_path": session.project_path,
-                "created_at": session.created_at,
-                "spec_count": len(session.specs),
-                "finding_count": len(session.findings),
-            })
-        return result
+        with self._lock:
+            result = []
+            for sid, session in sorted(self._sessions.items()):
+                result.append({
+                    "session_id": session.id,
+                    "project_path": session.project_path,
+                    "created_at": session.created_at,
+                    "spec_count": len(session.specs),
+                    "finding_count": len(session.findings),
+                })
+            return result
 
     def add_spec(self, session_id: str, spec: HardwareSpec) -> None:
         """Add a hardware spec to a session."""
         with self._lock:
-            session = self.get_session(session_id)
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(f"Session {session_id} not found")
             session.specs.append(spec)
             self._save_specs(session)
 
     def get_specs(self, session_id: str) -> list[HardwareSpec]:
         """Get all specs for a session."""
-        session = self.get_session(session_id)
-        return list(session.specs)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(f"Session {session_id} not found")
+            import copy
+            return copy.deepcopy(session.specs)
 
     def add_finding(self, session_id: str, finding: dict) -> None:
         """Add a finding (conflict, missing info, etc.) to a session."""
         with self._lock:
-            session = self.get_session(session_id)
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(f"Session {session_id} not found")
             finding.setdefault("timestamp", now_iso())
             session.findings.append(finding)
             self._save_findings(session)
 
     def get_findings(self, session_id: str) -> list[dict]:
         """Get all findings for a session."""
-        session = self.get_session(session_id)
-        return list(session.findings)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise KeyError(f"Session {session_id} not found")
+            import copy
+            return copy.deepcopy(session.findings)
 
     def _save_meta(self, session: SpecSession) -> None:
         """Save session metadata to disk."""
