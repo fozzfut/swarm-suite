@@ -166,29 +166,44 @@ def get_finding_reader(session_id: str, config: SuiteConfig | None = None) -> Fi
 def search_all_findings(
     config: SuiteConfig,
     *,
+    tool: str | None = None,
     file: str | None = None,
     severity: str | None = None,
     status: str | None = None,
     min_confidence: float | None = None,
 ) -> list[dict]:
-    """Search findings across ALL review sessions."""
-    sessions_dir = config.tool_sessions_path("review")
-    if not sessions_dir.exists():
-        return []
+    """Search findings across tool sessions.
+
+    Args:
+        tool: Restrict to a single tool (e.g. "review", "arch", "spec").
+              If None, searches ALL tools in TOOL_NAMES.
+    """
+    from .config import TOOL_NAMES
+
+    tools_to_search: tuple[str, ...] | list[str]
+    if tool:
+        tools_to_search = [tool]
+    else:
+        tools_to_search = TOOL_NAMES
 
     results: list[dict] = []
-    for entry in sorted(sessions_dir.iterdir()):
-        if not entry.is_dir():
+    for tool_name in tools_to_search:
+        sessions_dir = config.tool_sessions_path(tool_name)
+        if not sessions_dir.exists():
             continue
-        reader = FindingReader(entry)
-        if not reader.exists():
-            continue
-        findings = reader.search(
-            file=file, severity=severity,
-            status=status, min_confidence=min_confidence,
-        )
-        for f in findings:
-            f["_session_id"] = entry.name
-        results.extend(findings)
+        for entry in sorted(sessions_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+            reader = FindingReader(entry)
+            if not reader.exists():
+                continue
+            findings = reader.search(
+                file=file, severity=severity,
+                status=status, min_confidence=min_confidence,
+            )
+            for f in findings:
+                f["_session_id"] = entry.name
+                f["_tool"] = tool_name
+            results.extend(findings)
 
     return results
