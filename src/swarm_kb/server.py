@@ -1220,9 +1220,29 @@ No automatic progression. You control the pace.
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            findings_list = json.loads(findings)
+            findings_parsed = json.loads(findings)
         except json.JSONDecodeError as exc:
             return json.dumps({"error": f"Invalid findings JSON: {exc}"})
+
+        # Accept both formats:
+        #   - list of finding dicts: [{"severity": "high", ...}, ...]
+        #   - severity counts dict:  {"critical": 0, "high": 2, "medium": 4, "low": 12}
+        if isinstance(findings_parsed, dict) and not findings_parsed.get("severity"):
+            severity_keys = {"critical", "high", "medium", "low", "info"}
+            if severity_keys & set(findings_parsed.keys()):
+                findings_list = []
+                for sev in ("critical", "high", "medium", "low", "info"):
+                    count = int(findings_parsed.get(sev, 0))
+                    findings_list.extend(
+                        {"severity": sev, "title": f"{sev}-{i+1}"}
+                        for i in range(count)
+                    )
+            else:
+                findings_list = [findings_parsed]
+        elif isinstance(findings_parsed, list):
+            findings_list = findings_parsed
+        else:
+            return json.dumps({"error": "findings must be a JSON array of finding dicts or a severity counts dict"})
 
         metrics = compute_round_metrics(
             findings_list,
