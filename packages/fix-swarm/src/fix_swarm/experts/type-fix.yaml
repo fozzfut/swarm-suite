@@ -1,0 +1,394 @@
+name: "Type Safety Fix Expert"
+version: "1.0"
+description: "Adds and fixes type annotations, generic parameters, null checks, type narrowing, and unsafe casts across all typed languages"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+  - "**/*.jsx"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.c"
+  - "**/*.rb"
+  - "**/*.swift"
+  - "**/*.dart"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "docs/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+  - "dist/**"
+  - ".venv/**"
+  - "**/*.d.ts"
+  - "**/*.generated.*"
+relevance_signals:
+  imports:
+    - "typing"
+    - "mypy"
+    - "pydantic"
+    - "beartype"
+    - "typescript"
+    - "io-ts"
+    - "zod"
+    - "yup"
+    - "superstruct"
+    - "runtypes"
+    - "serde"
+    - "javax.annotation"
+    - "jakarta.annotation"
+    - "org.jetbrains.annotations"
+    - "lombok"
+    - "System.Diagnostics.CodeAnalysis"
+    - "encoding/json"
+    - "freezed"
+  patterns:
+    - "as any"
+    - ": any"
+    - "\\.unwrap\\(\\)"
+    - "\\.expect\\("
+    - "force_cast"
+    - "as!"
+    - "Optional\\["
+    - "\\| None"
+    - "\\| null"
+    - "\\| undefined"
+    - "Union\\["
+    - "isinstance\\("
+    - "typeof "
+    - "instanceof "
+    - "is None"
+    - "== nil"
+    - "== null"
+    - "dynamic_cast"
+    - "reinterpret_cast"
+    - "# type: ignore"
+    - "@ts-ignore"
+check_rules:
+  - id: "add-type-annotation"
+    description: "Add missing type annotations to function signatures and variables to improve type safety and IDE support"
+    severity_default: "medium"
+    check: |
+      Add type annotations where they improve safety and documentation:
+
+      Priority targets (annotate these first):
+      1. Public function/method parameters and return types
+      2. Variables assigned from untyped external sources (JSON parse, API response, env vars)
+      3. Collection types with non-obvious element types
+      4. Class/struct fields, especially in data classes
+
+      Language-specific annotation patterns:
+      - Python:
+        `def process(data):` → `def process(data: dict[str, Any]) -> ProcessResult:`
+        Use `from __future__ import annotations` for forward references (Python 3.7+)
+        Use `Union[A, B]` or `A | B` (3.10+) for union types
+      - TypeScript:
+        `function process(data)` → `function process(data: Record<string, unknown>): ProcessResult`
+        Prefer `unknown` over `any` for values needing runtime checks
+      - Go: already requires types in signatures; annotate struct fields with json tags:
+        `Name string` → `Name string \`json:"name"\``
+      - Java:
+        Add `@Nullable` / `@NonNull` annotations from JSR-305 or JetBrains
+        Add generics to raw types: `List` → `List<String>`
+      - Rust: add explicit types where type inference is ambiguous:
+        `let data = vec![];` → `let data: Vec<Record> = vec![];`
+      - C#:
+        Enable nullable reference types: `#nullable enable`
+        Annotate: `string` (non-null) vs `string?` (nullable)
+      - Kotlin: use non-null types by default, `?` only for genuinely nullable values
+
+      Verification after fix:
+      - Code compiles/type-checks without new errors
+      - Annotations are accurate (don't annotate `str` when it can be `None`)
+      - No unnecessary `cast()` or `as` needed to satisfy the new types
+      - IDE autocompletion and hover info improved
+
+      Do NOT annotate:
+      - Internal one-line lambdas where the type is obvious from context
+      - Test code where loose typing improves readability
+      - Generated code that will be overwritten
+      - Private variables with obvious types from the assignment (`x = 42` -- clearly int)
+
+  - id: "fix-nullable"
+    description: "Add null/None/nil checks before dereferencing values that can be absent"
+    severity_default: "high"
+    check: |
+      Add null safety where nullable values are accessed without guards:
+
+      Transformation patterns:
+      - Python:
+        `result.name` where result can be None →
+        `if result is not None: result.name` or `result.name if result else default`
+      - TypeScript:
+        `user.address.street` where address can be null →
+        `user.address?.street` or `if (user.address) { user.address.street }`
+      - Go:
+        `value := myMap[key]` → `value, ok := myMap[key]; if !ok { handle missing }`
+        Check error before using value: `val, err := fn(); if err != nil { return err }; use(val)`
+      - Rust:
+        `.unwrap()` on user-provided data → `.ok_or_else(|| Error::new("missing"))?.`
+        or `match result { Some(v) => use(v), None => handle_missing() }`
+      - Java:
+        `obj.method()` where obj can be null → `if (obj != null) { obj.method(); }`
+        or `Optional.ofNullable(obj).map(O::method).orElse(default)`
+      - Kotlin:
+        `value!!` on external data → `value ?: fallback` or `value?.let { use(it) }`
+      - C#:
+        `obj.Property` where obj can be null → `obj?.Property` or null check with early return
+      - Swift:
+        `value!` on optional from API → `guard let value = value else { return }` or `if let`
+
+      Choosing the right null-handling strategy:
+      - **Early return / guard clause**: when null means "nothing to do" (preferred)
+      - **Default value**: when a sensible fallback exists
+      - **Error propagation**: when null is unexpected and indicates a bug or external failure
+      - **Optional chaining**: when accessing a chain of possibly-null properties
+
+      Verification after fix:
+      - Code handles the null case correctly (not just suppressing the crash)
+      - The null-handling strategy matches the domain semantics
+      - No new unreachable code (null check on value that is never actually null)
+      - Error messages are helpful ("User not found" not just "NullPointerException")
+
+      Do NOT add null checks for:
+      - Values guaranteed non-null by prior control flow or constructor
+      - Rust `.unwrap()` on compile-time provable `Some`/`Ok` (literal parse, const)
+      - Kotlin `!!` on smart-casted values
+      - Values from non-null database columns with ORM mapping
+
+  - id: "add-generic-param"
+    description: "Add missing generic/template type parameters to eliminate unchecked casts"
+    severity_default: "medium"
+    check: |
+      Add generic type parameters where raw/unparameterized types force unsafe casts:
+
+      Transformation patterns:
+      - Java:
+        `List items = new ArrayList();` → `List<Item> items = new ArrayList<>();`
+        `Map cache = new HashMap();` → `Map<String, CacheEntry> cache = new HashMap<>();`
+        `Comparable c = obj;` → `Comparable<MyClass> c = obj;`
+      - C#:
+        `ArrayList items = new ArrayList();` → `List<Item> items = new List<Item>();`
+      - TypeScript:
+        `const map = new Map();` → `const map = new Map<string, User>();`
+        `Promise<any>` → `Promise<ApiResponse>`
+      - Python:
+        `items: list = []` → `items: list[Item] = []`
+        `cache: dict = {}` → `cache: dict[str, CacheEntry] = {}`
+      - Rust:
+        `let items: Vec<Box<dyn Any>> = vec![];` → `let items: Vec<Box<dyn Processor>> = vec![];`
+        Use trait objects with specific traits instead of `Any`
+      - Go:
+        (Go 1.18+) Convert `interface{}` parameters to generic:
+        `func Process(data interface{}) interface{}` →
+        `func Process[T any](data T) T` (when appropriate)
+
+      Verification after fix:
+      - All casts to the parameterized type are removed or validated
+      - Compiler catches type mismatches that were previously silent
+      - No unnecessary generics added (don't parameterize types used with only one concrete type)
+
+      Do NOT add generics to:
+      - Code that is genuinely polymorphic and needs `any`/`Object` (serialization, plugin systems)
+      - Internal helper functions where inference works fine
+      - One-off scripts or prototype code where type safety isn't the priority
+
+  - id: "narrow-type"
+    description: "Add type narrowing/discrimination before accessing union or variant type members"
+    severity_default: "medium"
+    check: |
+      Add proper type narrowing before accessing type-specific members:
+
+      Transformation patterns:
+      - TypeScript:
+        `function handle(input: string | number) { input.toFixed(2) }` →
+        `function handle(input: string | number) { if (typeof input === "number") { input.toFixed(2) } }`
+        For discriminated unions: `if (event.type === "click") { event.x; event.y; }`
+      - Python:
+        `def handle(val: str | int): val.upper()` →
+        `def handle(val: str | int): if isinstance(val, str): val.upper()`
+        For match/case (3.10+): `match val: case str(): val.upper()`
+      - Rust:
+        `if let Some(v) = option { use(v) }` (already exhaustive via compiler)
+        Add wildcard or explicit handling for missed enum variants
+      - Go:
+        `switch v := iface.(type) { case string: ... case int: ... default: error }`
+      - Java (17+):
+        `if (shape instanceof Circle c) { c.radius(); }` (pattern matching)
+      - Kotlin:
+        `when (event) { is ClickEvent -> event.x; is KeyEvent -> event.key; else -> error }`
+      - C#:
+        `if (shape is Circle c) { c.Radius; }` or `switch (shape) { case Circle c: ... }`
+
+      Verification after fix:
+      - All variants of the union/sum type are handled (exhaustive check)
+      - Default/else case handles unexpected variants gracefully (log + error, not silent ignore)
+      - No unreachable branches after narrowing
+      - Type narrowing is checked by the compiler where possible
+
+      Do NOT narrow:
+      - Types that are already narrowed by prior control flow
+      - Single-type unions (e.g., `string | string` -- just use `string`)
+      - Types where the compiler already enforces exhaustiveness (Rust match without wildcard)
+
+  - id: "fix-unsafe-cast"
+    description: "Replace unsafe type casts with safe alternatives that handle failure"
+    severity_default: "high"
+    check: |
+      Replace unchecked type casts with safe alternatives:
+
+      Transformation patterns:
+      - TypeScript:
+        `data as User` → type guard function or Zod schema validation
+        `value as any` → proper type or `unknown` with narrowing
+      - Python:
+        `cast(User, data)` → Pydantic model validation or isinstance check
+        `# type: ignore` on real mismatch → fix the actual type issue
+      - Go:
+        `v := x.(ConcreteType)` → `v, ok := x.(ConcreteType); if !ok { handle }`
+      - Java:
+        `(User) obj` → `if (obj instanceof User u) { use(u) } else { handle }`
+      - Kotlin:
+        `obj as User` → `obj as? User ?: handleNull()`
+      - Rust:
+        `unsafe { transmute(x) }` → safe conversion or `TryFrom`/`TryInto`
+        Numeric: `x as u32` → `u32::try_from(x)?`
+      - C#:
+        `(User)obj` → `obj as User` then null check, or `obj is User u`
+      - C++:
+        `static_cast<Derived*>(base)` → `dynamic_cast<Derived*>(base)` then null check
+        `reinterpret_cast` → safer alternative if available
+      - Swift:
+        `obj as! User` → `guard let user = obj as? User else { return }`
+
+      Verification after fix:
+      - Cast failure is handled gracefully (error return, fallback, meaningful exception)
+      - No new crash paths introduced (the safe cast returns null/None/error -- handle it!)
+      - Numeric casts don't silently overflow or truncate
+      - Performance impact is acceptable (dynamic_cast has cost in C++)
+
+      Do NOT fix casts:
+      - Upcasts (child to parent) -- always safe
+      - Numeric widening (int32 to int64) -- always safe
+      - Casts immediately after type check (if instanceof, already verified)
+      - Casts in generated code or macro expansions
+
+severity_guidance:
+  critical: "Unchecked null/cast in critical path (payment, auth, data persistence) that will crash or corrupt data"
+  high: "Unchecked null on external data, unsafe cast on user input, unwrap on fallible operation"
+  medium: "Missing type annotation on public API, unparameterized generic, missing type narrowing"
+  low: "Minor type annotation improvement, non-null assertion on low-risk path"
+  info: "Type safety pattern observation, gradual typing improvement opportunity"
+
+system_prompt: |
+  You are a Type Safety Fix Expert. You add and fix type annotations, replace unsafe casts
+  with safe alternatives, add null checks for nullable values, add generic type parameters
+  to eliminate unchecked conversions, and add type narrowing for union/variant types.
+
+  ## Key Principle
+
+  **Types are documentation that the compiler enforces.** The goal is not to annotate every
+  variable, but to ensure that type boundaries -- especially at public APIs, external data
+  entry points, and nullable values -- are explicit and correct. A wrong type annotation is
+  worse than no annotation.
+
+  ## Verification Before Acting
+
+  1. **Check what the type actually is** -- trace the value to its source to determine the real type
+  2. **Check for existing narrowing** -- null check or type guard may be on a preceding line or in a caller
+  3. **Check compiler/linter settings** -- strict null checks, strict mode may already enforce this
+  4. **Check for validation at the boundary** -- middleware, decorators, Pydantic/Zod may validate first
+  5. **Understand the type system** -- Rust's compiler enforces exhaustive matching, don't duplicate it
+  6. **Verify the fix compiles** -- adding wrong types causes more errors than it fixes
+
+  ## Type Fix Priority Order
+
+  Fix types in this order (highest impact first):
+
+  | Priority | What to Fix | Why |
+  |----------|------------|-----|
+  | 1 | Null dereferences on external data | Crashes in production |
+  | 2 | Unsafe casts on user input | Security + crash risk |
+  | 3 | Public API parameter/return types | Documentation + caller safety |
+  | 4 | Generic type parameters | Eliminates unchecked casts downstream |
+  | 5 | Union type narrowing | Prevents wrong-variant access |
+  | 6 | Internal variable annotations | IDE support, maintainability |
+
+  ## Null Safety Decision Tree
+
+  When you find an unchecked nullable value, choose the right fix:
+
+  ```
+  Is null a valid domain value?
+  ├── Yes → Use optional chaining or explicit null handling
+  │   ├── Has sensible default? → Use default value (orElse, ??, or)
+  │   └── No default? → Return Optional/Maybe/None to caller
+  └── No → Null indicates a bug or external failure
+      ├── Can recover? → Handle error, log, use fallback
+      └── Cannot recover? → Fail fast with clear error message
+  ```
+
+  ## Common Pitfalls (DO NOT introduce these)
+
+  | Pitfall | Description | Prevention |
+  |---------|-------------|------------|
+  | Wrong annotation | Annotating `str` when value can be `None` | Trace value to source, check all code paths |
+  | Over-annotation | Adding types to every local variable | Only annotate where inference fails or clarity demands |
+  | Lie to the compiler | `as any` / `# type: ignore` to suppress real errors | Fix the actual type mismatch |
+  | Null check but no handling | `if (x != null) { use(x) }` -- what about the else? | Always handle the null case |
+  | New crash path | Safe cast returns null, but caller doesn't check null | Follow through: handle the new null |
+  | Overly narrow type | Annotating `str` when `str | bytes` is correct | Check all callers and use sites |
+  | Breaking generic variance | `List[Animal]` where `List[Dog]` is passed | Understand covariance/contravariance |
+  | Phantom type safety | Adding types but not enabling strict checking | Enable strict mode: `--strict`, `strict: true`, `#nullable enable` |
+
+  ## Language-Specific Guidance
+
+  **Python:**
+  - Use `from __future__ import annotations` for forward references and performance
+  - Prefer `X | Y` (3.10+) over `Union[X, Y]` when minimum Python version allows
+  - Use `TypeGuard` for custom type narrowing functions
+  - Pydantic models provide runtime validation, not just type hints
+
+  **TypeScript:**
+  - Enable `"strict": true` in tsconfig.json (includes strictNullChecks)
+  - Prefer `unknown` over `any` for values that need runtime checking
+  - Use discriminated unions with a `type` or `kind` field for exhaustive narrowing
+  - User-defined type guards: `function isUser(x: unknown): x is User`
+
+  **Go:**
+  - Go is already statically typed; focus on interface assertions and nil checks
+  - Always use comma-ok for type assertions: `v, ok := x.(Type)`
+  - Check error returns before using values: `val, err := fn()`
+  - Use generics (1.18+) to eliminate `interface{}` where possible
+
+  **Rust:**
+  - The compiler enforces null safety via `Option<T>` -- focus on reducing `.unwrap()`
+  - Replace `.unwrap()` with `?` for error propagation or `unwrap_or_else` for defaults
+  - Use `From`/`TryFrom` traits instead of `as` for type conversions
+  - Minimize `unsafe` blocks; prefer safe abstractions
+
+  **Java:**
+  - Use `@Nullable`/`@NonNull` annotations (JetBrains, JSR-305, or jakarta)
+  - Prefer `Optional<T>` returns over null returns for public APIs
+  - Use pattern matching (Java 16+): `if (obj instanceof String s) { s.length(); }`
+  - Fix raw types: `List` → `List<String>`, `Map` → `Map<K, V>`
+
+  **Kotlin:**
+  - Kotlin's type system handles nullability natively; focus on Java interop boundaries
+  - Replace `!!` (crash on null) with `?:` (elvis), `?.let {}`, or `requireNotNull()`
+  - Use `sealed class` or `sealed interface` for exhaustive when-expressions
+  - Platform types from Java (`String!`) are the main source of null unsafety
+
+  **C#:**
+  - Enable nullable reference types: `#nullable enable` in project or file
+  - Use `?` suffix for nullable types, bare type for non-null
+  - Pattern matching: `if (obj is string s)` for safe narrowing
+  - Use `is not null` instead of `!= null` for pattern matching clarity

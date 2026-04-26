@@ -1,0 +1,380 @@
+name: "Error Handling Fix Expert"
+version: "1.0"
+description: "Fixes error handling: adds missing catches, narrows broad catches, propagates errors correctly, adds context, and recovers swallowed errors"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+  - "**/*.jsx"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.rb"
+  - "**/*.ex"
+  - "**/*.swift"
+  - "**/*.php"
+exclude_patterns:
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+  - "dist/**"
+  - ".venv/**"
+relevance_signals:
+  imports: []
+  patterns:
+    - "try[:\\s{]"
+    - "catch\\s*\\("
+    - "except[:\\s]"
+    - "rescue\\s"
+    - "if err != nil"
+    - "\\.unwrap\\("
+    - "\\.expect\\("
+    - "panic!\\("
+    - "raise "
+    - "throw "
+    - "Result<"
+    - "Result\\["
+    - "Error\\("
+    - "finally[:\\s{]"
+    - "defer "
+check_rules:
+  - id: "add-error-handling"
+    description: "Add try/catch or error checking around operations that can fail but have no error handling"
+    severity_default: "high"
+    check: |
+      Add error handling where operations can fail silently:
+
+      Identify unhandled failure points:
+      1. File I/O without try/catch (open, read, write, delete)
+      2. Network calls without error handling (HTTP requests, database queries, RPC)
+      3. JSON/YAML parsing without catch for malformed input
+      4. External process execution without checking exit code
+      5. Resource acquisition without cleanup on failure (connections, locks, file handles)
+
+      Transformation patterns:
+      - Python:
+        `data = json.loads(raw)` →
+        `try: data = json.loads(raw) except json.JSONDecodeError as e: raise ValueError(f"Invalid JSON: {e}") from e`
+      - Go:
+        `result := doSomething()` where doSomething returns (T, error) →
+        `result, err := doSomething(); if err != nil { return fmt.Errorf("doing something: %w", err) }`
+      - JS/TS:
+        `const data = await fetch(url).then(r => r.json())` →
+        `const resp = await fetch(url); if (!resp.ok) { throw new Error(\`HTTP ${resp.status}\`) }; const data = await resp.json()`
+      - Rust:
+        `let data = serde_json::from_str(raw).unwrap()` →
+        `let data = serde_json::from_str(raw).map_err(|e| anyhow!("parse config: {e}"))?`
+      - Java:
+        `FileReader fr = new FileReader(path);` →
+        `try (FileReader fr = new FileReader(path)) { ... } catch (IOException e) { throw new ConfigException("Cannot read " + path, e); }`
+      - C#:
+        `var content = File.ReadAllText(path);` →
+        `try { var content = File.ReadAllText(path); } catch (IOException ex) { throw new ConfigException($"Cannot read {path}", ex); }`
+      - Ruby:
+        `data = JSON.parse(raw)` →
+        `begin; data = JSON.parse(raw); rescue JSON::ParserError => e; raise ConfigError, "Invalid JSON: #{e.message}"; end`
+
+      Error handling strategy:
+      - **Propagate with context**: wrap and re-throw with description of what was being done
+      - **Recover and retry**: for transient failures (network timeout, lock contention)
+      - **Fail fast**: for configuration errors and programming bugs
+      - **Default value**: only when the operation is optional and a fallback is meaningful
+
+      Verification after fix:
+      - Error is caught at the right granularity (not too broad, not too narrow)
+      - Error message includes context: WHAT failed, with WHAT input, WHY it matters
+      - Stack trace is preserved (use `from e`, `cause`, `%w`, not a brand new error)
+      - Cleanup runs even on error (use finally/defer/RAII)
+
+      Do NOT add error handling:
+      - Around infallible operations (math on constants, string literals)
+      - Where the caller already handles the error (middleware, global handler)
+      - In test code where panicking on error is intentional
+      - Around operations that are documented as never failing
+
+  - id: "narrow-catch"
+    description: "Replace overly broad exception catches with specific exception types"
+    severity_default: "medium"
+    check: |
+      Narrow broad catch blocks to specific exceptions:
+
+      Transformation patterns:
+      - Python:
+        `except Exception:` → `except (ValueError, KeyError, TypeError):`
+        or separate catch blocks: `except ValueError: handle_value() except KeyError: handle_key()`
+        CRITICAL: bare `except:` catches SystemExit and KeyboardInterrupt -- always narrow this
+      - Java:
+        `catch (Exception e)` → `catch (IOException | ParseException e)`
+        `catch (Throwable t)` → only at top-level error boundaries
+      - JS/TS:
+        `catch (e) { /* handles everything */ }` →
+        check error type: `catch (e) { if (e instanceof TypeError) { ... } else { throw e; } }`
+      - C#:
+        `catch (Exception)` → `catch (IOException) { ... } catch (FormatException) { ... }`
+        Add `when` filter: `catch (HttpException ex) when (ex.StatusCode == 404)`
+      - Ruby:
+        `rescue => e` → `rescue JSON::ParserError, IOError => e`
+        `rescue Exception` catches SignalException -- always narrow this
+      - Go: N/A -- Go uses error values, not exceptions. Focus on checking specific error types:
+        `if err != nil` → `if errors.Is(err, os.ErrNotExist)` or `errors.As`
+      - Rust: N/A -- Rust uses Result<T, E>. Match on specific error variants:
+        `Err(e) => panic!()` → `Err(e) => match e { IoError(e) => ..., ParseError(e) => ... }`
+
+      What to do with the narrowed catches:
+      - Handle expected errors specifically (retry, default, user message)
+      - Re-throw unexpected errors (don't catch what you can't handle)
+      - Log unexpected errors at the boundary, with full context
+
+      Verification after fix:
+      - All expected error types are caught
+      - Unexpected errors propagate up (not silently swallowed by broad catch)
+      - No change in behavior for the expected error cases
+      - System-critical exceptions (OOM, StackOverflow) are not caught accidentally
+
+      Do NOT narrow:
+      - Top-level error boundaries (main function, request handler, event loop)
+      - Framework-mandated broad catches (middleware, plugin hosts)
+      - Catch blocks that log AND re-throw (they're observing, not handling)
+
+  - id: "propagate-error"
+    description: "Fix functions that catch errors internally when they should propagate them to the caller"
+    severity_default: "high"
+    check: |
+      Fix error propagation where errors are consumed instead of returned to the caller:
+
+      Identify broken propagation:
+      1. Function catches an error and returns a default value without the caller knowing
+      2. Function logs the error but returns success status
+      3. Error is assigned to `_` or discarded explicitly
+      4. Function signature doesn't include error in return type but can fail
+
+      Transformation patterns:
+      - Python:
+        ```
+        def load_config(path):
+            try: return json.loads(open(path).read())
+            except: return {}  # caller thinks empty config is normal
+        ```
+        → Add the error to the return or re-raise:
+        ```
+        def load_config(path) -> dict:
+            try: return json.loads(open(path).read())
+            except (IOError, json.JSONDecodeError) as e:
+                raise ConfigError(f"Cannot load {path}: {e}") from e
+        ```
+      - Go:
+        `result, _ := doSomething()` → `result, err := doSomething(); if err != nil { return zero, fmt.Errorf("context: %w", err) }`
+      - Rust:
+        `let _ = write_file(data);` → `write_file(data)?;` or `write_file(data).map_err(|e| ...)?;`
+      - JS/TS:
+        `.catch(() => null)` → `.catch(e => { throw new AppError("context", { cause: e }) })`
+        or return the error in a Result type pattern
+      - Java:
+        `catch (Exception e) { return null; }` → `catch (SpecificException e) { throw new AppException("context", e); }`
+
+      Verification after fix:
+      - Callers now handle the propagated error (check all call sites)
+      - Error message includes context about what operation failed
+      - Original error is preserved as the cause (for stack traces)
+      - Function signature reflects that it can fail (Go: returns error; Rust: returns Result)
+
+      Do NOT propagate:
+      - Cleanup errors (closing files, releasing locks) -- log and continue
+      - Metric/telemetry failures -- non-critical, should not break the main flow
+      - Errors in optional features (analytics, logging) -- degrade gracefully
+      - Expected "not found" results (these are not errors, they're valid outcomes)
+
+  - id: "add-error-context"
+    description: "Add contextual information to errors so they can be diagnosed when they reach the error boundary"
+    severity_default: "medium"
+    check: |
+      Add context to errors that are re-thrown or propagated without description:
+
+      Transformation patterns:
+      - Python:
+        `raise` (bare re-raise) → OK if the original exception has good context
+        `raise ValueError("invalid")` → `raise ValueError(f"Cannot process order {order_id}: field 'quantity' must be positive") from original_error`
+      - Go:
+        `return err` → `return fmt.Errorf("loading user %d: %w", userID, err)`
+        Chain context at each level: `"loading config" → "parsing JSON" → "invalid field 'port'"`
+      - Rust:
+        `Err(e) => Err(e)` → `Err(e) => Err(e).context(format!("loading user {user_id}"))?`
+        or `.map_err(|e| anyhow!("context: {e}"))?`
+      - JS/TS:
+        `throw e` → `throw new Error("Loading user failed", { cause: e })`
+        or use a custom error class with context fields
+      - Java:
+        `throw e;` → `throw new AppException("Loading user " + userId, e);`
+        Use the cause parameter to preserve the original stack trace
+      - C#:
+        `throw;` (bare re-throw preserves stack) -- OK if original has good context
+        `throw new AppException($"Loading user {userId}", ex);`
+
+      Context should include:
+      - WHAT operation was being performed ("loading user", "parsing config")
+      - WITH WHAT input (user ID, file path, query -- but NOT sensitive data like passwords)
+      - WHY it matters (which caller/feature depends on this)
+
+      Verification after fix:
+      - Error messages are actionable (developer can diagnose the issue from the message alone)
+      - Original stack trace is preserved (use `from`, `cause`, `%w`)
+      - No sensitive data in error messages (passwords, tokens, PII)
+      - Context doesn't duplicate information already in the original error
+
+      Do NOT add context:
+      - To errors that already have sufficient context
+      - At every level (over-wrapping produces "loading: parsing: reading: opening: error")
+      - With information that changes the error type inappropriately
+      - With sensitive data (credentials, PII, internal paths that leak to users)
+
+  - id: "fix-swallowed-error"
+    description: "Recover errors that are caught and silently discarded without logging or propagation"
+    severity_default: "high"
+    check: |
+      Fix catch blocks that silently discard errors:
+
+      Identify swallowed errors:
+      1. Empty catch/except/rescue blocks: `catch (e) {}`, `except: pass`, `rescue; end`
+      2. Catch blocks that only set a boolean or return default without logging
+      3. Go error assignments to `_`: `_, _ = dangerousOp()`
+      4. Promise `.catch(() => {})` or `.catch(() => undefined)`
+      5. Rust `let _ = fallible_op();` on non-trivial operations
+
+      Transformation patterns (minimum: add logging):
+      - Python:
+        `except Exception: pass` → `except Exception: logger.warning("Operation X failed", exc_info=True)`
+      - Go:
+        `_ = importantOp()` → `if err := importantOp(); err != nil { log.Printf("important op failed: %v", err) }`
+      - JS/TS:
+        `.catch(() => {})` → `.catch(e => { console.error("Operation failed:", e) })`
+      - Java:
+        `catch (Exception e) {}` → `catch (Exception e) { LOG.warn("Operation failed", e); }`
+      - Rust:
+        `let _ = write(data);` → `if let Err(e) = write(data) { tracing::warn!("write failed: {e}"); }`
+      - Ruby:
+        `rescue; end` → `rescue => e; logger.warn("Operation failed: #{e.message}"); end`
+
+      Deciding between log vs propagate:
+      - **Propagate** if the caller needs to know about the failure (data operations, auth, business logic)
+      - **Log** if the operation is optional and failure is tolerable (metrics, analytics, caching)
+      - **Log + propagate** if the error is important but you need local context in the log
+
+      Verification after fix:
+      - Previously silent failures now produce visible evidence (logs, metrics, error returns)
+      - The fix doesn't change control flow for callers that relied on the swallowed error
+      - Log level is appropriate (warn for expected failures, error for unexpected)
+      - No log spam (don't log expected high-frequency failures at error level)
+
+      Do NOT change:
+      - Intentionally ignored errors with explanatory comment (`// safe to ignore: X`)
+      - Cleanup errors (close, unlock, rollback) where logging would be noise
+      - Test code that expects errors
+      - Performance-critical paths where logging would add unacceptable overhead
+
+severity_guidance:
+  critical: "Swallowed error in data persistence, authentication, or financial path causing silent data loss"
+  high: "Missing error handling on I/O, swallowed error on important operation, broken error propagation"
+  medium: "Overly broad catch, missing error context, error without stack trace preservation"
+  low: "Missing error context on non-critical path, inconsistent error handling style"
+  info: "Error handling improvement opportunity, style suggestion"
+
+system_prompt: |
+  You are an Error Handling Fix Expert. You fix missing error handling, narrow overly broad
+  catches, propagate errors that are incorrectly swallowed, add context to bare errors, and
+  recover silently discarded failures. Your fixes ensure errors are visible, actionable, and
+  properly propagated.
+
+  ## Key Principle
+
+  **Errors exist to communicate failure. A silenced error is a hidden bug.** The question for
+  every error handler is: "Would a developer, operator, or user need to know about this failure?"
+  If yes and the error is silenced, that's a bug. If no (cleanup, optional features), silence
+  may be appropriate -- but it must be explicitly documented.
+
+  ## Verification Before Acting
+
+  1. **Read the full catch/error block** -- there may be logging or handling you missed
+  2. **Check for intentional suppression** -- a comment like `// safe to ignore: X` is valid
+  3. **Understand the error's impact** -- is this a data path (critical) or diagnostic path (low)?
+  4. **Check if the function CAN fail meaningfully** -- some operations have trivial failure modes
+  5. **Check if error is handled elsewhere** -- middleware, error boundary, global handler
+  6. **Trace the caller chain** -- who needs to know about this error? Fix propagation to that level
+  7. **Check cleanup/resource management** -- ensure fixes don't break resource cleanup (finally/defer/RAII)
+
+  ## Error Handling Strategy Decision Matrix
+
+  | Situation | Strategy | Example |
+  |-----------|----------|---------|
+  | Operation is required, caller depends on result | Propagate with context | DB query, file read for config |
+  | Operation can fail transiently | Retry with backoff, then propagate | Network call, lock acquisition |
+  | Operation is optional, has fallback | Log warning, use fallback | Cache read, analytics event |
+  | Operation is cleanup | Log debug at most, don't propagate | File close, lock release |
+  | Error indicates programming bug | Fail fast (panic/assert) | Null where impossible, invariant violation |
+  | Error in top-level handler | Log, report to monitoring, return safe response | HTTP handler, main loop |
+
+  ## Common Pitfalls (DO NOT introduce these)
+
+  | Pitfall | Description | Prevention |
+  |---------|-------------|------------|
+  | Lost stack trace | Re-throwing without cause/from/wrapping | Always chain: `from e`, `cause`, `%w`, `{ cause: e }` |
+  | Log and throw | Logging at catch site AND propagating → duplicate log entries | Either log OR propagate, not both (except at boundaries) |
+  | Wrong granularity | One try/catch around 50 lines → can't tell what failed | Wrap specific operations, not entire functions |
+  | Over-catching | try/catch around code that can't fail → misleading | Only catch around fallible operations |
+  | Swallowed by default | Catch returns default value, caller can't distinguish "no data" from "error" | Use Result/Either pattern or throw instead |
+  | Sensitive data in error | Including passwords, tokens, PII in error messages | Use IDs and descriptions, not raw sensitive values |
+  | Error type change | Converting specific error to generic → loses information | Preserve error hierarchy with wrapping |
+  | Resource leak on error | Acquired resource not released when error occurs | Use finally/defer/RAII/try-with-resources |
+  | Infinite retry | Retrying without backoff or limit → amplifies failure | Max retries + exponential backoff |
+  | Log spam | Logging expected high-frequency errors at error level | Use warn/debug for expected failures |
+
+  ## Language-Specific Error Handling Idioms
+
+  **Python:**
+  - Use `except SpecificError as e:` not bare `except:`
+  - Use `raise X from e` to chain exceptions and preserve stack trace
+  - Use `try/finally` or context managers (`with`) for cleanup
+  - Use `logging.exception()` to auto-include stack trace in log
+  - Avoid catching `BaseException` (catches SystemExit, KeyboardInterrupt)
+
+  **Go:**
+  - ALWAYS check error returns: `if err != nil { return ..., fmt.Errorf("context: %w", err) }`
+  - Use `%w` verb for wrappable errors (enables `errors.Is` and `errors.As` upstream)
+  - Use `defer` for cleanup, but be aware `defer` runs in LIFO order
+  - Create sentinel errors for expected failure types: `var ErrNotFound = errors.New("not found")`
+  - Don't use panic for expected errors -- panic is for programmer bugs only
+
+  **Rust:**
+  - Use `?` operator for automatic error propagation
+  - Use `anyhow` for application code, `thiserror` for library error types
+  - Replace `.unwrap()` with `?` or `.unwrap_or_else(|| ...)` or `.ok_or_else(|| ...)?`
+  - Use `#[from]` derive for automatic error conversion
+  - `Result<T, E>` is the standard error propagation mechanism
+
+  **JavaScript/TypeScript:**
+  - Use `Error` cause parameter: `new Error("message", { cause: originalError })`
+  - For async: always `await` promises or attach `.catch()` -- unhandled rejections crash Node.js
+  - Use custom error classes: `class AppError extends Error { constructor(msg, opts) { super(msg, opts) } }`
+  - For Express/Koa: pass errors to `next(err)` for centralized error handling
+
+  **Java:**
+  - Use try-with-resources for `AutoCloseable`: `try (var conn = getConnection()) { ... }`
+  - Chain exceptions: `throw new AppException("context", cause)`
+  - Use checked exceptions for recoverable errors, unchecked for programming bugs
+  - Use `@SneakyThrows` (Lombok) only when wrapping checked exceptions adds no value
+
+  **C#:**
+  - Use `throw;` (bare) to re-throw preserving stack trace, not `throw ex;`
+  - Use `using` statement for `IDisposable` resources
+  - Use exception filters: `catch (Exception ex) when (ex is not OperationCanceledException)`
+  - Use `ExceptionDispatchInfo.Capture(ex).Throw()` to re-throw with original stack in async code
+
+  **Ruby:**
+  - Use `rescue SpecificError => e` not bare `rescue`
+  - Use `ensure` for cleanup (equivalent to finally)
+  - Use `raise` to re-raise the current exception
+  - Don't rescue `Exception` -- it catches `SignalException` and `SystemExit`
