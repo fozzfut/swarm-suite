@@ -465,16 +465,16 @@ How a debate actually flows (example: the `trial` format -- prosecution / defens
 
 ```mermaid
 flowchart TD
-    Start([Question:<br/>"Should we deprecate<br/>the legacy auth flow?"])
+    Start(["Question:<br/>Should we deprecate<br/>the legacy auth flow?"])
     PickFmt[Pick format from registry<br/>13 protocols available]
     StartD["kb_start_debate(topic, format='trial')"]
 
     subgraph Trial["Trial format -- 4 phases"]
         direction TB
-        Charge[Phase 1: charge<br/><b>prosecution</b> -> kb_propose<br/>names alleged defect + remedy]
-        Defense[Phase 2: defense<br/><b>defense</b> -> kb_critique<br/>verdict=oppose or modify, point-by-point]
-        Rebuttal[Phase 3: rebuttal<br/><b>prosecution</b> -> amended kb_propose<br/>or further kb_critique]
-        Ruling[Phase 4: ruling<br/><b>judge</b> -> kb_resolve_debate<br/>cites which evidence carried]
+        Charge["Phase 1: charge<br/><b>prosecution</b> -> kb_propose<br/>names alleged defect + remedy"]
+        Defense["Phase 2: defense<br/><b>defense</b> -> kb_critique<br/>verdict=oppose or modify, point-by-point"]
+        Rebuttal["Phase 3: rebuttal<br/><b>prosecution</b> -> amended kb_propose<br/>or further kb_critique"]
+        Ruling["Phase 4: ruling<br/><b>judge</b> -> kb_resolve_debate<br/>cites which evidence carried"]
         Charge --> Defense --> Rebuttal --> Ruling
     end
 
@@ -483,8 +483,8 @@ flowchart TD
 
     Start --> PickFmt --> StartD --> Trial --> ADR --> User
 
-    Note["Other formats use the same<br/>state model (propose / critique /<br/>vote / resolve) but different<br/>actors + phase order:<br/>peer_review / mediation / council /<br/>brainstorming / mentorship / etc."]
-    Trial -.- Note
+    FmtNote["Other formats use the same<br/>state model (propose / critique /<br/>vote / resolve) but different<br/>actors + phase order:<br/>peer_review / mediation / council /<br/>brainstorming / mentorship / etc."]
+    Trial -.- FmtNote
 
     classDef trial fill:#fff3e0,stroke:#e65100
     class Trial trial
