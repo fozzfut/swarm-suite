@@ -63,7 +63,7 @@ But the rest of the pipeline -- multi-agent architecture debates, multi-expert c
   - [Stage 7: Hardening](#stage-7-hardening)
   - [Stage 8: Release Prep](#stage-8-release-prep)
 - [Composable Artifacts](#composable-artifacts)
-  - [Judgings -- CouncilAsAJudge](#judgings----counciljudasaajudge)
+  - [Judgings -- CouncilAsAJudge](#judgings----councilasajudge)
   - [PGVE Sessions -- Planner-Generator-Evaluator](#pgve-sessions----planner-generator-evaluator)
   - [Flow DSL -- AgentRearrange-style routing](#flow-dsl----agentrearrange-style-routing)
   - [Debate Format Library](#debate-format-library)
