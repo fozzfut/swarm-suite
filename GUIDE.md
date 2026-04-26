@@ -123,6 +123,11 @@ MCP server exposes:
 **CLAUDE.md keeper:**
 - `kb_check_claude_md(path)` -- audits CLAUDE.md for size, accreted bug-fix recipes, missing required sections, missing pointers
 
+**Prompt CLI (every tool, for setting up AI sub-agents):**
+- `<tool> prompt <expert>` -- prints the composed system prompt (role + declared skills + universal skills) for an AI sub-agent. Available across all 5 tool CLIs (review-swarm / fix-swarm / doc-swarm / arch-swarm / spec-swarm).
+- `<tool> prompt --list` -- lists available experts in that tool.
+- `arch-swarm prompt --debate-roles <role>` -- prints prompts for the 5 hardcoded `AgentRole` debate participants (also gets universal skills appended).
+
 See `docs/architecture/pipeline-stages.md` for the full lifecycle, `docs/architecture/skill-composition.md` for how skills compose into expert prompts, and `docs/decisions/` for individual stage contracts.
 
 ## Pipeline Stages

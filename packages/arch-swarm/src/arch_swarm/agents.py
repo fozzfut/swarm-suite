@@ -184,9 +184,27 @@ def get_role(name: str) -> AgentRole:
 def render_prompt(role: AgentRole, topic: str, context: str = "") -> str:
     """Render a role's system prompt with the given topic and context.
 
-    Uses string.Template.safe_substitute to avoid format string injection
-    from user-supplied topic/context values containing {braces}.
+    Substitutes $topic / $context safely (Template.safe_substitute), then
+    appends the universal skill bodies (solid_dry, karpathy_guidelines)
+    so debate roles get the same behavioural + output discipline as the
+    YAML-driven experts. Without this, debate participants would bypass
+    the SOLID+DRY enforcement that the rest of the suite promises.
     """
     from string import Template
     tmpl = Template(role.system_prompt)
-    return tmpl.safe_substitute(topic=topic, context=context)
+    body = tmpl.safe_substitute(topic=topic, context=context)
+
+    # Append universal skills so debate roles match the discipline
+    # enforced elsewhere. Best-effort -- if swarm_core isn't available
+    # we degrade gracefully (the role prompt is still useful on its own).
+    try:
+        from swarm_core.skills import default_registry
+        universals = default_registry.universal_skills()
+    except Exception:
+        return body
+    if not universals:
+        return body
+    sections = [body.rstrip()]
+    for skill in universals:
+        sections.append(skill.compose_body())
+    return "\n\n---\n\n".join(sections)

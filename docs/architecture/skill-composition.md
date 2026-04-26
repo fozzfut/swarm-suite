@@ -87,6 +87,34 @@ is removed and the universal skill takes over.
 4. Document in `docs/architecture/skill-composition.md` if it introduces
    a new methodology category.
 
+## How the AI agent gets the composed prompt
+
+Each tool exposes a `prompt` CLI command that prints the composed
+prompt for an expert. Use it to set up a sub-agent with the right
+system prompt:
+
+```bash
+review-swarm prompt security-surface       # composed: role + self_review + universals
+fix-swarm    prompt security-fix           # composed: role + systematic_debugging + self_review + universals
+doc-swarm    prompt api-reference          # composed: role + self_review + universals
+arch-swarm   prompt simplicity             # composed: role + self_review + universals
+spec-swarm   prompt mcu-peripherals        # composed: role + universals (no opt-in skills by default)
+
+# Special: arch-swarm's 5 hardcoded debate roles (agents.py)
+arch-swarm prompt --debate-roles "Simplicity Critic"
+```
+
+The `--list` flag on any of those prints available experts. All 5 CLIs
+use `swarm_core.experts.compose_system_prompt` (or
+`ExpertProfile.composed_system_prompt`) under the hood, so the result
+is consistent: role + declared skills + universal skills, deduped.
+
+`arch-swarm`'s `--debate-roles` flag is a special case: those 5 roles
+are hardcoded `AgentRole` dataclasses (not YAML-driven), so they go
+through `agents.render_prompt()` which appends universal skill bodies
+explicitly. Same end result -- universal discipline reaches every
+prompt the suite produces.
+
 ## Skills as layered discipline
 
 The five skills shipped form three layers:

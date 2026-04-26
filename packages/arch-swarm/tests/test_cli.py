@@ -69,3 +69,46 @@ class TestReportCommand:
         result = runner.invoke(main, ["report", "abc123"])
         assert result.exit_code == 0
         assert "Debate transcript" in result.output
+
+
+class TestPromptCommand:
+    """`arch-swarm prompt <expert>` should compose role + universal skills.
+
+    Also exercises --debate-roles which renders the hardcoded AgentRoles
+    with universal skills appended via render_prompt.
+    """
+
+    def test_prompt_list_yaml_experts(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "--list"])
+        assert result.exit_code == 0, result.output
+        assert "simplicity" in result.output or "modularity" in result.output
+
+    def test_prompt_specific_yaml_expert_includes_universal_skills(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "simplicity"])
+        assert result.exit_code == 0, result.output
+        assert "SOLID + DRY Enforcement" in result.output
+        assert "Karpathy Guidelines" in result.output
+        assert len(result.output) > 10000
+
+    def test_prompt_debate_role_list(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "--debate-roles", "--list"])
+        assert result.exit_code == 0, result.output
+        # 5 hardcoded debate roles -- at least the Simplicity Critic
+        assert "Simplicity Critic" in result.output
+
+    def test_prompt_debate_role_includes_universal_skills(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "--debate-roles", "Simplicity Critic"])
+        assert result.exit_code == 0, result.output
+        # render_prompt should append universal skill bodies
+        assert "SOLID + DRY Enforcement" in result.output
+        assert "Karpathy Guidelines" in result.output
+
+    def test_prompt_unknown_expert(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "no-such-expert"])
+        assert result.exit_code == 1
+        assert "not found" in result.output

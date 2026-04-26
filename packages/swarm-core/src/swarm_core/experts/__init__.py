@@ -5,7 +5,7 @@ delegates "given context X, which experts apply?" to a `SuggestStrategy`.
 This is OCP in action: new strategies subclass; the registry is closed.
 """
 
-from .registry import ExpertRegistry, ExpertProfile
+from .registry import ExpertRegistry, ExpertProfile, compose_system_prompt
 from .suggest import (
     SuggestStrategy,
     ProjectScanStrategy,
@@ -16,6 +16,7 @@ from .suggest import (
 __all__ = [
     "ExpertRegistry",
     "ExpertProfile",
+    "compose_system_prompt",
     "SuggestStrategy",
     "ProjectScanStrategy",
     "FindingMatchStrategy",

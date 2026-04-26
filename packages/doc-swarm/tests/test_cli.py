@@ -38,3 +38,28 @@ class TestCliGenerate:
         assert (docs_dir / "HOME.md").exists()
         assert (docs_dir / "INDEX.md").exists()
         assert (docs_dir / "api").exists()
+
+
+class TestCliPrompt:
+    """`doc-swarm prompt <expert>` should compose role + skills."""
+
+    def test_prompt_list(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "--list"])
+        assert result.exit_code == 0, result.output
+        assert "api-reference" in result.output or "tutorial-writer" in result.output
+
+    def test_prompt_specific_includes_universal_skills(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "api-reference"])
+        assert result.exit_code == 0, result.output
+        assert "SOLID + DRY Enforcement" in result.output
+        assert "Karpathy Guidelines" in result.output
+        assert "Self Review" in result.output
+        assert len(result.output) > 10000
+
+    def test_prompt_unknown_expert(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["prompt", "nonexistent-expert"])
+        assert result.exit_code == 1
+        assert "not found" in result.output

@@ -200,5 +200,60 @@ def report(session_id: str) -> None:
     click.echo(md_file.read_text(encoding="utf-8"))
 
 
+@main.command()
+@click.argument("expert_name", required=False)
+@click.option("--list", "list_all", is_flag=True, help="List available arch experts")
+@click.option("--debate-roles", is_flag=True,
+              help="Show the 5 hardcoded debate roles instead of YAML-defined experts")
+def prompt(expert_name, list_all: bool, debate_roles: bool) -> None:
+    """Print the composed system prompt for an arch expert or debate role.
+
+    --debate-roles flips to the 5 hardcoded AgentRoles in agents.py;
+    those get the universal skills (solid_dry, karpathy_guidelines)
+    appended via render_prompt.
+    """
+    from pathlib import Path as _Path
+
+    if debate_roles:
+        from .agents import ALL_ROLES, render_prompt
+        if list_all or expert_name is None:
+            click.echo("Available debate roles:\n")
+            for role in ALL_ROLES:
+                click.echo(f"  {role.name:30s} {role.description}")
+            click.echo("\nUsage: arch-swarm prompt --debate-roles <role-name>")
+            return
+        for role in ALL_ROLES:
+            if role.name.lower() == expert_name.lower():
+                click.echo(render_prompt(role, topic="<topic>", context="<context>"))
+                return
+        click.echo(f"Debate role not found: {expert_name}", err=True)
+        raise SystemExit(1)
+
+    from swarm_core.experts import ExpertRegistry, NullSuggestStrategy
+    builtin = _Path(__file__).parent / "experts"
+    reg = ExpertRegistry(builtin_dir=builtin, suggest_strategy=NullSuggestStrategy())
+
+    if list_all or expert_name is None:
+        click.echo("Available arch expert profiles:\n")
+        for p in sorted(reg.list_profiles(), key=lambda x: x.slug):
+            click.echo(f"  {p.slug:30s} {p.description}")
+        click.echo("\nUsage: arch-swarm prompt <expert-name>")
+        click.echo("       arch-swarm prompt --debate-roles --list  (for debate roles)")
+        return
+
+    try:
+        profile = reg.load_profile(expert_name)
+    except FileNotFoundError:
+        click.echo(f"Expert profile not found: {expert_name}", err=True)
+        click.echo("Use 'arch-swarm prompt --list' to see available profiles.")
+        raise SystemExit(1)
+
+    if not profile.system_prompt:
+        click.echo(f"No system_prompt defined for {expert_name}", err=True)
+        raise SystemExit(1)
+
+    click.echo(profile.composed_system_prompt)
+
+
 if __name__ == "__main__":
     main()

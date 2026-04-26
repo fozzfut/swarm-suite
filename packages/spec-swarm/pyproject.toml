@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spec-swarm-ai"
-version = "0.1.7"
+version = "0.2.0"
 description = "Hardware specification analyzer for embedded software development -- datasheets, register maps, protocols, constraints"
 readme = "README.md"
 license = {text = "MIT"}
@@ -21,7 +21,8 @@ classifiers = [
 dependencies = [
     "click>=8.0,<9",
     "mcp>=1.0",
-    "swarm-kb>=0.2.0",
+    "swarm-core>=0.1.0",
+    "swarm-kb>=0.3.0",
     "pyyaml>=6.0,<8",
 ]
 

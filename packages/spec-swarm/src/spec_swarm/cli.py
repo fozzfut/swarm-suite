@@ -154,12 +154,16 @@ def prompt(expert_name: str):
         click.echo("Use 'spec-swarm list-experts' to see available profiles.")
         raise SystemExit(1)
 
-    sys_prompt = profile.get("system_prompt", "")
-    if not sys_prompt:
+    if not profile.get("system_prompt"):
         click.echo(f"No system_prompt defined for {expert_name}", err=True)
         raise SystemExit(1)
 
-    click.echo(sys_prompt)
+    # Compose role + declared skills + universal skills (solid_dry,
+    # karpathy_guidelines, ...). This is what the AI agent should see.
+    from swarm_core.experts import compose_system_prompt
+    click.echo(compose_system_prompt(
+        profile, source_file=profile.get("_source_file", expert_name),
+    ))
 
 
 if __name__ == "__main__":

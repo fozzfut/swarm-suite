@@ -1,21 +1,25 @@
-"""Data models for DocSwarm."""
+"""Data models for DocSwarm.
+
+Universal Severity + now_iso come from swarm_core (single source of truth).
+DocStatus / DocType stay local because they're DocSwarm-specific.
+"""
 
 from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import TypedDict
 
 import yaml
 
+# Re-exported from swarm_core so existing
+# `from .models import Severity, now_iso` callers keep working.
+from swarm_core.models import Severity                   # noqa: F401 -- re-exported
+from swarm_core.timeutil import now_iso                  # noqa: F401 -- re-exported
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
-
-# ── Enums ────────────────────────────────────────────────────────────
+# ── Enums (DocSwarm-specific) ────────────────────────────────────────
 
 
 class DocStatus(str, Enum):
@@ -35,16 +39,6 @@ class DocType(str, Enum):
     ARCHITECTURE = "architecture"  # System design
     REFERENCE = "reference"      # Config, CLI, glossary
     INDEX = "index"              # Navigation/RAG index
-
-
-class Severity(str, Enum):
-    """Severity of a documentation issue."""
-    # All values are part of the public API; some reserved for future agent use
-    CRITICAL = "critical"    # docs actively mislead (wrong API, wrong behavior)
-    HIGH = "high"            # missing docs for public API
-    MEDIUM = "medium"        # outdated examples, stale references
-    LOW = "low"              # style, formatting, minor inaccuracies
-    INFO = "info"            # suggestion, not a problem
 
 
 # ── Code Map ─────────────────────────────────────────────────────────

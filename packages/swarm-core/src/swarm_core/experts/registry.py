@@ -39,6 +39,40 @@ SOLID_DRY_BLOCK_MARKER = "## SOLID+DRY enforcement (apply to user code)"
 _SECTION_SEP = "\n\n---\n\n"
 
 
+def compose_system_prompt(
+    profile_dict: dict,
+    *,
+    source_file: Path | str = "<dict>",
+    skill_registry: SkillRegistry | None = None,
+) -> str:
+    """Compose the prompt the AI agent should see, from a YAML-loaded dict.
+
+    This is the surgical bridge for tools whose CLIs / orchestrators load
+    YAML profiles into raw dicts. Replace:
+
+        sys_prompt = profile.get("system_prompt", "")
+
+    with:
+
+        from swarm_core.experts import compose_system_prompt
+        sys_prompt = compose_system_prompt(profile)
+
+    Result includes the role's `system_prompt` plus every skill declared
+    in `uses_skills:` plus every universal skill (solid_dry,
+    karpathy_guidelines), de-duplicated. Equivalent to building an
+    `ExpertProfile` and reading `.composed_system_prompt`, but without
+    the dataclass dance.
+    """
+    profile = ExpertProfile(
+        name=profile_dict.get("name", "unknown"),
+        description=profile_dict.get("description", ""),
+        source_file=Path(source_file) if not isinstance(source_file, Path) else source_file,
+        data=profile_dict,
+        skill_registry=skill_registry or _default_skill_registry,
+    )
+    return profile.composed_system_prompt
+
+
 @dataclass
 class ExpertProfile:
     """Parsed expert profile.

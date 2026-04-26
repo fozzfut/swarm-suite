@@ -187,3 +187,36 @@ def _truncate(text: str, max_len: int = 80) -> str:
     if len(flat) > max_len:
         return flat[: max_len - 3] + "..."
     return flat
+
+
+@main.command()
+@click.argument("expert_name", required=False)
+@click.option("--list", "list_all", is_flag=True, help="List available fix experts")
+def prompt(expert_name: str | None, list_all: bool) -> None:
+    """Print the composed system prompt for a fix expert (role + skills)."""
+    from pathlib import Path
+    from swarm_core.experts import ExpertRegistry, NullSuggestStrategy
+
+    builtin = Path(__file__).parent / "experts"
+    reg = ExpertRegistry(builtin_dir=builtin, suggest_strategy=NullSuggestStrategy())
+
+    if list_all or expert_name is None:
+        click.echo("Available fix expert profiles:\n")
+        for p in sorted(reg.list_profiles(), key=lambda x: x.slug):
+            click.echo(f"  {p.slug:25s} {p.description}")
+        click.echo("\nUsage: fix-swarm prompt <expert-name>")
+        return
+
+    try:
+        profile = reg.load_profile(expert_name)
+    except FileNotFoundError:
+        click.echo(f"Expert profile not found: {expert_name}", err=True)
+        click.echo("Use 'fix-swarm prompt --list' to see available profiles.")
+        raise SystemExit(1)
+
+    if not profile.system_prompt:
+        click.echo(f"No system_prompt defined for {expert_name}", err=True)
+        raise SystemExit(1)
+
+    # composed_system_prompt = role + uses_skills + universal skills
+    click.echo(profile.composed_system_prompt)

@@ -1,14 +1,16 @@
-"""Data models for hardware specification analysis."""
+"""Data models for hardware specification analysis.
+
+Universal `now_iso` comes from swarm_core (single source of truth).
+SpecType / PeripheralType stay local because they're SpecSwarm-specific.
+"""
 
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 
-
-def now_iso() -> str:
-    """Return current UTC time as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+# Re-exported from swarm_core so existing
+# `from .models import now_iso` callers keep working.
+from swarm_core.timeutil import now_iso                  # noqa: F401 -- re-exported
 
 
 class SpecType(str, Enum):

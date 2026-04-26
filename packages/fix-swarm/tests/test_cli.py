@@ -153,3 +153,30 @@ class TestVersionFlag:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
         assert "version" in result.output
+
+
+class TestPromptCommand:
+    """`fix-swarm prompt <expert>` should compose role + skills."""
+
+    def test_prompt_list(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["prompt", "--list"])
+        assert result.exit_code == 0, result.output
+        # at least one of the 8 fix-swarm experts should be listed
+        assert "security-fix" in result.output or "refactoring" in result.output
+
+    def test_prompt_specific_includes_universal_skills(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["prompt", "security-fix"])
+        assert result.exit_code == 0, result.output
+        # Composition should bring in solid_dry, karpathy_guidelines, and
+        # the per-expert systematic_debugging + self_review.
+        assert "SOLID + DRY Enforcement" in result.output
+        assert "Karpathy Guidelines" in result.output
+        assert "Self Review" in result.output
+        assert "Iron Law" in result.output  # systematic_debugging body
+        # Bigger than the role alone (~5 KB) -- composition should ~5x it
+        assert len(result.output) > 15000
+
+    def test_prompt_unknown_expert(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["prompt", "nonexistent-expert"])
+        assert result.exit_code == 1
+        assert "not found" in result.output

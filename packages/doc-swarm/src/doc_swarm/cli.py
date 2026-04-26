@@ -213,5 +213,36 @@ def verify(project_path: str, docs: str, scope: str):
         raise SystemExit(1)
 
 
+@main.command()
+@click.argument("expert_name", required=False)
+@click.option("--list", "list_all", is_flag=True, help="List available doc experts")
+def prompt(expert_name: str | None, list_all: bool):
+    """Print the composed system prompt for a doc expert (role + skills)."""
+    from swarm_core.experts import ExpertRegistry, NullSuggestStrategy
+
+    builtin = Path(__file__).parent / "experts"
+    reg = ExpertRegistry(builtin_dir=builtin, suggest_strategy=NullSuggestStrategy())
+
+    if list_all or expert_name is None:
+        click.echo("Available doc expert profiles:\n")
+        for p in sorted(reg.list_profiles(), key=lambda x: x.slug):
+            click.echo(f"  {p.slug:25s} {p.description}")
+        click.echo("\nUsage: doc-swarm prompt <expert-name>")
+        return
+
+    try:
+        profile = reg.load_profile(expert_name)
+    except FileNotFoundError:
+        click.echo(f"Expert profile not found: {expert_name}", err=True)
+        click.echo("Use 'doc-swarm prompt --list' to see available profiles.")
+        raise SystemExit(1)
+
+    if not profile.system_prompt:
+        click.echo(f"No system_prompt defined for {expert_name}", err=True)
+        raise SystemExit(1)
+
+    click.echo(profile.composed_system_prompt)
+
+
 if __name__ == "__main__":
     main()

@@ -206,6 +206,44 @@ def test_composed_prompt_skips_unknown_skill(tmp_path: Path):
     assert "ROLE" in composed
 
 
+def test_compose_system_prompt_helper_works_on_dict(tmp_path: Path):
+    """The dict-based helper must produce the same result as the dataclass path."""
+    from swarm_core.experts import compose_system_prompt
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    _write_skill(skills_dir / "u.md", "u", universal=True, body="UNIVERSAL_BODY")
+    skill_reg = SkillRegistry(builtin_dir=skills_dir)
+
+    profile_dict = {
+        "name": "Test Expert",
+        "description": "d",
+        "system_prompt": "ROLE_PROMPT_BODY",
+    }
+    composed = compose_system_prompt(profile_dict, skill_registry=skill_reg)
+    assert "ROLE_PROMPT_BODY" in composed
+    assert "UNIVERSAL_BODY" in composed
+    assert composed.index("ROLE_PROMPT_BODY") < composed.index("UNIVERSAL_BODY")
+
+
+def test_compose_system_prompt_helper_handles_uses_skills(tmp_path: Path):
+    from swarm_core.experts import compose_system_prompt
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    _write_skill(skills_dir / "u.md", "u", universal=True, body="UNIVERSAL")
+    _write_skill(skills_dir / "explicit.md", "explicit", universal=False, body="EXPLICIT")
+    skill_reg = SkillRegistry(builtin_dir=skills_dir)
+
+    composed = compose_system_prompt(
+        {"name": "x", "description": "d", "system_prompt": "ROLE", "uses_skills": ["explicit"]},
+        skill_registry=skill_reg,
+    )
+    assert "ROLE" in composed
+    assert "EXPLICIT" in composed
+    assert "UNIVERSAL" in composed
+
+
 def test_composed_prompt_suppresses_inline_solid_dry(tmp_path: Path):
     """Legacy YAMLs with the SOLID+DRY block inlined must not get a duplicate
     via the universal skill."""
