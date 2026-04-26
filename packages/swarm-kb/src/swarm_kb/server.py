@@ -2464,6 +2464,43 @@ No automatic progression. You control the pace.
         return json.dumps([f.to_dict() for f in items], indent=2)
 
     # ════════════════════════════════════════════════════════════════════
+    # Navigator -- single-call context snapshot for the navigator skill
+    # ════════════════════════════════════════════════════════════════════
+
+    from .navigator import navigator_state as _navigator_state
+
+    @mcp.tool(
+        name="kb_navigator_state",
+        description=(
+            "Single-call context snapshot for the swarm_suite_navigator skill. "
+            "Returns: active pipeline + current/next stage, open composable "
+            "artifacts (judgings/verifications/pgve/flows/debates), recent "
+            "decisions, current-stage actions, and 2-4 suggested next steps "
+            "with WHY + which MCP tools execute each. Read-only -- safe to "
+            "call at session start and after every state-changing action. "
+            "The navigator skill turns this snapshot into 2-3 human-language "
+            "options for the user."
+        ),
+    )
+    def _kb_navigator_state(
+        project_path: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        cfg = _get_config(ctx)
+        snap = _navigator_state(
+            project_path,
+            config=cfg,
+            pipeline_manager=_get_pipeline_manager(ctx),
+            decision_store=_get_decision_store(ctx),
+            judging_engine=_get_judging_engine(ctx),
+            verification_store=_get_verification_store(ctx),
+            pgve_store=_get_pgve_store(ctx),
+            flow_store=_get_flow_store(ctx),
+            debate_engine=_get_debate_engine(ctx),
+        )
+        return json.dumps(snap, indent=2, ensure_ascii=False)
+
+    # ════════════════════════════════════════════════════════════════════
     # AgentRouter -- rank experts for a task by keyword overlap
     # ════════════════════════════════════════════════════════════════════
 
