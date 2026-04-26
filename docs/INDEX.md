@@ -22,6 +22,7 @@ intentionally does not duplicate the detail.
 - [mcp-server-pattern](architecture/mcp-server-pattern.md) -- `MCPApp`, transport, error wrapping, structured logging.
 - [coordination-primitives](architecture/coordination-primitives.md) -- MessageBus, EventBus, PhaseBarrier, ClaimRegistry, RateLimiter.
 - [pipeline-stages](architecture/pipeline-stages.md) -- Idea -> ... -> Release, gates, what each stage produces.
+- [skill-composition](architecture/skill-composition.md) -- methodology recipes + composition into expert prompts (universal vs opt-in, layered discipline).
 
 ## Feature docs (per pipeline stage)
 
@@ -35,6 +36,11 @@ intentionally does not duplicate the detail.
 ## Decisions / post-mortems
 
 - [2026-04-26 fix-swarm <- arch-swarm coupling](decisions/2026-04-26-fix-swarm-arch-coupling.md)
+- [2026-04-26 swarm-core extraction roadmap](decisions/2026-04-26-swarm-core-extraction.md)
+- [2026-04-26 skill composition design](decisions/2026-04-26-skill-composition.md)
+- [2026-04-26 Stage 0a Idea contract](decisions/2026-04-26-stage-0a-idea-stage.md)
+- [2026-04-26 Stage 2 Plan contract](decisions/2026-04-26-stage-2-plan-stage.md)
+- [2026-04-26 Stages 6 + 7 Hardening + Release contracts](decisions/2026-04-26-stages-6-7-hardening-release.md)
 
 ## Plans (in progress)
 

@@ -181,8 +181,51 @@ class Pipeline:
         self.stages[next_stage].started_at = datetime.now(timezone.utc).isoformat()
         return next_stage
 
+    def rewind_to(self, stage: str, reason: str = "") -> bool:
+        """Go BACKWARD to an earlier stage.
+
+        The current stage and any newer stages are reset to PENDING (their
+        history -- session_ids, approved/dismissed counts -- is preserved
+        for audit). The target stage becomes ACTIVE. The `reason` is
+        appended to the target stage's notes so the rewind shows up in
+        pipeline status / log.
+
+        Returns True if rewind succeeded; False if `stage` is invalid or
+        is not strictly earlier than the current stage.
+
+        Use case: discoveries during Review (stage 3) reveal that an ADR
+        from Architecture (stage 1) is wrong -> rewind_to("arch") to
+        re-debate, then advance forward through Review again.
+        """
+        if stage not in STAGE_ORDER:
+            return False
+        target_idx = STAGE_ORDER.index(stage)
+        current_idx = STAGE_ORDER.index(self.current_stage)
+        if target_idx >= current_idx:
+            return False  # rewind must go strictly backward
+
+        now = datetime.now(timezone.utc).isoformat()
+        # Reset target stage and everything between target and current to PENDING
+        for i in range(target_idx, current_idx + 1):
+            s = STAGE_ORDER[i]
+            self.stages[s].status = StageStatus.PENDING
+            self.stages[s].started_at = ""
+            self.stages[s].completed_at = ""
+        # Activate the target
+        self.stages[stage].status = StageStatus.ACTIVE
+        self.stages[stage].started_at = now
+        prefix = f"[rewound from {self.current_stage}@{now}] "
+        if reason:
+            existing = self.stages[stage].notes
+            self.stages[stage].notes = (prefix + reason + ("\n" + existing if existing else ""))
+        self.current_stage = stage
+        return True
+
     def skip_to(self, stage: str) -> bool:
-        """Skip intermediate stages and jump to a specific stage."""
+        """Skip intermediate stages and jump to a specific stage (forward only).
+
+        For backward navigation, use `rewind_to`.
+        """
         if stage not in STAGE_ORDER:
             return False
         target_idx = STAGE_ORDER.index(stage)
@@ -275,8 +318,27 @@ class PipelineManager:
                 "pipeline": pipe.to_dict(),
             }
 
+    def rewind(self, pipeline_id: str, stage: str, reason: str = "") -> dict:
+        """Rewind a pipeline to an earlier stage. See Pipeline.rewind_to."""
+        with self._lock:
+            pipe = self._pipelines.get(pipeline_id)
+            if not pipe:
+                return {"error": f"Pipeline {pipeline_id} not found"}
+            if not pipe.rewind_to(stage, reason=reason):
+                return {"error": f"Cannot rewind to {stage!r} (must be earlier than current)"}
+            self._save(pipe.id)
+            info = STAGE_INFO[stage]
+            return {
+                "status": "rewound",
+                "current_stage": stage,
+                "stage_name": info["name"],
+                "reason": reason,
+                "actions": info["actions"],
+                "pipeline": pipe.to_dict(),
+            }
+
     def skip_to(self, pipeline_id: str, stage: str) -> dict:
-        """Skip to a specific stage."""
+        """Skip to a specific stage (forward only). For backward, use rewind()."""
         with self._lock:
             pipe = self._pipelines.get(pipeline_id)
             if not pipe:
