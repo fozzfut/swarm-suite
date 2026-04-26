@@ -957,7 +957,7 @@ These are domain-specific to firmware / instrument software. Skip the whole tool
 
 Every expert is a YAML file -- edit it in place, or drop a new one into the `experts/` directory of any tool and it's auto-discovered on next server start. Required frontmatter fields: `name`, `description`, `system_prompt`. Optional: `severity_default`, `uses_skills:` (a list of methodology skills to compose into the prompt), `relevance_signals: { imports: [...], patterns: [...], keywords: [...] }` for AgentRouter scoring.
 
-Universal skills (`solid_dry`, `karpathy_guidelines`) auto-attach to every expert; opt into more (e.g. `systematic_debugging`, `self_review`, `brainstorming`, `writing_plans`) via `uses_skills:`. See `docs/architecture/skill-composition.md` for the composition algorithm and `packages/swarm-core/src/swarm_core/skills/SKILL_FORMAT.md` for the skill file spec.
+Universal skills (`solid_dry`, `karpathy_guidelines`, `swarm_suite_navigator`) auto-attach to every expert; opt into more (e.g. `systematic_debugging`, `self_review`, `brainstorming`, `writing_plans`) via `uses_skills:`. See the **Skills** section below + `docs/architecture/skill-composition.md` for the composition algorithm and `packages/swarm-core/src/swarm_core/skills/SKILL_FORMAT.md` for the skill file spec.
 
 ## Requirements
 
@@ -965,17 +965,45 @@ Universal skills (`solid_dry`, `karpathy_guidelines`) auto-attach to every exper
 - An MCP-compatible AI client (Claude Code, Cursor, Windsurf, Cline, etc.)
 - For PDF datasheets (embedded only): `pip install spec-swarm-ai[pdf]`
 
-## SOLID + DRY -- the non-negotiable
+## Skills -- composable methodology overlays
 
-Every expert profile in every tool ends with the same SOLID+DRY block (canonical home: `packages/swarm-core/src/swarm_core/experts/SOLID_DRY_BLOCK.md`). When AI agents drive the suite, they:
+A **skill** is a markdown file (in `packages/swarm-core/src/swarm_core/skills/`) describing a reusable methodology -- a recipe the AI agent follows when working in a particular mode. Skills are not roles (roles are the expert YAMLs); a role *uses* one or more skills. At expert load time, `ExpertProfile.composed_system_prompt` assembles: `<role.system_prompt> + <opt-in skills> + <universal skills>`. Result is the prompt the AI agent actually sees.
 
-- **arch-swarm experts** propose designs that satisfy SRP, OCP, LSP, ISP, DIP and identify a single source of truth for every concern.
-- **review-swarm experts** flag SOLID violations (god classes, layer-direction violations, fat interfaces) and DRY violations (logic duplicated across files) as `category: design` findings.
-- **fix-swarm experts** propose fixes that move *toward* SOLID+DRY, never away. A fix that adds a god method is rejected.
-- **doc-swarm experts** document decisions in terms of which SOLID/DRY trade-off was made.
-- **spec-swarm experts** map hardware constraints to module boundaries that respect DIP.
+7 skills ship with the suite today. **3 universal** auto-attach to every expert; **4 opt-in** are declared via `uses_skills:` in the expert YAML.
 
-This is the user-visible promise. Editing an expert YAML to weaken or remove the SOLID+DRY block is enforced by tests in `swarm-core` and by the `claude_md_keeper` audit at every `kb_advance_pipeline` call.
+### Universal skills (auto-attached to all 53 experts)
+
+These are the **non-negotiable backbone**. Removing or weakening any of them requires a decision doc + corresponding update to `docs/architecture/skill-composition.md`.
+
+| Slug | Purpose | When |
+|------|---------|------|
+| **`solid_dry`** | SOLID + DRY enforcement applied to *user code* the AI is producing or reviewing. arch-swarm proposes designs satisfying SRP/OCP/LSP/ISP/DIP + identifies a single source of truth for every concern; review-swarm flags violations as `category: design` findings; fix-swarm refuses fixes that move *away* from SOLID+DRY (a fix adding a god method is rejected); doc-swarm documents decisions in terms of which trade-off was made; spec-swarm maps hardware constraints to module boundaries respecting DIP. | always |
+| **`karpathy_guidelines`** | Behavioural discipline for the AI itself: avoid overcomplication, make surgical changes, surface assumptions, define verifiable success criteria, prefer reading 3 files before writing 1, never delegate understanding. Adapted from Andrej Karpathy's published guidance for LLM coding agents. Keeps the agent disciplined while it works. | always -- behavioural discipline for any AI agent working on user code |
+| **`swarm_suite_navigator`** | The pilot. Instructs the AI to call `kb_navigator_state` at session start + after every state change, present 2-3 human-language options with WHY, ask ONE clarifying question if intent is ambiguous, execute MCP tool calls itself when the user picks (so the user never needs to know any of the 84 tool names), and confirm before destructive operations. This is what makes the suite usable without memorising the tool surface. | at the start of every swarm-suite session AND any time the user's intent is unclear, vague ("что дальше", "продолжай", "help"), or expressed as a goal rather than a tool call |
+
+The SOLID+DRY enforcement is what makes the suite a *quality* tool rather than just an automation harness; the karpathy_guidelines keep the AI from going off the rails while applying it; the navigator makes the whole thing usable for humans who don't know all 84 tools. **Editing or removing any of the three is enforced by tests in `swarm-core` and by the `claude_md_keeper` audit at every `kb_advance_pipeline` call.**
+
+### Opt-in skills (declared per-expert via `uses_skills:`)
+
+These are mode-specific methodologies; they only attach when the expert YAML opts in.
+
+| Slug | Purpose | When |
+|------|---------|------|
+| **`brainstorming`** | Structured ideation: one question at a time (multiple choice when possible), 2-3 alternatives per major design decision, incremental design presented in 200-300 word sections for explicit user validation. Flexibility > rigid progression -- can revisit earlier phases when new constraints appear. | when the user describes any feature or project idea, before writing code (drives the **Idea stage**) |
+| **`writing_plans`** | TDD-grade plan writing: tasks sized 2-5 minutes each, each with a failing test first, exact commands, no hand-waving. Validated by a contract on `kb_finalize_plan` -- malformed plans are rejected with a list of fixes. | when a design / ADR is approved and you need detailed bite-sized implementation tasks (drives the **Plan stage**) |
+| **`systematic_debugging`** | "No fix without root cause first" discipline: reproduce, isolate, hypothesise, verify, only then patch. Watches for "five rationalisations" the AI uses to skip steps (the bug looks obvious / I've seen this before / the fix is small / time pressure / can't repro is good enough). | when encountering any bug, test failure, or unexpected behavior, before proposing fixes (used by **fix-swarm** experts) |
+| **`self_review`** | Pre-publication checklist any expert runs before posting a finding / proposal / decision / plan to the shared KB. Catches the most common quality regressions: missing evidence, vague rationale, severity mismatch, broken cross-refs. | before publishing any finding, proposal, decision, or plan to the shared KB |
+
+### Composition algorithm (in one paragraph)
+
+When an expert is loaded, `composed_system_prompt` builds: `<expert.system_prompt>` then `<each declared skill body in declared order>` then `<each universal skill body in load order>`. Slugs are de-duplicated. If an expert YAML still has the inline SOLID+DRY block from before the skill split, the universal `solid_dry` is suppressed for that expert (no double inclusion). Task-conditioned variant `composed_system_prompt_for_task(task)` filters universal skills by Jaccard similarity against the task description so a small task doesn't waste prompt budget on irrelevant overlays. See `docs/architecture/skill-composition.md` for the full algorithm + `packages/swarm-core/src/swarm_core/skills/SKILL_FORMAT.md` for the skill file spec.
+
+### Adding a new skill
+
+1. Create `packages/swarm-core/src/swarm_core/skills/<slug>.md` with the required YAML frontmatter (`name`, `slug`, `when_to_use`, `version`; optional `universal`, `attribution`, `cost`).
+2. Run `pytest packages/swarm-core/tests/test_skills.py` -- the registry validates the new skill loads and parses cleanly.
+3. Either set `universal: true` (auto-attaches) OR reference from expert YAMLs via `uses_skills: [<slug>]`.
+4. Document in `docs/architecture/skill-composition.md` if it introduces a new methodology category.
 
 ## Contributing
 
