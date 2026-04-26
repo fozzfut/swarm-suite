@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from swarm_core.timeutil import now_iso
 
 from .models import (
     ClaimStatus,
@@ -55,7 +58,7 @@ class FixSessionManager:
         """Create a new fix session. Returns session_id."""
         with self._lock:
             session_id = self._generate_session_id()
-            now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            now = now_iso()
             self._sessions[session_id] = {
                 "session_id": session_id,
                 "name": name or session_id,
@@ -79,7 +82,7 @@ class FixSessionManager:
         with self._lock:
             meta = self._require_session(session_id)
             meta["status"] = "ended"
-            meta["ended"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            meta["ended"] = now_iso()
 
             # Post a SESSION_ENDED event
             ev = Event(event_type=EventType.SESSION_ENDED, payload={"session_id": session_id})
@@ -719,30 +722,37 @@ class FixSessionManager:
         return None
 
     def _generate_session_id(self) -> str:
-        """Generate a session ID like fix-2026-03-23-001."""
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        """Generate a session ID like fix-2026-03-23-001.
+
+        Mirrors the date-sequenced + UUID-fallback pattern used by
+        ``swarm_core.sessions.SessionLifecycle._generate_id``. FixSessionManager
+        keeps its own implementation (rather than subclassing SessionLifecycle)
+        because it manages an in-memory cache of sessions in addition to disk
+        state -- the canonical pattern only inspects disk.
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         prefix = f"fix-{today}-"
 
-        # Find the next available number
-        existing = [
-            sid for sid in self._sessions if sid.startswith(prefix)
-        ]
-        # Also check on-disk directories
+        # Combined in-memory + on-disk view of taken IDs for this date.
+        existing = {sid for sid in self._sessions if sid.startswith(prefix)}
         if self._dir.exists():
             for d in self._dir.iterdir():
-                if d.is_dir() and d.name.startswith(prefix) and d.name not in existing:
-                    existing.append(d.name)
+                if d.is_dir() and d.name.startswith(prefix):
+                    existing.add(d.name)
 
         max_n = 0
         for sid in existing:
             suffix = sid[len(prefix):]
             try:
-                n = int(suffix)
-                if n > max_n:
-                    max_n = n
+                max_n = max(max_n, int(suffix))
             except ValueError:
                 pass
-        return f"{prefix}{max_n + 1:03d}"
+
+        candidate = f"{prefix}{max_n + 1:03d}"
+        # UUID fallback under race collision (matches SessionLifecycle).
+        if candidate in existing:
+            candidate = f"{prefix}{uuid.uuid4().hex[:6]}"
+        return candidate
 
     def _discover_existing_sessions(self) -> None:
         """Scan the sessions directory and load any existing sessions."""

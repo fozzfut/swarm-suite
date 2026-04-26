@@ -136,6 +136,34 @@ STAGE_INFO = {
         ],
         "optional": True,
     },
+    "harden": {
+        "name": "Hardening",
+        "tool": "swarm-kb",
+        "description": "Production-readiness checks: typecheck (mypy --strict), coverage (>=85%), dep-audit (pip-audit), secrets scan, dep hygiene, CI presence, observability. Aggregates into a single report; user reviews blockers before release.",
+        "actions": [
+            "1. kb_start_hardening(project_path) opens a harden session",
+            "2. kb_run_check(session_id, check) for each of: typecheck, coverage, dep_audit, secrets, dep_hygiene, ci_presence, observability",
+            "3. kb_get_hardening_report(session_id) aggregates results into Markdown",
+            "4. Address blockers (failed-and-installed checks); install missing tools (pip-audit, gitleaks)",
+            "5. Call kb_advance_pipeline(pipeline_id) to enter Release",
+        ],
+        "optional": True,
+    },
+    "release": {
+        "name": "Release Preparation",
+        "tool": "swarm-kb",
+        "description": "Final release artifact prep: semver bump, changelog generation, pyproject validation, dist build. Does NOT publish to PyPI -- the user runs `twine upload` after reviewing the artifact.",
+        "actions": [
+            "1. kb_start_release(project_path) opens a release session",
+            "2. kb_propose_version_bump(session_id, level) for major/minor/patch",
+            "3. kb_validate_pyproject(session_id) checks PyPI-required fields",
+            "4. kb_generate_changelog(session_id) drafts CHANGELOG.md from commits",
+            "5. kb_build_dist(session_id) runs `python -m build`",
+            "6. kb_release_summary(session_id) aggregates the artifact status",
+            "7. Review the artifact, then run `twine upload` manually when ready",
+        ],
+        "optional": True,
+    },
 }
 
 

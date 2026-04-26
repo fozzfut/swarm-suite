@@ -108,11 +108,17 @@ class DocVerifier:
             if source_file and source_file in modules:
                 mod = modules[source_file]
                 documented_funcs = frontmatter.get("functions", [])
-                actual_funcs = {f.get("name", "") for f in mod.get("functions", [])}
+                # ModuleInfo is a TypedDict (total=False); at runtime callers
+                # may pass raw dicts. Guard against non-dict / missing fields.
+                mod_funcs = mod.get("functions") or [] if isinstance(mod, dict) else []
+                mod_classes = mod.get("classes") or [] if isinstance(mod, dict) else []
+                actual_funcs = {
+                    f.get("name", "") for f in mod_funcs if isinstance(f, dict)
+                }
                 actual_funcs.update(
                     m.get("name", "")
-                    for c in mod.get("classes", [])
-                    for m in c.get("methods", [])
+                    for c in mod_classes if isinstance(c, dict)
+                    for m in (c.get("methods") or []) if isinstance(m, dict)
                 )
                 for func_name in documented_funcs:
                     if func_name not in actual_funcs:
@@ -130,9 +136,13 @@ class DocVerifier:
 
         # Check for undocumented modules
         for mod_path, info in modules.items():
+            if not isinstance(info, dict):
+                continue
+            classes = info.get("classes") or []
+            functions = info.get("functions") or []
             has_public = (
-                any(c.get("is_public") for c in info.get("classes", []))
-                or any(f.get("is_public") for f in info.get("functions", []))
+                any(isinstance(c, dict) and c.get("is_public") for c in classes)
+                or any(isinstance(f, dict) and f.get("is_public") for f in functions)
             )
             if has_public and mod_path not in doc_source_files:
                 issues.append(DocIssue(

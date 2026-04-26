@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-_log = logging.getLogger("swarm_kb.config")
+from swarm_core.logging_setup import get_logger
+
+_log = get_logger("kb.config")
 
 _DEFAULT_ROOT = "~/.swarm-kb"
 

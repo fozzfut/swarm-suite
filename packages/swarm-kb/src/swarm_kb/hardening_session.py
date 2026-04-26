@@ -228,23 +228,63 @@ def _run(cmd: list[str], *, cwd: Path, timeout: int = DEFAULT_TIMEOUT_S) -> tupl
 
 
 def _check_typecheck(project: Path, meta: dict[str, Any]) -> CheckResult:
-    """mypy --strict on the project. 0 errors -> pass."""
+    """mypy --strict on every package src/ tree. 0 errors -> pass.
+
+    Iterates per-package because `mypy --strict .` from a monorepo root
+    fails immediately on duplicate module names (e.g. each package has its
+    own `tests/conftest.py`). Per-package invocation also matches each
+    package's own `[tool.mypy]` config from its `pyproject.toml`.
+    """
     if shutil.which("mypy") is None:
         return CheckResult(
             name="typecheck", passed=False, installed=False,
             summary="mypy not installed (`pip install mypy`)",
         )
-    rc, out, err = _run(["mypy", "--strict", "."], cwd=project)
-    error_count = 0
-    m = re.search(r"Found (\d+) errors?", out)
-    if m:
-        error_count = int(m.group(1))
-    passed = rc == 0
+
+    # Discover sources: monorepo `packages/*/src` first, then `src`, then `.`
+    targets: list[Path] = []
+    pkgs = project / "packages"
+    if pkgs.is_dir():
+        for p in sorted(pkgs.iterdir()):
+            src = p / "src"
+            if src.is_dir():
+                targets.append(src)
+    elif (project / "src").is_dir():
+        targets.append(project / "src")
+    else:
+        targets.append(project)
+
+    total_errors = 0
+    per_target: list[dict[str, Any]] = []
+    for tgt in targets:
+        rel = tgt.relative_to(project) if tgt.is_relative_to(project) else tgt
+        rc, out, err = _run(
+            ["mypy", "--strict", "--explicit-package-bases", str(rel)],
+            cwd=project,
+        )
+        m = re.search(r"Found (\d+) errors?", out)
+        n = int(m.group(1)) if m else (0 if rc == 0 else 1)
+        total_errors += n
+        per_target.append({"target": str(rel), "returncode": rc, "errors": n,
+                           "stdout_tail": out[-1500:]})
+
+    passed = total_errors == 0
     return CheckResult(
         name="typecheck", passed=passed, installed=True,
-        summary=f"{error_count} error(s)" if error_count else ("clean" if passed else f"exit {rc}"),
-        details={"returncode": rc, "stdout_tail": out[-2000:], "stderr_tail": err[-500:]},
+        summary=f"{total_errors} error(s)" if total_errors else "clean",
+        details={"per_target": per_target, "total_errors": total_errors},
     )
+
+
+def _detect_cov_source(project: Path) -> str:
+    """Pick the directory pytest-cov should track. Bare `--cov` (no arg) measures
+    every imported module including stdlib and third-party, which can balloon
+    runtime by 10-100x. Prefer monorepo `packages/`, then `src/`, then `.`."""
+    if (project / "packages").is_dir():
+        return "packages"
+    if (project / "src").is_dir():
+        return "src"
+    return "."
 
 
 def _check_coverage(project: Path, meta: dict[str, Any]) -> CheckResult:
@@ -255,8 +295,9 @@ def _check_coverage(project: Path, meta: dict[str, Any]) -> CheckResult:
             summary="pytest not installed",
         )
     threshold = int(meta.get("min_coverage", DEFAULT_MIN_COVERAGE))
+    cov_src = _detect_cov_source(project)
     rc, out, err = _run(
-        ["pytest", "--cov", f"--cov-fail-under={threshold}", "-q", "--no-header"],
+        ["pytest", f"--cov={cov_src}", f"--cov-fail-under={threshold}", "-q", "--no-header"],
         cwd=project, timeout=DEFAULT_TIMEOUT_S * 2,
     )
     pct = 0.0
@@ -268,7 +309,7 @@ def _check_coverage(project: Path, meta: dict[str, Any]) -> CheckResult:
         name="coverage", passed=passed, installed=True,
         summary=f"coverage {pct:.0f}% (threshold {threshold}%)",
         details={"returncode": rc, "coverage_pct": pct, "threshold": threshold,
-                 "stdout_tail": out[-1500:]},
+                 "cov_source": cov_src, "stdout_tail": out[-1500:]},
     )
 
 

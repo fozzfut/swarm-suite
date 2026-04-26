@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-import logging
 
 import click
+
+from swarm_core.logging_setup import setup_logging
 
 from . import __version__
 from .config import SuiteConfig
@@ -28,10 +29,7 @@ def serve(port: int, host: str, transport: str):
     On startup, automatically initializes directories and migrates
     legacy data from ~/.review-swarm, ~/.doc-swarm, etc.
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
-    )
+    setup_logging("kb")
 
     from .server import create_mcp_server
 
@@ -46,7 +44,7 @@ def serve(port: int, host: str, transport: str):
 @main.command()
 def status():
     """Show KB status: session counts, storage root, xref count."""
-    logging.basicConfig(level=logging.WARNING)
+    setup_logging("kb")
 
     config = SuiteConfig.load()
 
@@ -75,10 +73,7 @@ def status():
 @main.command()
 def migrate():
     """Migrate sessions from legacy storage paths to the shared KB."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
-    )
+    setup_logging("kb")
 
     config = SuiteConfig.load()
 

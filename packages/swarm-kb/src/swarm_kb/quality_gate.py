@@ -12,11 +12,12 @@ Categories that do NOT count (non-code):
 """
 
 import json
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_log = logging.getLogger("swarm_kb.quality_gate")
+from swarm_core.logging_setup import get_logger
+
+_log = get_logger("kb.quality_gate")
 
 # Categories that count as "code bugs" for the quality gate
 CODE_BUG_CATEGORIES = {

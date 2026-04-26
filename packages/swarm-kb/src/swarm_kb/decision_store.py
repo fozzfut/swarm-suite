@@ -116,12 +116,34 @@ class DecisionStore:
                 pass
             raise
 
-    def append(self, **kwargs: object) -> Decision:
+    def append(
+        self,
+        *,
+        title: str = "",
+        status: str = "proposed",
+        rationale: str = "",
+        context: str = "",
+        consequences: list[str] | None = None,
+        source_tool: str = "",
+        source_session: str = "",
+        debate_id: str = "",
+        project_path: str = "",
+        tags: list[str] | None = None,
+    ) -> Decision:
         """Create and persist a new decision."""
         decision = Decision(
             id=Decision.generate_id(),
             created_at=datetime.now(timezone.utc).isoformat(),
-            **kwargs,  # type: ignore[arg-type]
+            title=title,
+            status=status,
+            rationale=rationale,
+            context=context,
+            consequences=list(consequences) if consequences else [],
+            source_tool=source_tool,
+            source_session=source_session,
+            debate_id=debate_id,
+            project_path=project_path,
+            tags=list(tags) if tags else [],
         )
 
         with self._lock:

@@ -5,12 +5,12 @@ Creates directories, migrates legacy data, generates default config.
 
 from __future__ import annotations
 
-import logging
+from swarm_core.logging_setup import get_logger
 
 from .config import SuiteConfig, TOOL_NAMES
 from .compat import migrate_all
 
-_log = logging.getLogger("swarm_kb.bootstrap")
+_log = get_logger("kb.bootstrap")
 
 
 def bootstrap(config: SuiteConfig | None = None) -> SuiteConfig:

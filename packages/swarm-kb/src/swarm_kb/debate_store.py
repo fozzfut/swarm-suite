@@ -93,12 +93,36 @@ class DebateStore:
                 except Exception as exc:
                     _log.warning("Skipping corrupt line in %s: %s", self._path, exc)
 
-    def append(self, **kwargs: object) -> DebateRecord:
+    def append(
+        self,
+        *,
+        topic: str = "",
+        project_path: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        status: str = "open",
+        proposals: list[dict] | None = None,
+        winning_proposal: str = "",
+        decision_id: str = "",
+        participant_count: int = 0,
+        vote_tally: dict | None = None,
+        tags: list[str] | None = None,
+    ) -> DebateRecord:
         """Create and persist a new debate record."""
         record = DebateRecord(
             id=DebateRecord.generate_id(),
             created_at=datetime.now(timezone.utc).isoformat(),
-            **kwargs,  # type: ignore[arg-type]
+            topic=topic,
+            project_path=project_path,
+            source_tool=source_tool,
+            source_session=source_session,
+            status=status,
+            proposals=list(proposals) if proposals else [],
+            winning_proposal=winning_proposal,
+            decision_id=decision_id,
+            participant_count=participant_count,
+            vote_tally=dict(vote_tally) if vote_tally else {},
+            tags=list(tags) if tags else [],
         )
 
         with self._lock:
