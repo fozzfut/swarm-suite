@@ -201,7 +201,8 @@ This is the user-visible promise. Editing an expert YAML to weaken or remove the
 ## Contributing
 
 - Read `CLAUDE.md` first -- it's the rules, not a reference.
-- Run `python scripts/check_imports.py` and `pytest` before opening a PR.
+- Run `python scripts/verify_e2e.py` before opening a PR. It exercises the full surface (CLIs, MCP server wiring, every new pipeline stage end-to-end, prompt composition through subprocess, idempotency of all migration scripts, then the pytest sweep). 48 checks total.
+- For a quick gate: `python scripts/check_imports.py && python scripts/test_all.py -q --tb=no`.
 - Bugs / fixes / decisions go into `docs/decisions/<date>-<slug>.md`, NOT into CLAUDE.md.
 - See `docs/INDEX.md` for the master keyword map.
 

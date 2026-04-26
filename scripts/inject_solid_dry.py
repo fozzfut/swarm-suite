@@ -80,7 +80,15 @@ def tool_for(expert_dir: Path) -> str:
 
 
 def process_yaml(yaml_path: Path, block: str, intro: str, *, dry_run: bool) -> str:
-    """Return one of: 'updated', 'skipped', 'corrupt'."""
+    """Return one of: 'updated', 'skipped', 'corrupt'.
+
+    Skip semantics (post-migration era):
+      - YAML already contains the inline marker -> skip (legacy idempotent).
+      - YAML declares `uses_skills:` containing `solid_dry`,
+        OR the universal `solid_dry` skill exists in swarm-core,
+        -> skip. Re-injecting would either duplicate (composition still
+        appends the universal body) or undo migrate_solid_dry_to_skill.
+    """
     try:
         data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     except yaml.YAMLError:
@@ -94,6 +102,18 @@ def process_yaml(yaml_path: Path, block: str, intro: str, *, dry_run: bool) -> s
 
     if MARKER in prompt:
         return "skipped"
+
+    # Post-migration guards: avoid undoing migrate_solid_dry_to_skill.py
+    uses = data.get("uses_skills") or []
+    if isinstance(uses, list) and "solid_dry" in uses:
+        return "skipped"
+    try:
+        from swarm_core.skills import default_registry
+        if any(s.slug == "solid_dry" and s.universal
+               for s in default_registry.list_skills()):
+            return "skipped"
+    except Exception:
+        pass  # swarm-core unavailable -> fall through to legacy inject
 
     appended = prompt.rstrip()
     if appended:

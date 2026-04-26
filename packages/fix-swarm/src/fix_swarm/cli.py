@@ -220,3 +220,7 @@ def prompt(expert_name: str | None, list_all: bool) -> None:
 
     # composed_system_prompt = role + uses_skills + universal skills
     click.echo(profile.composed_system_prompt)
+
+
+if __name__ == "__main__":
+    main()
