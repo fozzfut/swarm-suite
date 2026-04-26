@@ -1,6 +1,6 @@
 # Swarm Suite
 
-**A multi-agent MCP toolkit that takes a Python project from idea to production.** Seven tools collaborate through a shared knowledge base to capture ideas, architect, plan, review, fix, document, harden, and release your code -- enforcing **SOLID + DRY** at every stage.
+**A multi-agent MCP toolkit that takes a Python project from idea to production.** Seven tools collaborate through a shared knowledge base to capture ideas, architect, plan, review, fix, document, harden, and release your code -- enforcing **SOLID + DRY** in your code and **Andrej Karpathy's coding-agent guidelines** in the AI itself (surgical changes, surface assumptions, never delegate understanding).
 
 > Python-first and language-agnostic for everything below the spec layer. Embedded / industrial projects get an **optional** Stage 0 (`spec-swarm`) for datasheet + protocol analysis; everything else runs by default and works for any Python codebase.
 
