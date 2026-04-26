@@ -5,28 +5,34 @@
 > Python-first and language-agnostic for everything below the spec layer. Embedded / industrial projects get an **optional** Stage 0 (`spec-swarm`) for datasheet + protocol analysis; everything else runs by default and works for any Python codebase.
 
 ```
-                          +----------------+
-                          |  swarm-core   |   shared foundation:
-                          |  models       |     models, ExpertRegistry,
-                          |  experts      |     SessionLifecycle,
-                          |  coordination |     MessageBus / EventBus /
-                          |  mcp / keeper |     PhaseBarrier / RateLimiter,
-                          +-------+-------+     MCPApp, CLAUDE.md keeper
-                                  |
-                          +-------v-------+
-                          |   swarm-kb    |   storage layer:
-                          |  findings     |     findings, decisions,
-                          |  decisions    |     debates, pipelines,
-                          |  debates      |     code maps, cross-refs,
-                          |  pipelines    |     quality gate state
-                          +---+---+---+--+
-        +-----+-----+-----+---|---|---|----+-----+-----+
-        |     |     |     |   |   |   |    |     |     |
-        v     v     v     v                v     v     v
-      Spec  Arch  Plan  Review  Fix  Doc  Hard  Release
-      Swarm Swarm (NEW) Swarm   Swarm Swarm (NEW)(NEW)
-                                                  ^
-                              "Idea -> Production" pipeline
+                       +-----------------+
+                       |   swarm-core    |  shared foundation:
+                       |  models         |    models, ExpertRegistry,
+                       |  experts        |    SessionLifecycle,
+                       |  coordination   |    MessageBus / EventBus /
+                       |  skills         |    PhaseBarrier / RateLimiter /
+                       |  mcp / keeper   |    CompletionTracker, MCPApp,
+                       |  textmatch      |    Jaccard task<->skill matching
+                       +--------+--------+
+                                |
+                       +--------v--------+
+                       |    swarm-kb     |  storage + coordination:
+                       |  findings       |    findings, decisions, debates,
+                       |  decisions      |    judgings (CouncilAsAJudge),
+                       |  debates (x13)  |    verifications, pgve sessions,
+                       |  judgings       |    flows (AgentRearrange DSL),
+                       |  verifications  |    pipelines, code maps,
+                       |  pgve / flows   |    cross-refs, quality gate,
+                       |  pipelines      |    cross-process file locks
+                       +-+-+-+-+-+-+-+-+-+
+                         | | | | | | | |
+       +-----+-----+-----+ | | | | | | +-----+-----+
+       |     |     |     | | | | | |   |     |     |
+       v     v     v     v v v v v v   v     v     v
+     Idea  Spec  Arch  Plan  Review Fix Verify Doc Hard Release
+     (kb) (spec)(arch) (kb)  (rev) (fix)(fix) (doc)(kb) (kb)
+                                                         ^
+                            "Idea -> Production" pipeline
 ```
 
 ## About
@@ -109,65 +115,333 @@ claude mcp add spec-swarm   -- spec-swarm serve --transport stdio
 
 ## Pipeline Workflow
 
-The suite follows a multi-stage pipeline (idea -> production) with **user gates** between stages. You control the pace -- no automatic progression. See `docs/architecture/pipeline-stages.md` for the full stage spec.
+A **10-stage pipeline** (idea -> production) with **user gates** between every stage. You control the pace -- no automatic progression. Several stages are *optional*: skip Idea/Plan if you already have a design, skip Spec if you're not on embedded.
 
-### Default flow (any Python project)
+The diagram below renders natively on GitHub (Mermaid). Light blue boxes are optional; the dashed loop on Fix is the quality-gate retry until the suite emits `stop_clean` or `stop_circuit_breaker`. Every solid arrow crosses an explicit user gate (`kb_advance_pipeline`).
 
-```
-kb_start_pipeline("./project")
-```
+```mermaid
+flowchart TD
+    Start([Project start])
+    GreenfieldQ{Greenfield<br/>project?}
+    Idea["Stage 0a: Idea<br/>brainstorming -> design.md<br/><i>swarm-kb</i>"]
+    EmbeddedQ{Embedded /<br/>industrial?}
+    Spec["Stage 0b: Spec<br/>datasheets -> hw constraints<br/><i>spec-swarm</i>"]
+    Arch["Stage 1: Architecture<br/>scan + multi-agent debates -> ADRs<br/><i>arch-swarm</i>"]
+    PlanQ{Want TDD-grade<br/>executable plan?}
+    Plan["Stage 2: Plan<br/>ADRs -> 2-5 min tasks, tests-first<br/><i>swarm-kb</i>"]
+    Review["Stage 3: Review<br/>13 experts + cross-check phase<br/><i>review-swarm</i>"]
+    Fix["Stage 4: Fix<br/>propose -> consensus -> apply<br/><i>fix-swarm</i>"]
+    Gate{Quality gate}
+    Manual["Manual review<br/>fix cycle unstable"]
+    Verify["Stage 5: Verify<br/>regression + VerificationReport<br/><i>fix-swarm</i>"]
+    Doc["Stage 6: Doc<br/>verify stale + generate API ref<br/><i>doc-swarm</i>"]
+    Hard["Stage 7: Hardening<br/>mypy / coverage / pip-audit / secrets<br/><i>swarm-kb</i>"]
+    Release["Stage 8: Release<br/>version bump + changelog + dist<br/><i>swarm-kb</i>"]
+    End([Production-ready])
 
-```
-Stage 1: Architecture Analysis (ArchSwarm)
-  ├── Scan project metrics: coupling, complexity, dependencies
-  ├── Multi-agent debates on design decisions (real AI analysis)
-  └── Decisions become ADRs in swarm-kb
-  USER GATE: review findings → kb_advance_pipeline()
+    Start --> GreenfieldQ
+    GreenfieldQ -- yes --> Idea
+    GreenfieldQ -- no --> EmbeddedQ
+    Idea --> EmbeddedQ
+    EmbeddedQ -- yes --> Spec
+    EmbeddedQ -- no --> Arch
+    Spec --> Arch
+    Arch --> PlanQ
+    PlanQ -- yes --> Plan
+    PlanQ -- no --> Review
+    Plan --> Review
+    Review --> Fix
+    Fix --> Gate
+    Gate -- continue --> Review
+    Gate -- stop_circuit_breaker --> Manual
+    Gate -- stop_clean --> Verify
+    Verify --> Doc
+    Doc --> Hard
+    Hard --> Release
+    Release --> End
 
-Stage 2: Code Review (ReviewSwarm)
-  ├── 13 experts review code (security, performance, threading, etc.)
-  ├── Experts receive ADRs as context — flag violations
-  ├── Cross-check phase: experts react to each other's findings
-  └── Decision compliance check
-  USER GATE: review findings → kb_advance_pipeline()
-
-Stage 3: Fix (FixSwarm)
-  ├── snapshot_tests() — save baseline
-  ├── Fix experts propose changes with consensus
-  ├── Cross-review: experts approve/reject each other's fixes
-  └── apply_approved() — only consensus fixes applied
-  USER GATE: review fixes → kb_advance_pipeline()
-
-Stage 4: Regression Check (FixSwarm)
-  ├── Syntax validation on modified files
-  ├── Test suite comparison (before vs after)
-  └── Re-scan for new issues
-  USER GATE: verify clean → kb_advance_pipeline()
-
-Stage 5: Documentation (DocSwarm)
-  ├── Verify existing docs against changed code
-  └── Generate/update API documentation
-  → Pipeline complete!
-```
-
-### Embedded / industrial variant (opt-in Stage 0)
-
-```
-kb_start_pipeline("./project", include_spec=True)
-```
-
-Adds a Stage 0 *before* the architecture analysis:
-
-```
-Stage 0: Spec Analysis (SpecSwarm)
-  ├── Ingest datasheets, reference manuals
-  ├── Extract: registers, pins, protocols, timing, power, memory
-  ├── Check conflicts: pin collisions, bus overload, power budget
-  └── Export constraints to swarm-kb (informs Stage 1 architecture)
-  USER GATE: review specs → kb_advance_pipeline()
+    classDef optional fill:#e1f5ff,stroke:#1976d2,color:#0d47a1
+    classDef required fill:#f3f3f3,stroke:#424242,color:#212121
+    classDef alarm fill:#ffe1e1,stroke:#c62828,color:#b71c1c
+    classDef terminal fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    class Idea,Spec,Plan optional
+    class Arch,Review,Fix,Verify,Doc,Hard,Release required
+    class Manual alarm
+    class Start,End terminal
 ```
 
-Stages 1-5 then run as in the default flow, with the hardware constraints flowing through ADRs into review and fix.
+Stages at a glance:
+
+```
+0a. Idea         (kb)         optional: greenfield brainstorming -> design.md
+0b. Spec         (spec-swarm) optional: datasheet / protocol extraction (embedded)
+1.  Architecture (arch-swarm) coupling, complexity, debates -> ADRs
+2.  Plan         (kb)         optional: ADRs -> TDD-grade executable plan
+3.  Review       (review)     13 experts, cross-check phase, decision compliance
+4.  Fix          (fix)        propose-consensus-apply with quality gate
+5.  Verify       (fix)        regression check, optional VerificationReport
+6.  Doc          (doc)        verify stale docs, generate API reference
+7.  Hardening    (kb)         mypy strict / coverage / pip-audit / secrets / CI
+8.  Release      (kb)         version bump, changelog, validate pyproject, build dist
+```
+
+```
+kb_start_pipeline("./project")                         # default: starts at Architecture
+kb_start_pipeline("./project", include_spec=True)      # embedded: starts at Spec
+# To use Idea / Plan / Hardening / Release stages: drive the per-stage MCP calls
+# below; each one feeds the next via kb_advance_pipeline gates.
+```
+
+### Stage 0a: Idea Capture (optional, greenfield)
+
+When you're starting from zero (no codebase yet), the suite drives a **structured brainstorming session** before any architecture decision. The flow follows the `brainstorming` skill: one question at a time, never multiple; 2-3 design alternatives surfaced for each decision; incremental design presented for user approval.
+
+```
+kb_start_idea_session(project_path, prompt="...")
+kb_capture_idea_answer(sid, question, answer)            # repeat as the agent asks
+kb_record_idea_alternatives(sid, alternatives, chosen_id)
+kb_finalize_idea_design(sid, design_md)
+kb_advance_pipeline(pipeline_id)                         # -> Architecture
+```
+
+Output: a `design.md` anchored to the session, ready to flow into Architecture as ADR seed material. **Skip this stage if you already have a design or are working on existing code.**
+
+### Stage 0b: Spec Analysis (optional, embedded)
+
+For firmware / instrument software where hardware specs (registers, pins, fieldbus) must constrain the architecture.
+
+```
+spec_start_session(project_path)
+spec_ingest(sid, "datasheets/cpu.pdf")                   # per document
+spec_check_conflicts(sid)                                 # pin/bus/power budget
+spec_export_for_arch(sid)                                 # post constraints to swarm-kb
+kb_advance_pipeline(pipeline_id)                          # -> Architecture
+```
+
+### Stage 1: Architecture Analysis
+
+Real multi-agent debates on design decisions, anchored against the project's actual code metrics (coupling, complexity, dependencies). Decisions become ADRs in swarm-kb that downstream stages read as context.
+
+```
+arch_analyze(project_path)                                # structural scan
+orchestrate_debate(project_path, topic="...")             # multi-agent debate
+# debates use the format library (see Composable Artifacts below)
+kb_advance_pipeline(pipeline_id)
+```
+
+### Stage 2: Implementation Plan (optional, recommended for greenfield)
+
+Convert the ADRs from Stage 1 into a **TDD-grade executable plan**. Drives the `writing_plans` skill: 2-5 minute tasks, failing test first, exact commands.
+
+```
+kb_start_plan_session(project_path, adr_ids=["adr-...","adr-..."])
+kb_emit_task(sid, task_md)                               # one task at a time
+kb_finalize_plan(sid, plan_md)                           # validates against contract
+kb_advance_pipeline(pipeline_id)                          # -> Review
+```
+
+### Stage 3: Code Review
+
+13 experts review the code; experts receive Stage 1 ADRs as context so they can flag deviations. Phase 2 cross-check: experts react to each other's findings (2+ confirms = confirmed, 1+ dispute = disputed).
+
+```
+orchestrate_review(project_path)                          # full session
+# Or do it manually: start_session / claim_file / post_finding / mark_phase_done / ...
+kb_advance_pipeline(pipeline_id)
+```
+
+### Stage 4: Fix
+
+Fix experts propose changes; cross-review for consensus; only approved fixes apply. After each iteration, `kb_check_quality_gate` returns `continue / stop_clean / stop_circuit_breaker` so the loop has a defined exit.
+
+```
+snapshot_tests(session_id)                                # baseline first
+start_session(review_session=..., arch_session=...)
+fix_plan(...) / fix_apply(...) / verify_fixes(...)
+apply_approved(...)                                       # only consensus fixes applied
+kb_check_quality_gate(findings, fixes_applied, regressions, history)
+kb_advance_pipeline(pipeline_id)                          # -> Verify
+```
+
+For per-fix retry-with-feedback, fix-swarm can drive a **PGVE session** (see Composable Artifacts below).
+
+### Stage 5: Verify
+
+Regression check + (optional) a structured `VerificationReport` aggregating evidence across kinds: test diffs, regression scans, quality-gate results, judgings.
+
+```
+check_regression(session_id)
+# Optional structured artifact:
+kb_start_verification(fix_session=...)
+kb_add_verification_evidence(report_id, kind="test_diff", summary="155->158 passing", data=...)
+kb_add_verification_evidence(report_id, kind="judging", data={"judging_id":"..."})
+kb_finalise_verification(report_id, overall="pass", summary="...")  # gates Stage 6
+kb_advance_pipeline(pipeline_id)
+```
+
+### Stage 6: Documentation
+
+Verify existing docs against changed code; generate API reference + ADR cross-refs.
+
+```
+doc_verify(project_path)                                  # find stale docs
+doc_generate(project_path)                                # regenerate
+kb_advance_pipeline(pipeline_id)
+```
+
+### Stage 7: Hardening
+
+Aggregates Python-default production-readiness checks into one report. Each check is a subprocess with a timeout; tools that aren't installed degrade gracefully (`installed: false`) so you see exactly what's missing.
+
+| Check | Tool | Pass criterion |
+|---|---|---|
+| type-check | `mypy --strict` (or basedpyright) | 0 errors |
+| coverage | `pytest-cov` | >= configured (default 85%) |
+| dep-audit (security) | `pip-audit` | 0 high/critical CVEs |
+| secrets-scan | `gitleaks` (or naive regex fallback) | 0 high-confidence findings |
+| dep-hygiene | custom | 0 unused, 0 conflicts |
+| ci-presence | filesystem | `.github/workflows/*.yml` exists |
+| observability | filesystem | structured logging configured |
+
+```
+kb_start_hardening(project_path)
+kb_run_check(sid, check_name)                             # per check
+kb_get_hardening_report(sid)                              # aggregated report.md
+kb_advance_pipeline(pipeline_id)                          # -> Release
+```
+
+### Stage 8: Release Prep
+
+PyPI / GitHub release prep -- never auto-publishes; only PREPARES.
+
+```
+kb_start_release(project_path, package_path)
+kb_propose_version_bump(sid)            # reads git log since last tag -> patch/minor/major
+kb_generate_changelog(sid)              # drafts CHANGELOG.md entry
+kb_validate_pyproject(sid)              # PyPI-required fields check
+kb_build_dist(sid)                      # `python -m build`, checks dist/
+kb_release_summary(sid)                 # "Ready to twine upload" with checklist
+# You run `twine upload` yourself.
+```
+
+## Composable Artifacts
+
+Beyond the per-tool sessions, swarm-kb exposes shared coordination primitives any tool (or your own MCP integration) can use independently of the pipeline.
+
+### Judgings -- CouncilAsAJudge
+
+N judges score N dimensions in parallel; an aggregator synthesises **pass / fail / mixed** with a rationale (numbers intentionally absent -- read the reasoning). 6 default dimensions: accuracy, helpfulness, harmlessness, coherence, conciseness, instruction_adherence.
+
+```
+kb_start_judging(subject="evaluate fp-7c2a", dimensions="correctness,regression",
+                 subject_kind="proposal", subject_ref="fp-7c2a")
+kb_judge_dimension(judging_id, judge="threading", dimension="correctness",
+                   verdict="pass", rationale="...")
+kb_resolve_judging(judging_id, overall="pass", summary="net positive tradeoff")
+```
+
+Use cases: review-swarm can open a judging on its own findings ("review the reviewer"); fix-swarm can judge a candidate before applying.
+
+### PGVE Sessions -- Planner-Generator-Evaluator
+
+Generate-verify-retry loop with **auto-carried `previous_feedback`** so the generator agent reads its last evaluator feedback directly from the next candidate's payload (no JSONL re-read).
+
+```
+kb_start_pgve(task_spec="implement file lock", max_candidates=5)
+kb_submit_candidate(sid, generator="fix-1", content="patch v1")
+kb_evaluate_candidate(sid, evaluator="reviewer", verdict="revise",
+                      feedback="leak on exception path")
+kb_submit_candidate(sid, generator="fix-1", content="patch v2")     # carries feedback
+kb_evaluate_candidate(sid, evaluator="reviewer", verdict="accepted", feedback="lgtm")
+```
+
+Verdicts: `accepted` (session finalises with this candidate) / `revise` (retry until budget exhausted) / `rejected` (planner should produce a fresh task spec).
+
+### Flow DSL -- AgentRearrange-style routing
+
+Declarative pipeline routing as a DSL string instead of hardcoded Python. The store **does not execute** -- it tells you what's next; the AI client dispatches the named tools.
+
+Grammar:
+- `->` sequence (left-to-right)
+- `,` parallel
+- `H` human gate (= `kb_advance_pipeline`)
+- `()` grouping
+
+Examples:
+
+```
+arch -> review -> fix -> verify -> doc                    # standard sequence
+arch -> H -> review -> (lint, type_check) -> fix          # gate + parallel branch
+review -> (security_audit, perf_audit) -> H -> fix        # parallel + human gate
+```
+
+```
+kb_parse_flow(source="arch -> H -> review", known_names="arch\nreview")  # dry-run
+kb_start_flow(source="arch -> review -> fix", known_names="arch\nreview\nfix")
+kb_get_next_steps(flow_id)                                # what to invoke now
+kb_mark_step_done(flow_id, step_id, outputs="...")
+```
+
+Bounded parser: max 16 KB source / 512 nodes / 64 nesting depth -- raises `FlowSyntaxError` instead of stack-overflowing.
+
+### Debate Format Library
+
+13 named protocols over the same `DebateEngine` -- pick the right shape for the question:
+
+| Format | Actors | Best for |
+|---|---|---|
+| `open` | proposer / critic / voter | free-form (legacy default) |
+| `with_judge` | pro / con / judge | iterative refinement, judged rounds |
+| `trial` | prosecution / defense / judge | security findings, breaking changes |
+| `mediation` | party_a / party_b / mediator | conflicting reviewer findings |
+| `peer_review` | author / reviewer / editor | fix proposals before applying |
+| `brainstorming` | contributor / consolidator | greenfield ideation (Idea stage) |
+| `council` | member / chair | strategic ADRs with vote weights |
+| `expert_panel` | panelist / moderator | cross-domain questions |
+| `round_table` | participant | small egalitarian groups |
+| `interview` | interviewer / respondent | spec extraction, fact-finding |
+| `mentorship` | mentor / mentee | onboarding, reasoning chains |
+| `negotiation` | party_a / party_b | API contracts, resource allocation |
+| `one_on_one` | agent_a / agent_b | lightweight 2-side debate |
+
+```
+kb_list_debate_formats                          # all 13 with summaries
+kb_get_debate_format(format="trial")            # actors, phases, expected MCP calls
+kb_start_debate(topic="...", format="trial")    # then propose / critique / vote / resolve
+```
+
+### Agent Router
+
+Rank expert YAMLs against a task description by Jaccard similarity over (name + description + system_prompt + relevance_signals). **No embedding model dependency**; cheap, explainable, swappable via the `SuggestStrategy` ABC if a project ever needs semantic matching.
+
+```
+kb_route_experts(task="audit auth bugs in login", experts_dir="path/to/experts",
+                 top_k=5, min_score=0.05)
+```
+
+Use it before orchestrating a review/fix to attach the right experts instead of running every expert on everything.
+
+### Completion Tracking -- agent self-direction
+
+Per-session state machine for "agent claims it's done" with hard caps so the AI client can stop on a clean signal instead of parsing free-text or guessing loop counts.
+
+```
+kb_subtask_done(tool, session_id, subtask_id, summary)    # idempotent on subtask_id
+kb_complete_task(tool, session_id, summary)               # idempotent
+kb_record_think(tool, session_id)                         # "thought without action"
+kb_record_action(tool, session_id)                        # reset thinks counter
+kb_get_completion(tool, session_id)                       # state + caps + should_stop
+```
+
+Caps: max 50 distinct subtasks, max 10 re-marks per subtask id, max 2 consecutive thinks. Cap exceedance -> `INVALID_PARAMS` with a next-step message embedded.
+
+### Task-conditioned skill composition
+
+`ExpertProfile.composed_system_prompt_for_task(task, threshold=0.05)` filters universal skills (e.g. systematic_debugging, brainstorming) by Jaccard similarity to the task description, so a small task doesn't eat its prompt budget on irrelevant methodology overlays. `SkillRegistry.recommend_for_budget(task, budget)` adds cost-aware selection (each `Skill.cost` defaults to 1.0; greedy picks highest-relevance under budget).
+
+### Cross-process safety
+
+All five storage primitives above (judgings, verifications, pgve sessions, flows, completion sessions) use `portalocker` to guarantee no lost updates when **multiple Claude Code instances** or **Claude + a parallel CI / automation job** hit the same `~/.swarm-kb/` simultaneously. Per-record sibling `.lock` files keep parallelism: different records mutate concurrently. Proved by 4 real-multiprocess tests in the suite (10 OS processes hammering the same record).
 
 ## Architecture
 
