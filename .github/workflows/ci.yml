@@ -44,6 +44,13 @@ jobs:
         # other deps via each package's pyproject.
         run: python scripts/install_all.py
 
+      - name: Install test dependencies
+        # Each package's pyproject [project.optional-dependencies].dev
+        # lists pytest + pytest-asyncio + mypy. install_all.py uses the
+        # base install only; CI needs the dev extras to actually run
+        # the tests. Done as a single install for the whole monorepo.
+        run: pip install "pytest>=8.0" "pytest-asyncio>=0.23"
+
       - name: Import-direction check
         # scripts/check_imports.py enforces swarm-core <- swarm-kb <- tools.
         # A violation means a tool started reaching back into swarm-core
