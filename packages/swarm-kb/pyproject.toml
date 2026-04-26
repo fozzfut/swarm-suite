@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swarm-kb"
+version = "0.2.10"
+description = "Shared knowledge base for the Swarm suite (ReviewSwarm, FixSwarm, DocSwarm, ArchSwarm, SpecSwarm)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Ilya Sidorov" }]
+keywords = ["mcp", "swarm", "knowledge-base", "ai", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "mcp>=1.6,<2",
+    "pyyaml>=6.0,<8",
+    "click>=8.0,<9",
+]
+
+[project.urls]
+Repository = "https://github.com/fozzfut/swarm-kb"
+
+[project.scripts]
+swarm-kb = "swarm_kb.cli:main"
+
+[project.optional-dependencies]
+pdf = ["pymupdf>=1.20"]
+pdf-tables = ["pdfplumber>=0.9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
