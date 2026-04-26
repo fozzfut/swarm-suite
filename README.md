@@ -33,7 +33,7 @@
 
 | Package | Description | Install |
 |---------|-------------|---------|
-| **swarm-core**   | Shared foundation: models, expert registry, session lifecycle, coordination primitives, MCP scaffolding, CLAUDE.md keeper | `pip install swarm-core` |
+| **swarm-core**   | Shared foundation: models, expert registry, session lifecycle, coordination primitives, MCP scaffolding, CLAUDE.md keeper | `pip install swarmsuite-core` |
 | **swarm-kb**     | Shared knowledge base -- findings, decisions, debates, pipelines, code maps | `pip install swarm-kb` |
 | **SpecSwarm**    | Hardware spec analyzer -- datasheets, register maps, CAN/SPI/I2C/EtherCAT/Modbus/OPC UA | `pip install spec-swarm-ai` |
 | **ArchSwarm**    | Multi-agent architecture debates -- coupling, modularity, scalability, SOLID-grounded designs | `pip install arch-swarm-ai` |
@@ -47,18 +47,18 @@ All seven packages live in this monorepo under `packages/` but ship to PyPI inde
 
 ### Install
 
-> **PyPI publish status (as of this commit):** the new `swarm-core` package and the bumped versions (`swarm-kb 0.3.0`, `review-swarm 0.4.0`, `fix-swarm-ai 0.3.0`, `doc-swarm-ai 0.2.0`, `spec-swarm-ai 0.2.0`) are **not yet on PyPI**. The new functionality (Stage 0a/2/6/7, lite-mode, keeper, skill composition) lives in this monorepo only. For now, install from source:
-
 ```bash
-# Recommended: monorepo dev install (gets the new tools)
+# Full suite (all new functionality: Stage 0a/2/6/7, lite-mode, keeper, skill composition)
+pip install swarmsuite-core swarm-kb review-swarm fix-swarm-ai doc-swarm-ai arch-swarm-ai spec-swarm-ai
+pip install spec-swarm-ai[pdf]                 # for datasheet ingestion (optional)
+
+# Monorepo dev install (editable, dependency-ordered)
 git clone https://github.com/fozzfut/swarm-suite
 cd swarm-suite
-python scripts/install_all.py             # editable, dependency-ordered
-
-# Or pip-install old PyPI versions (no new tools, but still functional)
-pip install swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
-pip install spec-swarm-ai[pdf]              # for datasheet ingestion
+python scripts/install_all.py
 ```
+
+> **Naming note:** the foundation package is `swarmsuite-core` on PyPI (the shorter `swarm-core` was rejected as too similar to existing `swarms`). The Python import name remains `swarm_core` -- code and docs unchanged.
 
 To verify the install: `python scripts/verify_e2e.py --quick` -- runs 47 end-to-end checks across CLIs, MCP server wiring, every new pipeline stage, prompt composition, and migration-script idempotency.
 

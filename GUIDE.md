@@ -21,7 +21,7 @@ For the layering rules see `docs/architecture/layering.md`. For the full pipelin
 
 ```bash
 # Full suite
-pip install swarm-core swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
+pip install swarmsuite-core swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
 
 # With PDF support (for datasheets and documentation)
 pip install swarm-kb[pdf] spec-swarm-ai[pdf]

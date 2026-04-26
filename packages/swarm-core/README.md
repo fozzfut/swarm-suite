@@ -19,7 +19,7 @@ Shared foundation for the [Swarm Suite](https://github.com/fozzfut/swarm-suite).
 ## Install
 
 ```bash
-pip install swarm-core
+pip install swarmsuite-core
 ```
 
 This package is a runtime dep of every other Swarm Suite package; you usually install it transitively.

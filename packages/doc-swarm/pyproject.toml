@@ -24,7 +24,7 @@ dependencies = [
     "click>=8.0,<9",
     "pyyaml>=6.0,<8",
     "mcp>=1.0",
-    "swarm-core>=0.1.0",
+    "swarmsuite-core>=0.1.0",
     "swarm-kb>=0.3.0",
 ]
 
