@@ -869,15 +869,95 @@ kb_resolve_debate(debate_id) → ADR saved automatically
 
 ## Expert Profiles
 
-| Tool | Experts | Focus |
-|------|---------|-------|
-| **ArchSwarm** | 10 | Simplicity, modularity, reuse, scalability, trade-offs, API design, data modeling, testing strategy, dependencies, observability |
-| **ReviewSwarm** | 13 | Security, performance, threading, error handling, API contracts, consistency, dead code, dependencies, logging, resources, tests, types, project context |
-| **FixSwarm** | 8 | Refactoring, security fix, performance fix, type fix, error handling fix, test fix, dependency fix, compatibility fix |
-| **DocSwarm** | 8 | API reference, tutorials, changelog, migration guides, architecture docs, inline docs, README quality, error messages |
-| **SpecSwarm** *(optional)* | 9 | MCU peripherals, CAN/CANopen/EtherCAT/PROFINET/Modbus, power, sensors, motors, memory, timing, safety |
+**53 expert profiles total.** The 39 in the universal set are language-agnostic and apply to any Python project; the 14 SpecSwarm experts are domain-specific to embedded / industrial work. All YAML, customizable. Each profile is a `slug.yaml` under `packages/<tool>/src/<tool>_swarm/experts/` with a `system_prompt`, optional `relevance_signals` for the AgentRouter, and `uses_skills:` declarations that compose with `solid_dry` + `karpathy_guidelines` automatically.
 
-**Total: 48 expert profiles.** The 39 in the universal set are language-agnostic and apply to any Python project; the 9 SpecSwarm experts are domain-specific to embedded / industrial work. All YAML, customizable.
+Counts by tool: **arch-swarm 10**, **review-swarm 13**, **fix-swarm 8**, **doc-swarm 8**, **spec-swarm 14** (optional).
+
+### ArchSwarm -- design-time architecture (10 experts)
+
+| Slug | Specialisation |
+|------|----------------|
+| `simplicity` | Champions minimal solutions; flags over-engineering, unnecessary abstractions, premature generalisation. |
+| `modularity` | Module boundaries, single responsibility, coupling metrics, dependency direction. |
+| `reuse` | Identifies code duplication, missed shared abstractions, library extraction opportunities. |
+| `scalability` | Stress-tests designs against growth scenarios; identifies bottlenecks, concurrency limits. |
+| `tradeoff-mediator` | Synthesises competing architectural perspectives, documents trade-offs explicitly, proposes resolutions. |
+| `api-design` | API design quality: naming consistency, versioning strategy, backward compatibility, endpoint consistency. |
+| `data-modeling` | Schema design, normalization strategy, migration safety, query access patterns. |
+| `testing-strategy` | Test architecture: pyramid balance, integration boundaries, fixture strategy. |
+| `dependency-architecture` | Dependency graph direction, layer violations, architectural boundary enforcement. |
+| `observability` | Logging architecture, metrics design, distributed tracing, alerting strategy. |
+
+### ReviewSwarm -- code-time bug detection (13 experts)
+
+| Slug | Specialisation |
+|------|----------------|
+| `security-surface` | Injection vectors, hardcoded secrets, unsafe deserialization, missing input validation. |
+| `performance` | N+1 queries, quadratic algorithms, memory leaks, unbounded collections, blocking I/O on hot paths. |
+| `threading-safety` | Race conditions, deadlocks, concurrency bugs across threads / async / goroutines / actors. |
+| `error-handling` | Swallowed errors, empty catches, unchecked error returns, missing error propagation. |
+| `type-safety` | Unchecked null / None / nil, unsafe type casts, missing type guards, `any` / `Object` abuse. |
+| `api-signatures` | Function/method signatures match usage; types match contracts; interface implementations satisfied. |
+| `consistency` | Cross-file contradictions: broken imports, naming mismatches, stale re-exports, config/code drift. |
+| `dead-code` | Unreachable code paths, unused exports, orphaned functions, dead feature flags. |
+| `dependency-drift` | Unused dependencies, missing deps, version conflicts, manifest/lockfile inconsistencies. |
+| `logging-patterns` | Missing logging at error boundaries, sensitive data in logs, inconsistent log levels. |
+| `resource-lifecycle` | Resource leaks: unclosed files / connections / handles, missing cleanup, dangling references. |
+| `test-quality` | Weakened tests, unrealistic mocks, swallowed failures, assertion anti-patterns. |
+| `project-context` | Validates `CLAUDE.md` / `AGENTS.md` structure: architecture trees, critical rules, accuracy vs code. |
+
+### FixSwarm -- repair-time code changes (8 experts)
+
+| Slug | Specialisation |
+|------|----------------|
+| `refactoring` | Safe refactoring patterns: extract method, rename, inline, decompose conditional, replace magic numbers. |
+| `security-fix` | Fixes for security vulnerabilities: injection, XSS, CSRF, auth bypass, secret exposure. |
+| `performance-fix` | Performance optimisations: batch queries, add caching, fix N+1, replace quadratic algorithms. |
+| `type-fix` | Adds and fixes type annotations, generics, null checks, type narrowing, unsafe-cast removal. |
+| `error-handling-fix` | Adds missing catches, narrows broad catches, propagates errors correctly, retry/backoff. |
+| `test-fix` | Fixes broken tests, adds missing assertions, improves test isolation, fixes flaky tests. |
+| `dependency-fix` | Updates vulnerable packages, replaces deprecated APIs, resolves version conflicts. |
+| `compatibility-fix` | Cross-version / cross-platform / cross-browser compatibility -- adds polyfills, version guards. |
+
+### DocSwarm -- documentation generation + verification (8 experts)
+
+| Slug | Specialisation |
+|------|----------------|
+| `api-reference` | Verifies public APIs (functions, classes, methods, endpoints) have complete, accurate docstrings. |
+| `tutorial-writer` | Tutorial quality: logical flow, prerequisites, working code examples, progressive complexity. |
+| `readme-quality` | README completeness: project description, badges, installation, usage, configuration. |
+| `architecture-docs` | Validates ADRs / design docs / system diagrams match the actual codebase. |
+| `inline-docs` | Code-comment quality: misleading comments, outdated TODOs, commented-out code, stale references. |
+| `changelog-expert` | Changelog completeness; follows Keep-a-Changelog + semver; accurately reflects shipped changes. |
+| `migration-guide` | Migration docs cover all breaking changes; before/after examples; explicit upgrade paths. |
+| `error-messages` | User-facing error messages are helpful: what went wrong, why, what to do next. |
+
+### SpecSwarm -- hardware / embedded specs (14 experts, optional)
+
+These are domain-specific to firmware / instrument software. Skip the whole tool if you're not on embedded.
+
+| Slug | Specialisation |
+|------|----------------|
+| `mcu-peripherals` | GPIO config, clock tree setup, interrupt priorities, DMA channel allocation. |
+| `communication-protocols` | SPI, I2C, UART, CAN, USB, Ethernet -- correctness, timing compliance, signal integrity. |
+| `industrial-protocols` | CAN, CANopen, EtherCAT, PROFINET, Modbus, OPC UA, EtherNet/IP, PROFIBUS, IO-Link, PROFIsafe, FSoE. |
+| `power-management` | Power budget, voltage rail compatibility, sleep mode transitions, current draw. |
+| `sensor-interfaces` | ADC resolution, sampling rates, calibration requirements, sensor fusion. |
+| `motor-control` | PWM configurations, H-bridge drivers, encoder interfaces, commutation strategies. |
+| `memory-layout` | Flash/RAM partitioning, linker script config, bootloader layout, OTA update slots. |
+| `timing-constraints` | Timing budgets, watchdog windows, real-time deadlines, interrupt latency, jitter. |
+| `safety-requirements` | Functional safety: redundancy, watchdog design, error detection and handling, fail-safe states. |
+| `requirements-analysis` | Parses SRS / PRD / user stories / acceptance criteria; flags ambiguity and conflicts. |
+| `api-specification` | OpenAPI/Swagger, gRPC protobuf, GraphQL schemas, REST API doc completeness + consistency. |
+| `system-integration` | How components connect: data flow, protocol bridges, message formats, error propagation. |
+| `standards-compliance` | ISO 9001, IEC 61508, ISO 26262, DO-178C, MISRA, etc. |
+| `configuration-spec` | Configuration files, environment variables, feature flags, deployment configs. |
+
+### Customising and adding experts
+
+Every expert is a YAML file -- edit it in place, or drop a new one into the `experts/` directory of any tool and it's auto-discovered on next server start. Required frontmatter fields: `name`, `description`, `system_prompt`. Optional: `severity_default`, `uses_skills:` (a list of methodology skills to compose into the prompt), `relevance_signals: { imports: [...], patterns: [...], keywords: [...] }` for AgentRouter scoring.
+
+Universal skills (`solid_dry`, `karpathy_guidelines`) auto-attach to every expert; opt into more (e.g. `systematic_debugging`, `self_review`, `brainstorming`, `writing_plans`) via `uses_skills:`. See `docs/architecture/skill-composition.md` for the composition algorithm and `packages/swarm-core/src/swarm_core/skills/SKILL_FORMAT.md` for the skill file spec.
 
 ## Requirements
 
