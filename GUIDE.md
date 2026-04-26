@@ -84,6 +84,47 @@ kb_start_pipeline("/path/to/project")
 
 ---
 
+## New tool surface (Stages 0a, 2, 6, 7 + lite-mode + keeper)
+
+In addition to the original review/fix/doc/arch/spec tools, the swarm-kb
+MCP server exposes:
+
+**Stage 0a Idea (drives the brainstorming skill):**
+- `kb_start_idea_session(project_path, prompt)`
+- `kb_capture_idea_answer(session_id, question, answer)`
+- `kb_record_idea_alternatives(session_id, alternatives, chosen_id)`
+- `kb_finalize_idea_design(session_id, design_md)`
+
+**Stage 2 Plan (drives the writing_plans skill):**
+- `kb_start_plan_session(project_path, adr_ids)`
+- `kb_emit_task(session_id, task_md)`
+- `kb_finalize_plan(session_id, plan_md)` -- validates per the writing_plans contract
+
+**Stage 6 Hardening (production-readiness checks, graceful degradation when tools missing):**
+- `kb_start_hardening(project_path, min_coverage)`
+- `kb_run_check(session_id, check)` -- one of: typecheck / coverage / dep_audit / secrets / dep_hygiene / ci_presence / observability
+- `kb_get_hardening_report(session_id)` -- aggregated Markdown report with [PASS]/[FAIL]/[SKIPPED]
+
+**Stage 7 Release (NEVER auto-publishes -- user runs twine):**
+- `kb_start_release(project_path)`
+- `kb_propose_version_bump(session_id)` -- Conventional Commits heuristic
+- `kb_generate_changelog(session_id)`
+- `kb_validate_pyproject(session_id, path)`
+- `kb_build_dist(session_id)`
+- `kb_release_summary(session_id)`
+
+**Lite-mode (escape hatch from full-pipeline ceremony):**
+- `kb_quick_review(file, line_start, line_end, severity, title, expert_role, ...)`
+- `kb_quick_fix(file, line_start, line_end, old_text, new_text, rationale, expert_role, ...)`
+
+**Pipeline backward navigation:**
+- `kb_rewind_pipeline(pipeline_id, stage, reason)` -- when discoveries in stage N invalidate decisions from M < N
+
+**CLAUDE.md keeper:**
+- `kb_check_claude_md(path)` -- audits CLAUDE.md for size, accreted bug-fix recipes, missing required sections, missing pointers
+
+See `docs/architecture/pipeline-stages.md` for the full lifecycle, `docs/architecture/skill-composition.md` for how skills compose into expert prompts, and `docs/decisions/` for individual stage contracts.
+
 ## Pipeline Stages
 
 ### Stage 0: Spec Analysis (SpecSwarm) — *embedded projects only*

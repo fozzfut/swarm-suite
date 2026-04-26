@@ -2,6 +2,9 @@
 # Aggregated test config. Each package keeps its own pytest.ini_options
 # inside its pyproject.toml; this top-level config is for running
 # `pytest packages/<name>/tests` from the repo root with consistent flags.
+# `importlib` mode avoids name collisions when multiple tests/ subtrees
+# all contain a `conftest.py` that pytest would otherwise import as
+# `tests.conftest` (the "rootdir" collision).
 testpaths = [
     "packages/swarm-core/tests",
     "packages/swarm-kb/tests",

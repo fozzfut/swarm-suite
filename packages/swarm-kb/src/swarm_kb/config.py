@@ -37,7 +37,8 @@ _DEFAULT_CONFIG: dict = {
     "arch": {},
 }
 
-TOOL_NAMES = ("review", "fix", "doc", "arch", "spec")
+TOOL_NAMES = ("review", "fix", "doc", "arch", "spec",
+              "idea", "plan", "harden", "release")
 
 
 @dataclass

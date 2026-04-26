@@ -159,8 +159,12 @@ def validate_plan_markdown(plan_md: str) -> list[str]:
     text = plan_md or ""
 
     for field in _REQUIRED_HEADER_FIELDS:
-        if not re.search(rf"\*\*{re.escape(field)}:\*\*", text):
-            errors.append(f"missing header field: **{field}:**")
+        # Tolerate `**Goal:**`, `**Goal**:`, and `Goal:` (no bold). The skill
+        # template uses `**Field:**` but we don't want to fail validation on
+        # cosmetic markdown variations.
+        pat = rf"(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*:"
+        if not re.search(pat, text):
+            errors.append(f"missing header field: {field}:")
 
     # Find tasks: headings like "### Task N: ..." or "## Task N: ..."
     task_blocks = list(re.finditer(r"^#{2,3}\s*Task\s+\d+\s*:", text, re.MULTILINE))

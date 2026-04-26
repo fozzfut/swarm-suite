@@ -41,6 +41,7 @@ intentionally does not duplicate the detail.
 - [2026-04-26 Stage 0a Idea contract](decisions/2026-04-26-stage-0a-idea-stage.md)
 - [2026-04-26 Stage 2 Plan contract](decisions/2026-04-26-stage-2-plan-stage.md)
 - [2026-04-26 Stages 6 + 7 Hardening + Release contracts](decisions/2026-04-26-stages-6-7-hardening-release.md)
+- [2026-04-26 skill composition gap (open)](decisions/2026-04-26-skill-composition-gap.md)
 
 ## Plans (in progress)
 

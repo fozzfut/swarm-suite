@@ -15,6 +15,7 @@ from .scanner import (
     CouplingMetrics,
     ArchAnalysis,
     scan_project,
+    format_analysis,
 )
 
-__all__ = ["ModuleInfo", "CouplingMetrics", "ArchAnalysis", "scan_project"]
+__all__ = ["ModuleInfo", "CouplingMetrics", "ArchAnalysis", "scan_project", "format_analysis"]

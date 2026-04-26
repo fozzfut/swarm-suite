@@ -24,6 +24,13 @@ from .quality_gate import (
 from .session_meta import count_sessions, list_sessions
 from .xref import XRefLog
 
+# New tool surfaces -- see docs/decisions/2026-04-26-stage-*.md
+from . import idea_session as _idea
+from . import plan_session as _plan
+from . import hardening_session as _harden
+from . import release_session as _release
+from . import lite_tools as _lite
+
 _log = logging.getLogger("swarm_kb.server")
 
 
@@ -1425,5 +1432,290 @@ No automatic progression. You control the pace.
             "migrated": result,
             "total": total,
         })
+
+    # ════════════════════════════════════════════════════════════════════
+    # Stage 0a Idea -- drives the brainstorming skill
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_idea_session",
+        description="Open a new Idea session. Drives the `brainstorming` skill: ask one question per turn, record answers, present 2-3 alternatives, finalize design.",
+    )
+    def _kb_start_idea(project_path: str, prompt: str, name: str = "",
+                       ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _idea.start_idea_session(
+            cfg.tool_sessions_path("idea"),
+            project_path=project_path, prompt=prompt, name=name,
+        )
+        return json.dumps(out, indent=2)
+
+    @mcp.tool(
+        name="kb_capture_idea_answer",
+        description="Phase 1 of brainstorming: record one Q&A pair into the Idea session.",
+    )
+    def _kb_capture_idea(session_id: str, question: str, answer: str,
+                         ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _idea.capture_idea_answer(
+            cfg.tool_sessions_path("idea"),
+            session_id=session_id, question=question, answer=answer,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_record_idea_alternatives",
+        description="Phase 2 of brainstorming: record 2-3 design alternatives + the user's chosen one.",
+    )
+    def _kb_record_alternatives(session_id: str, alternatives: list[dict],
+                                chosen_id: str = "",
+                                ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _idea.record_alternatives(
+            cfg.tool_sessions_path("idea"),
+            session_id=session_id, alternatives=alternatives, chosen_id=chosen_id,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_finalize_idea_design",
+        description="Phase 3+5 of brainstorming: persist the consolidated design and mark the session ready to advance to Architecture.",
+    )
+    def _kb_finalize_design(session_id: str, design_md: str,
+                            ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _idea.finalize_idea_design(
+            cfg.tool_sessions_path("idea"),
+            session_id=session_id, design_md=design_md,
+        )
+        return json.dumps(out)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Stage 2 Plan -- drives the writing_plans skill
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_plan_session",
+        description="Open a Plan session anchored to one or more ADRs. Drives the `writing_plans` skill: bite-sized 2-5-minute tasks, each with failing test first.",
+    )
+    def _kb_start_plan(project_path: str, adr_ids: list[str], name: str = "",
+                       ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _plan.start_plan_session(
+            cfg.tool_sessions_path("plan"),
+            project_path=project_path, adr_ids=adr_ids, name=name,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_emit_task",
+        description="Append one task (Markdown body) to the Plan session's tasks.jsonl.",
+    )
+    def _kb_emit_task(session_id: str, task_md: str,
+                      ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _plan.emit_task(
+            cfg.tool_sessions_path("plan"),
+            session_id=session_id, task_md=task_md,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_finalize_plan",
+        description="Persist plan.md and validate it against the writing_plans contract. Returns {validated, errors}. On success, the pipeline can advance to Review.",
+    )
+    def _kb_finalize_plan(session_id: str, plan_md: str,
+                          ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _plan.finalize_plan(
+            cfg.tool_sessions_path("plan"),
+            session_id=session_id, plan_md=plan_md,
+        )
+        return json.dumps(out)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Stage 6 Hardening -- production-readiness checks
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_hardening",
+        description="Open a Hardening session for a project. Lists the available checks (typecheck, coverage, dep_audit, secrets, dep_hygiene, ci_presence, observability).",
+    )
+    def _kb_start_harden(project_path: str, min_coverage: int = 85,
+                         name: str = "",
+                         ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _harden.start_hardening(
+            cfg.tool_sessions_path("harden"),
+            project_path=project_path, min_coverage=min_coverage, name=name,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_run_check",
+        description="Run one hardening check by name. Tools that aren't installed degrade to {installed: false} -- the user sees what's missing instead of a crash.",
+    )
+    def _kb_run_check(session_id: str, check: str,
+                      ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _harden.run_check(
+            cfg.tool_sessions_path("harden"),
+            session_id=session_id, check=check,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_get_hardening_report",
+        description="Aggregate all run checks into a Markdown report. Reports {blockers, skipped, total_checks}.",
+    )
+    def _kb_harden_report(session_id: str,
+                          ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _harden.get_hardening_report(
+            cfg.tool_sessions_path("harden"),
+            session_id=session_id,
+        )
+        return json.dumps(out)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Stage 7 Release -- never auto-publishes; user runs twine
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_release",
+        description="Open a Release session for a project.",
+    )
+    def _kb_start_release(project_path: str, name: str = "",
+                          ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _release.start_release(
+            cfg.tool_sessions_path("release"),
+            project_path=project_path, name=name,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_propose_version_bump",
+        description="Read git log since last tag; propose patch / minor / major bump using Conventional Commits prefixes.",
+    )
+    def _kb_propose_bump(session_id: str,
+                         ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _release.propose_version_bump(
+            cfg.tool_sessions_path("release"), session_id=session_id,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_generate_changelog",
+        description="Draft a CHANGELOG.md entry from commits since the last tag, grouped by Conventional Commits prefix.",
+    )
+    def _kb_gen_changelog(session_id: str,
+                          ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _release.generate_changelog(
+            cfg.tool_sessions_path("release"), session_id=session_id,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_validate_pyproject",
+        description="Check pyproject.toml for PyPI-required fields (name, version, description, license, authors, readme, requires-python) plus LICENSE file presence.",
+    )
+    def _kb_validate_pp(session_id: str, path: str = "pyproject.toml",
+                        ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _release.validate_pyproject(
+            cfg.tool_sessions_path("release"), session_id=session_id, path=path,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_build_dist",
+        description="Run `python -m build` and report the resulting artifacts in dist/.",
+    )
+    def _kb_build(session_id: str,
+                  ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _release.build_dist(
+            cfg.tool_sessions_path("release"), session_id=session_id,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_release_summary",
+        description="Aggregate version bump + pyproject validation + build status into a 'ready to twine upload' checklist. NEVER auto-publishes.",
+    )
+    def _kb_release_summary(session_id: str,
+                            ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _release.release_summary(
+            cfg.tool_sessions_path("release"), session_id=session_id,
+        )
+        return json.dumps(out)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Lite-mode -- escape hatch from full pipeline ceremony
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_quick_review",
+        description="One-shot review: post a single finding without opening a review session. Persists to ~/.swarm-kb/lite/<YYYY-MM-DD>/.",
+    )
+    def _kb_quick_review(file: str, line_start: int, line_end: int,
+                         severity: str, title: str, expert_role: str,
+                         actual: str = "", expected: str = "",
+                         source_ref: str = "", confidence: float = 0.7,
+                         ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _lite.kb_quick_review(
+            file=file, line_start=line_start, line_end=line_end,
+            severity=severity, title=title, expert_role=expert_role,
+            actual=actual, expected=expected, source_ref=source_ref,
+            confidence=confidence, config=cfg,
+        )
+        return json.dumps(out)
+
+    @mcp.tool(
+        name="kb_quick_fix",
+        description="One-shot fix proposal: record intent without opening a fix session. The patch is NOT applied -- the caller edits the file. Persists to ~/.swarm-kb/lite/<YYYY-MM-DD>/.",
+    )
+    def _kb_quick_fix(file: str, line_start: int, line_end: int,
+                      old_text: str, new_text: str, rationale: str,
+                      expert_role: str, finding_id: str = "",
+                      ctx: Optional[Context] = None) -> str:
+        cfg = _get_config(ctx)
+        out = _lite.kb_quick_fix(
+            file=file, line_start=line_start, line_end=line_end,
+            old_text=old_text, new_text=new_text, rationale=rationale,
+            expert_role=expert_role, finding_id=finding_id, config=cfg,
+        )
+        return json.dumps(out)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Pipeline backward navigation
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_rewind_pipeline",
+        description="Rewind a pipeline to an earlier stage. Used when discoveries in stage N invalidate decisions from stage M < N (e.g. Review finds the ADR was wrong). Reason is recorded in the target stage's notes.",
+    )
+    def _kb_rewind(pipeline_id: str, stage: str, reason: str = "",
+                   ctx: Optional[Context] = None) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx)
+        return json.dumps(pipe_mgr.rewind(pipeline_id, stage, reason=reason), indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # CLAUDE.md keeper
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_check_claude_md",
+        description="Audit a CLAUDE.md file for size, accreted bug-fix recipes, missing required sections, and missing pointers. Used as a kb_advance_pipeline gate.",
+    )
+    def _kb_keep_claude(path: str = "CLAUDE.md",
+                        ctx: Optional[Context] = None) -> str:
+        from swarm_core.keeper.server import kb_check_claude_md
+        return json.dumps(kb_check_claude_md(path), indent=2)
 
     return mcp
