@@ -43,6 +43,7 @@ intentionally does not duplicate the detail.
 - [2026-04-26 Stages 6 + 7 Hardening + Release contracts](decisions/2026-04-26-stages-6-7-hardening-release.md)
 - [2026-04-26 skill composition gap (open)](decisions/2026-04-26-skill-composition-gap.md)
 - [2026-04-26 real-work review findings (resolved)](decisions/2026-04-26-real-work-review.md)
+- [2026-04-26 Pass 5 deep audit findings (resolved)](decisions/2026-04-26-pass5-deep-audit.md)
 
 ## Plans (in progress)
 
