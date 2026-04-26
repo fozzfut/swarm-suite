@@ -1,8 +1,8 @@
 # Swarm Suite
 
-**Take a Python project from idea to production-grade industrial code.** Seven MCP tools that collaborate through a shared knowledge base to capture ideas, analyze specs, architect, plan, review, fix, document, harden, and release your code -- enforcing **SOLID + DRY** at every stage.
+**A multi-agent MCP toolkit that takes a Python project from idea to production.** Seven tools collaborate through a shared knowledge base to capture ideas, architect, plan, review, fix, document, harden, and release your code -- enforcing **SOLID + DRY** at every stage.
 
-> Built for Python first; embedded C supported via SpecSwarm for hardware spec extraction. Other languages best-effort.
+> Python-first and language-agnostic for everything below the spec layer. Embedded / industrial projects get an **optional** Stage 0 (`spec-swarm`) for datasheet + protocol analysis; everything else runs by default and works for any Python codebase.
 
 ```
                           +----------------+
@@ -29,28 +29,44 @@
                               "Idea -> Production" pipeline
 ```
 
+## About
+
+The suite was originally built for developers writing **industrial / embedded software**, where hardware specs (registers, pin maps, fieldbus protocols) need to align with the code architecture. That use case is still first-class via `spec-swarm`.
+
+But the rest of the pipeline -- multi-agent architecture debates, multi-expert code review, fix-with-consensus, generate-verify-retry loops, the 13-format debate library, the AgentRearrange-style flow DSL, task-conditioned skill composition -- turned out general enough that **any Python project benefits**. Spec-swarm is opt-in (`include_spec=True`); everything else runs by default.
+
 ## Packages
+
+Universal Python tooling (run by default):
 
 | Package | Description | Install |
 |---------|-------------|---------|
 | **swarm-core**   | Shared foundation: models, expert registry, session lifecycle, coordination primitives, MCP scaffolding, CLAUDE.md keeper | `pip install swarmsuite-core` |
-| **swarm-kb**     | Shared knowledge base -- findings, decisions, debates, pipelines, code maps | `pip install swarm-kb` |
-| **SpecSwarm**    | Hardware spec analyzer -- datasheets, register maps, CAN/SPI/I2C/EtherCAT/Modbus/OPC UA | `pip install spec-swarm-ai` |
+| **swarm-kb**     | Shared knowledge base -- findings, decisions, debates, judgings, verifications, pgve sessions, flow DSL, pipelines, code maps | `pip install swarm-kb` |
 | **ArchSwarm**    | Multi-agent architecture debates -- coupling, modularity, scalability, SOLID-grounded designs | `pip install arch-swarm-ai` |
 | **ReviewSwarm**  | Multi-agent code review -- 13 experts (security, performance, threading, SOLID/DRY violations, ...) | `pip install review-swarm` |
 | **FixSwarm**     | Multi-agent code fixer -- propose, consensus, apply, regression-check; refuses fixes that move away from SOLID+DRY | `pip install fix-swarm-ai` |
 | **DocSwarm**     | Documentation generator + ADR maintainer -- API docs, verification, SOLID/DRY trade-off justifications | `pip install doc-swarm-ai` |
 
-All seven packages live in this monorepo under `packages/` but ship to PyPI independently. The shared code lives in `swarm-core`; layering enforced by `scripts/check_imports.py`.
+Optional add-on for embedded / industrial projects:
+
+| Package | Description | Install |
+|---------|-------------|---------|
+| **SpecSwarm**    | Hardware spec analyzer -- datasheets, register maps, CAN/CANopen/EtherCAT/PROFINET/Modbus/OPC UA. Activates Stage 0 of the pipeline (`include_spec=True`). Skip if you're not writing firmware / instrument software. | `pip install spec-swarm-ai` |
+
+All packages live in this monorepo under `packages/` but ship to PyPI independently. The shared code lives in `swarm-core`; layering enforced by `scripts/check_imports.py`.
 
 ## Quick Start
 
 ### Install
 
 ```bash
-# Full suite (all new functionality: Stage 0a/2/6/7, lite-mode, keeper, skill composition)
-pip install swarmsuite-core swarm-kb review-swarm fix-swarm-ai doc-swarm-ai arch-swarm-ai spec-swarm-ai
-pip install spec-swarm-ai[pdf]                 # for datasheet ingestion (optional)
+# Default install -- universal Python tooling (skip spec-swarm if you're not on embedded)
+pip install swarmsuite-core swarm-kb arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
+
+# Embedded / industrial projects: add the spec analyzer
+pip install spec-swarm-ai
+pip install spec-swarm-ai[pdf]                 # for PDF datasheet ingestion
 
 # Monorepo dev install (editable, dependency-ordered)
 git clone https://github.com/fozzfut/swarm-suite
@@ -65,12 +81,15 @@ To verify the install: `python scripts/verify_e2e.py --quick` -- runs 47 end-to-
 ### Add MCP servers (Claude Code)
 
 ```bash
+# Universal set
 claude mcp add swarm-kb     -- swarm-kb serve --transport stdio
-claude mcp add spec-swarm   -- spec-swarm serve --transport stdio
 claude mcp add arch-swarm   -- arch-swarm serve --transport stdio
 claude mcp add review-swarm -- review-swarm serve --transport stdio
 claude mcp add fix-swarm    -- fix-swarm serve --transport stdio
 claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
+
+# Embedded / industrial only
+claude mcp add spec-swarm   -- spec-swarm serve --transport stdio
 ```
 
 ### Add MCP servers (Cursor / Windsurf / Cline)
@@ -79,38 +98,30 @@ claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
 {
   "mcpServers": {
     "swarm-kb":     { "url": "http://localhost:8788/sse" },
-    "spec-swarm":   { "url": "http://localhost:8769/sse" },
     "arch-swarm":   { "url": "http://localhost:8768/sse" },
     "review-swarm": { "url": "http://localhost:8765/sse" },
     "fix-swarm":    { "url": "http://localhost:8767/sse" },
-    "doc-swarm":    { "url": "http://localhost:8766/sse" }
+    "doc-swarm":    { "url": "http://localhost:8766/sse" },
+    "spec-swarm":   { "url": "http://localhost:8769/sse" }
   }
 }
 ```
 
 ## Pipeline Workflow
 
-The suite follows a 9-stage pipeline (idea -> production) with **user gates** between stages. You control the pace -- no automatic progression. See `docs/architecture/pipeline-stages.md` for the full stage spec.
+The suite follows a multi-stage pipeline (idea -> production) with **user gates** between stages. You control the pace -- no automatic progression. See `docs/architecture/pipeline-stages.md` for the full stage spec.
 
-### For embedded/hardware projects
-
-```
-kb_start_pipeline("./project", include_spec=True)
-```
+### Default flow (any Python project)
 
 ```
-Stage 0: Spec Analysis (SpecSwarm)
-  ├── Ingest datasheets, reference manuals
-  ├── Extract: registers, pins, protocols, timing, power, memory
-  ├── Check conflicts: pin collisions, bus overload, power budget
-  └── Export constraints to swarm-kb
-  USER GATE: review specs → kb_advance_pipeline()
+kb_start_pipeline("./project")
+```
 
+```
 Stage 1: Architecture Analysis (ArchSwarm)
   ├── Scan project metrics: coupling, complexity, dependencies
   ├── Multi-agent debates on design decisions (real AI analysis)
-  ├── Decisions become ADRs in swarm-kb
-  └── Hardware constraints from Stage 0 inform architecture
+  └── Decisions become ADRs in swarm-kb
   USER GATE: review findings → kb_advance_pipeline()
 
 Stage 2: Code Review (ReviewSwarm)
@@ -139,13 +150,24 @@ Stage 5: Documentation (DocSwarm)
   → Pipeline complete!
 ```
 
-### For software projects
+### Embedded / industrial variant (opt-in Stage 0)
 
 ```
-kb_start_pipeline("./project")
+kb_start_pipeline("./project", include_spec=True)
 ```
 
-Starts at Stage 1 (architecture), skipping spec analysis.
+Adds a Stage 0 *before* the architecture analysis:
+
+```
+Stage 0: Spec Analysis (SpecSwarm)
+  ├── Ingest datasheets, reference manuals
+  ├── Extract: registers, pins, protocols, timing, power, memory
+  ├── Check conflicts: pin collisions, bus overload, power budget
+  └── Export constraints to swarm-kb (informs Stage 1 architecture)
+  USER GATE: review specs → kb_advance_pipeline()
+```
+
+Stages 1-5 then run as in the default flow, with the hardware constraints flowing through ADRs into review and fix.
 
 ## Architecture
 
@@ -177,19 +199,19 @@ kb_resolve_debate(debate_id) → ADR saved automatically
 
 | Tool | Experts | Focus |
 |------|---------|-------|
-| **SpecSwarm** | 9 | MCU peripherals, CAN/CANopen/EtherCAT/PROFINET/Modbus, power, sensors, motors, memory, timing, safety |
 | **ArchSwarm** | 10 | Simplicity, modularity, reuse, scalability, trade-offs, API design, data modeling, testing strategy, dependencies, observability |
 | **ReviewSwarm** | 13 | Security, performance, threading, error handling, API contracts, consistency, dead code, dependencies, logging, resources, tests, types, project context |
 | **FixSwarm** | 8 | Refactoring, security fix, performance fix, type fix, error handling fix, test fix, dependency fix, compatibility fix |
 | **DocSwarm** | 8 | API reference, tutorials, changelog, migration guides, architecture docs, inline docs, README quality, error messages |
+| **SpecSwarm** *(optional)* | 9 | MCU peripherals, CAN/CANopen/EtherCAT/PROFINET/Modbus, power, sensors, motors, memory, timing, safety |
 
-**Total: 48 expert profiles** — all language-agnostic, customizable via YAML.
+**Total: 48 expert profiles.** The 39 in the universal set are language-agnostic and apply to any Python project; the 9 SpecSwarm experts are domain-specific to embedded / industrial work. All YAML, customizable.
 
 ## Requirements
 
 - Python 3.10+
 - An MCP-compatible AI client (Claude Code, Cursor, Windsurf, Cline, etc.)
-- For PDF datasheets: `pip install spec-swarm-ai[pdf]`
+- For PDF datasheets (embedded only): `pip install spec-swarm-ai[pdf]`
 
 ## SOLID + DRY -- the non-negotiable
 
