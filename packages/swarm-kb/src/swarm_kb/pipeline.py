@@ -31,9 +31,22 @@ class StageStatus:
     COMPLETED = "completed"
     SKIPPED = "skipped"
 
-STAGE_ORDER = ["spec", "arch", "review", "fix", "verify", "doc"]
+STAGE_ORDER = ["idea", "spec", "arch", "plan", "review", "fix", "verify", "doc", "harden", "release"]
 
 STAGE_INFO = {
+    "idea": {
+        "name": "Idea Capture",
+        "tool": "swarm-kb",
+        "description": "Greenfield brainstorming. Drives the brainstorming skill: one question at a time, 2-3 design alternatives, incremental design presentation. Optional for projects that already have a design.",
+        "actions": [
+            "1. kb_start_idea_session(project_path, prompt) to open the session",
+            "2. Drive the `brainstorming` skill: capture answers via kb_capture_idea_answer",
+            "3. kb_record_alternatives(sid, alternatives, chosen_id) for Phase 2",
+            "4. kb_finalize_idea_design(sid, design_md) when the user approves",
+            "5. kb_advance_pipeline(pipeline_id) to enter Architecture",
+        ],
+        "optional": True,
+    },
     "spec": {
         "name": "Hardware Spec Analysis",
         "tool": "spec-swarm",
@@ -55,9 +68,22 @@ STAGE_INFO = {
         "actions": [
             "1. Run arch_analyze(project_path) to scan for structural issues",
             "2. Optionally run orchestrate_debate(project_path, topic) for design decisions",
-            "3. Review the findings — approve valid ones, dismiss false positives",
-            "4. Call kb_advance_pipeline(pipeline_id) when ready for code review",
+            "3. Review the findings -- approve valid ones, dismiss false positives",
+            "4. Call kb_advance_pipeline(pipeline_id) when ready for plan or review",
         ],
+    },
+    "plan": {
+        "name": "Implementation Plan",
+        "tool": "swarm-kb",
+        "description": "Convert approved ADRs into a TDD-grade executable plan. Drives the writing_plans skill: 2-5-minute tasks, failing test first, exact commands. Optional but strongly recommended for greenfield work.",
+        "actions": [
+            "1. kb_start_plan_session(project_path, adr_ids) to anchor the plan to ADRs",
+            "2. Drive the `writing_plans` skill: emit each task via kb_emit_task",
+            "3. kb_finalize_plan(sid, plan_md) -- validates against the writing_plans contract",
+            "4. Fix any validation errors and re-finalize",
+            "5. kb_advance_pipeline(pipeline_id) to enter Review",
+        ],
+        "optional": True,
     },
     "review": {
         "name": "Code Review",
@@ -145,7 +171,7 @@ class Pipeline:
     id: str = ""
     project_path: str = ""
     created_at: str = ""
-    current_stage: str = "spec"
+    current_stage: str = ""  # auto-set to STAGE_ORDER[0] in __post_init__
     stages: dict[str, StageState] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -156,9 +182,13 @@ class Pipeline:
         if not self.stages:
             for stage in STAGE_ORDER:
                 self.stages[stage] = StageState(stage=stage)
-            # Default: start at spec (first stage)
-            self.stages["spec"].status = StageStatus.ACTIVE
-            self.stages["spec"].started_at = self.created_at
+            # Default: start at the first stage in STAGE_ORDER. Callers that
+            # want to skip earlier optional stages (e.g. an existing project
+            # that doesn't need ideation) call `skip_to(...)` after start.
+            first = STAGE_ORDER[0]
+            self.stages[first].status = StageStatus.ACTIVE
+            self.stages[first].started_at = self.created_at
+            self.current_stage = first
 
     def get_current(self) -> StageState:
         return self.stages[self.current_stage]
@@ -263,7 +293,7 @@ class Pipeline:
             id=d.get("id", ""),
             project_path=d.get("project_path", ""),
             created_at=d.get("created_at", ""),
-            current_stage=d.get("current_stage", "spec"),
+            current_stage=d.get("current_stage", STAGE_ORDER[0]),
             stages=stages,
         )
 

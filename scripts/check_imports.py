@@ -53,11 +53,9 @@ ALL_SUITE_MODULES = set(ALLOWED.keys())
 # Migration plan tracked in docs/decisions/. New entries here require a
 # corresponding decision doc URL in the comment.
 GRANDFATHERED: dict[tuple[str, str], set[str]] = {
-    # docs/decisions/2026-04-26-fix-swarm-arch-coupling.md -- to be moved
-    # into swarm_core.code_scan in a follow-up phase.
-    ("fix_swarm", "arch_swarm"): {
-        "packages/fix-swarm/src/fix_swarm/arch_adapter.py",
-    },
+    # 2026-04-26-fix-swarm-arch-coupling.md: RESOLVED on 2026-04-26.
+    # code_scanner extracted to swarm_core.code_scan; arch_swarm now ships a
+    # shim. fix_swarm.arch_adapter imports from swarm_core directly.
 }
 
 

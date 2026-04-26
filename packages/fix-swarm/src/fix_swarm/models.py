@@ -1,4 +1,10 @@
-"""Data models for FixSwarm -- FixAction, FixPlan, FixResult, and multi-agent collaboration types."""
+"""Data models for FixSwarm -- FixAction, FixPlan, FixResult, and multi-agent collaboration types.
+
+Universal pieces (Severity, SEVERITY_ORDER, severity_at_least, MessageType,
+ClaimStatus) come from `swarm_core.models` -- single source of truth across
+the suite. FixSwarm-specific enums (ReactionType with approve/reject verbs,
+EventType with FIX_*) stay local because their values are domain-specific.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +13,19 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+# Re-exported from swarm_core so existing
+# `from .models import Severity, ...` callers keep working.
+from swarm_core.models import (
+    Severity,                            # noqa: F401 -- re-exported
+    SEVERITY_ORDER,                      # noqa: F401 -- re-exported
+    severity_at_least,                   # noqa: F401 -- re-exported
+    ClaimStatus,                         # noqa: F401 -- re-exported (subset of values used)
+    MessageType,                         # noqa: F401 -- re-exported
+)
+
 
 # ---------------------------------------------------------------------------
-# Enums -- original
+# Enums -- FixSwarm-specific
 # ---------------------------------------------------------------------------
 
 class FixActionType(str, Enum):
@@ -19,38 +35,6 @@ class FixActionType(str, Enum):
     INSERT = "insert"
     DELETE = "delete"
 
-
-class Severity(str, Enum):
-    """Mirror of ReviewSwarm severity levels, ordered high-to-low."""
-
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"
-
-
-# Severity ordering: lower index == higher priority.
-SEVERITY_ORDER: list[Severity] = [
-    Severity.CRITICAL,
-    Severity.HIGH,
-    Severity.MEDIUM,
-    Severity.LOW,
-    Severity.INFO,
-]
-
-
-def severity_at_least(sev: Severity, threshold: Severity) -> bool:
-    """Return True if *sev* is at least as severe as *threshold*."""
-    try:
-        return SEVERITY_ORDER.index(sev) <= SEVERITY_ORDER.index(threshold)
-    except ValueError:
-        return False
-
-
-# ---------------------------------------------------------------------------
-# Enums -- multi-agent collaboration
-# ---------------------------------------------------------------------------
 
 class ProposalStatus(str, Enum):
     PROPOSED = "proposed"
@@ -66,18 +50,6 @@ class ReactionType(str, Enum):
     REJECT = "reject"
     SUGGEST_ALTERNATIVE = "suggest_alternative"
     REQUEST_EVIDENCE = "request_evidence"
-
-
-class MessageType(str, Enum):
-    DIRECT = "direct"
-    BROADCAST = "broadcast"
-    QUERY = "query"
-    RESPONSE = "response"
-
-
-class ClaimStatus(str, Enum):
-    ACTIVE = "active"
-    RELEASED = "released"
 
 
 class EventType(str, Enum):

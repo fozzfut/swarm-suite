@@ -90,9 +90,9 @@ def analyze_project_for_arch_findings(project_path: str, scope: str = "") -> lis
     runs scan_project(), and converts the results into ArchFinding objects.
     """
     try:
-        from arch_swarm.code_scanner import scan_project, ArchAnalysis
+        from swarm_core.code_scan import scan_project, ArchAnalysis
     except ImportError:
-        _log.warning("arch-swarm-ai not installed, cannot scan for arch findings")
+        _log.warning("swarm-core not installed, cannot scan for arch findings")
         return []
 
     analysis = scan_project(project_path, scope=scope or None)

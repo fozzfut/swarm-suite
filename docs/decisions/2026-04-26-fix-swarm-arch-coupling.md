@@ -2,7 +2,11 @@
 
 ## Status
 
-Open. Grandfathered in `scripts/check_imports.py::GRANDFATHERED`.
+**RESOLVED 2026-04-26.** `arch_swarm.code_scanner` extracted to
+`swarm_core.code_scan`. `arch_swarm.code_scanner` now ships a thin shim
+that re-exports for legacy callers. `fix_swarm.arch_adapter` imports
+from `swarm_core.code_scan` directly. The GRANDFATHERED entry is gone;
+`scripts/check_imports.py` is clean without exceptions.
 
 ## Context
 

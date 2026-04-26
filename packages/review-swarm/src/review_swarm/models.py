@@ -1,31 +1,30 @@
-"""Data models for ReviewSwarm -- Finding, Claim, Reaction with serialization."""
+"""Data models for ReviewSwarm -- Finding, Claim, Reaction with serialization.
+
+Universal enums (Severity, ReactionType, ClaimStatus) and `now_iso` come
+from `swarm_core.models` / `swarm_core.timeutil` -- single source of truth
+across the suite. Tool-specific enums (Category, Action, Status) stay
+local because their values are review-swarm-specific.
+"""
 
 from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import TypedDict
 
+# Re-export the canonical enums + now_iso so existing
+# `from .models import Severity, ...` callers keep working.
+from swarm_core.models import (
+    Severity,                         # noqa: F401 -- re-exported
+    ReactionType,                     # noqa: F401 -- re-exported (review-swarm uses the suite-wide values)
+    ClaimStatus,                      # noqa: F401 -- re-exported
+    MessageType,                      # noqa: F401 -- re-exported
+)
+from swarm_core.timeutil import now_iso  # noqa: F401 -- re-exported
 
-# ── Helper ──────────────────────────────────────────────────────────────
 
-
-def now_iso() -> str:
-    """Return current UTC time as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-# ── Enums ───────────────────────────────────────────────────────────────
-
-
-class Severity(str, Enum):
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"
+# ── Tool-specific enums (review-swarm only) ──────────────────────────────
 
 
 class Category(str, Enum):
@@ -51,19 +50,6 @@ class Status(str, Enum):
     DISPUTED = "disputed"
     FIXED = "fixed"
     WONTFIX = "wontfix"
-    DUPLICATE = "duplicate"
-
-
-class ClaimStatus(str, Enum):
-    ACTIVE = "active"
-    RELEASED = "released"
-    EXPIRED = "expired"
-
-
-class ReactionType(str, Enum):
-    CONFIRM = "confirm"
-    DISPUTE = "dispute"
-    EXTEND = "extend"
     DUPLICATE = "duplicate"
 
 
@@ -368,13 +354,7 @@ class Event:
 
 
 # ── Message ────────────────────────────────────────────────────────────
-
-
-class MessageType(str, Enum):
-    DIRECT = "direct"       # one agent → one agent
-    BROADCAST = "broadcast"  # one agent → all agents
-    QUERY = "query"          # question to all, expects responses
-    RESPONSE = "response"    # answer to a query
+# MessageType is re-exported at the top of this file from swarm_core.models.
 
 
 @dataclass
