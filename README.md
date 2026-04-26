@@ -178,18 +178,18 @@ Each subgraph shows the actual MCP-call sequence for that stage, including all i
 
 ```mermaid
 flowchart TD
-    Start([Project start])
-    GQ{Greenfield?}
+    Start(["Project start"])
+    GQ{"Greenfield?"}
 
     subgraph IDEA["Stage 0a: Idea -- swarm-kb (optional)"]
         direction TB
-        I1[kb_start_idea_session<br/>prompt + project_path]
-        I2{Question to ask?}
-        I3[brainstorming skill:<br/>one question at a time]
-        I4[kb_capture_idea_answer<br/>user answer]
-        I5{Need to surface<br/>2-3 alternatives?}
-        I6[kb_record_idea_alternatives<br/>chosen_id]
-        I7[kb_finalize_idea_design<br/>design.md]
+        I1["kb_start_idea_session<br/>prompt + project_path"]
+        I2{"Question to ask?"}
+        I3["brainstorming skill:<br/>one question at a time"]
+        I4["kb_capture_idea_answer<br/>user answer"]
+        I5{"Need to surface<br/>2-3 alternatives?"}
+        I6["kb_record_idea_alternatives<br/>chosen_id"]
+        I7["kb_finalize_idea_design<br/>design.md"]
         I1 --> I2
         I2 -- yes --> I3 --> I4 --> I2
         I2 -- no --> I5
@@ -197,15 +197,15 @@ flowchart TD
         I5 -- no --> I7
     end
 
-    EQ{Embedded?}
+    EQ{"Embedded?"}
 
     subgraph SPEC["Stage 0b: Spec -- spec-swarm (optional)"]
         direction TB
-        S1[spec_start_session]
-        S2{More datasheets?}
-        S3[spec_ingest<br/>doc.pdf]
-        S4[spec_check_conflicts<br/>pin / bus / power budget]
-        S5[spec_export_for_arch<br/>hw constraints -> swarm-kb]
+        S1["spec_start_session"]
+        S2{"More datasheets?"}
+        S3["spec_ingest<br/>doc.pdf"]
+        S4["spec_check_conflicts<br/>pin, bus, power budget"]
+        S5["spec_export_for_arch<br/>hw constraints to swarm-kb"]
         S1 --> S2
         S2 -- yes --> S3 --> S2
         S2 -- no --> S4 --> S5
@@ -213,56 +213,56 @@ flowchart TD
 
     subgraph ARCH["Stage 1: Architecture -- arch-swarm"]
         direction TB
-        A1[arch_analyze<br/>coupling / complexity / deps]
-        A2{Design question<br/>worth a debate?}
-        A3[Pick format:<br/>open / with_judge / trial /<br/>mediation / council / ...]
-        A4[kb_start_debate format=...]
-        A5[kb_propose / kb_critique<br/>kb_vote / kb_resolve_debate]
-        A6[ADRs in swarm-kb]
+        A1["arch_analyze<br/>coupling, complexity, deps"]
+        A2{"Design question<br/>worth a debate?"}
+        A3["Pick format:<br/>open, with_judge, trial,<br/>mediation, council, ..."]
+        A4["kb_start_debate(format=...)"]
+        A5["kb_propose, kb_critique,<br/>kb_vote, kb_resolve_debate"]
+        A6["ADRs in swarm-kb"]
         A1 --> A2
         A2 -- yes --> A3 --> A4 --> A5 --> A6
         A2 -- no --> A6
     end
 
-    PQ{TDD plan?}
+    PQ{"TDD plan?"}
 
     subgraph PLAN["Stage 2: Plan -- swarm-kb (optional)"]
         direction TB
-        P1[kb_start_plan_session<br/>anchor to ADR ids]
-        P2{More tasks?}
-        P3[writing_plans skill:<br/>2-5 min, tests-first]
-        P4[kb_emit_task<br/>one task]
-        P5[kb_finalize_plan<br/>validates contract]
-        P6{Validation<br/>errors?}
+        P1["kb_start_plan_session<br/>anchor to ADR ids"]
+        P2{"More tasks?"}
+        P3["writing_plans skill:<br/>2-5 min, tests-first"]
+        P4["kb_emit_task<br/>one task"]
+        P5["kb_finalize_plan<br/>validates contract"]
+        P6{"Validation<br/>errors?"}
         P1 --> P2
         P2 -- yes --> P3 --> P4 --> P2
         P2 -- no --> P5 --> P6
         P6 -- yes --> P3
-        P6 -- no --> PEnd[plan.md ready]
+        P6 -- no --> PEnd["plan.md ready"]
     end
 
     subgraph REVIEW["Stage 3: Review -- review-swarm"]
         direction TB
-        R1[orchestrate_review or<br/>kb_route_experts to pre-pick]
-        R2[suggest_experts]
-        R3[Phase 1: claim_file -><br/>post_finding -> release_file]
-        R4[mark_phase_done 1<br/>barrier waits for all experts]
-        R5[Phase 2: cross-check<br/>react / confirm / dispute]
-        R6[mark_phase_done 2]
-        R7[check_decision_compliance<br/>against Stage 1 ADRs]
+        R1["orchestrate_review or<br/>kb_route_experts to pre-pick"]
+        R2["suggest_experts"]
+        R3["Phase 1: claim_file then<br/>post_finding then release_file"]
+        R4["mark_phase_done(1)<br/>barrier waits for all experts"]
+        R5["Phase 2: cross-check<br/>react, confirm, dispute"]
+        R6["mark_phase_done(2)"]
+        R7["check_decision_compliance<br/>against Stage 1 ADRs"]
         R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7
     end
 
     subgraph FIX["Stage 4: Fix -- fix-swarm"]
         direction TB
-        F1[snapshot_tests<br/>baseline]
-        F2[start_session<br/>review + arch findings]
-        F3[fix_plan / propose_fix<br/>per finding]
-        F4{Need retry-<br/>with-feedback?}
-        F5[Drive PGVE session<br/>kb_start_pgve / submit_candidate /<br/>evaluate_candidate accepted/revise/rejected]
-        F6[Cross-review:<br/>2+ approvals = consensus]
-        F7[apply_approved or<br/>apply_single]
-        F8[kb_check_quality_gate]
+        F1["snapshot_tests<br/>baseline"]
+        F2["start_session<br/>review + arch findings"]
+        F3["fix_plan or propose_fix<br/>per finding"]
+        F4{"Need retry-<br/>with-feedback?"}
+        F5["Drive PGVE session<br/>kb_start_pgve, submit_candidate,<br/>evaluate_candidate accepted/revise/rejected"]
+        F6["Cross-review:<br/>2+ approvals = consensus"]
+        F7["apply_approved or<br/>apply_single"]
+        F8["kb_check_quality_gate"]
         F1 --> F2 --> F3 --> F4
         F4 -- yes --> F5 --> F6
         F4 -- no --> F6
@@ -273,37 +273,37 @@ flowchart TD
 
     subgraph VERIFY["Stage 5: Verify -- fix-swarm"]
         direction TB
-        V1[check_regression<br/>syntax + tests + re-scan]
-        V2{Build VerificationReport?}
-        V3[kb_start_verification]
-        V4{More evidence?}
-        V5[kb_add_verification_evidence<br/>kind=test_diff / regression_scan /<br/>quality_gate / judging / manual_note]
-        V6[kb_finalise_verification<br/>verdict pass/fail/partial]
+        V1["check_regression<br/>syntax + tests + re-scan"]
+        V2{"Build VerificationReport?"}
+        V3["kb_start_verification"]
+        V4{"More evidence?"}
+        V5["kb_add_verification_evidence<br/>kind=test_diff, regression_scan,<br/>quality_gate, judging, manual_note"]
+        V6["kb_finalise_verification<br/>verdict pass/fail/partial"]
         V1 --> V2
         V2 -- yes --> V3 --> V4
         V4 -- yes --> V5 --> V4
         V4 -- no --> V6
-        V2 -- no --> VOut[regression report only]
+        V2 -- no --> VOut["regression report only"]
     end
 
     subgraph DOC["Stage 6: Doc -- doc-swarm (optional)"]
         direction TB
-        D1[doc_verify<br/>find stale]
-        D2[doc_generate<br/>API ref + ADR cross-refs]
+        D1["doc_verify<br/>find stale"]
+        D2["doc_generate<br/>API ref + ADR cross-refs"]
         D1 --> D2
     end
 
     subgraph HARD["Stage 7: Hardening -- swarm-kb"]
         direction TB
-        H1[kb_start_hardening]
-        H2[mypy --strict]
-        H3[pytest-cov >= 85%]
-        H4[pip-audit CVE scan]
-        H5[gitleaks secrets scan]
-        H6[dep-hygiene]
-        H7[ci-presence check]
-        H8[observability check]
-        H9[kb_get_hardening_report<br/>aggregated report.md]
+        H1["kb_start_hardening"]
+        H2["mypy strict"]
+        H3["pytest-cov >= 85 percent"]
+        H4["pip-audit CVE scan"]
+        H5["gitleaks secrets scan"]
+        H6["dep-hygiene"]
+        H7["ci-presence check"]
+        H8["observability check"]
+        H9["kb_get_hardening_report<br/>aggregated report.md"]
         H1 --> H2 --> H9
         H1 --> H3 --> H9
         H1 --> H4 --> H9
@@ -315,16 +315,16 @@ flowchart TD
 
     subgraph REL["Stage 8: Release -- swarm-kb"]
         direction TB
-        L1[kb_start_release]
-        L2[kb_propose_version_bump<br/>git log since last tag]
-        L3[kb_generate_changelog<br/>draft CHANGELOG.md]
-        L4[kb_validate_pyproject<br/>PyPI fields]
-        L5[kb_build_dist<br/>python -m build]
-        L6[kb_release_summary<br/>checklist for twine]
+        L1["kb_start_release"]
+        L2["kb_propose_version_bump<br/>git log since last tag"]
+        L3["kb_generate_changelog<br/>draft CHANGELOG.md"]
+        L4["kb_validate_pyproject<br/>PyPI fields"]
+        L5["kb_build_dist<br/>python -m build"]
+        L6["kb_release_summary<br/>checklist for twine"]
         L1 --> L2 --> L3 --> L4 --> L5 --> L6
     end
 
-    End([twine upload<br/>by user])
+    End(["twine upload<br/>by user"])
 
     Start --> GQ
     GQ -- yes --> IDEA --> EQ
@@ -466,7 +466,7 @@ How a debate actually flows (example: the `trial` format -- prosecution / defens
 ```mermaid
 flowchart TD
     Start(["Question:<br/>Should we deprecate<br/>the legacy auth flow?"])
-    PickFmt[Pick format from registry<br/>13 protocols available]
+    PickFmt["Pick format from registry<br/>13 protocols available"]
     StartD["kb_start_debate(topic, format='trial')"]
 
     subgraph Trial["Trial format -- 4 phases"]
@@ -478,8 +478,8 @@ flowchart TD
         Charge --> Defense --> Rebuttal --> Ruling
     end
 
-    ADR[ADR in swarm-kb<br/>winning proposal + dissenting opinions<br/>+ structured transcript.md]
-    User[USER GATE -- review ADR,<br/>kb_advance_pipeline]
+    ADR["ADR in swarm-kb<br/>winning proposal + dissenting opinions<br/>+ structured transcript.md"]
+    User["USER GATE -- review ADR,<br/>kb_advance_pipeline"]
 
     Start --> PickFmt --> StartD --> Trial --> ADR --> User
 
@@ -692,10 +692,10 @@ How the council actually works -- one judge per dimension, all in parallel, then
 
 ```mermaid
 flowchart TD
-    Start([Subject needs<br/>multi-dim verdict])
-    StartJ[kb_start_judging<br/>subject_kind, subject_ref,<br/>dimensions list]
+    Start(["Subject needs<br/>multi-dim verdict"])
+    StartJ["kb_start_judging<br/>subject_kind, subject_ref,<br/>dimensions list"]
 
-    subgraph Council["Council -- one judge per dimension (parallel)"]
+    subgraph Council["Council -- one judge per dimension, parallel"]
         direction LR
         J1["judge: accuracy<br/>kb_judge_dimension<br/>verdict + rationale"]
         J2["judge: helpfulness<br/>verdict + rationale"]
@@ -705,10 +705,10 @@ flowchart TD
         J6["judge: instruction_adherence<br/>verdict + rationale"]
     end
 
-    Cover{All dimensions<br/>covered?<br/>(is_complete)}
-    Aggr[Aggregator reads<br/>all per-dim verdicts]
-    Resolve["kb_resolve_judging<br/>overall=pass/fail/mixed<br/>summary + follow_ups<br/>(rationale, NOT a number)"]
-    Out([JudgingSynthesis<br/>persisted; downstream<br/>tools read overall]) 
+    Cover{"All dimensions<br/>covered?<br/>is_complete"}
+    Aggr["Aggregator reads<br/>all per-dim verdicts"]
+    Resolve["kb_resolve_judging<br/>overall=pass/fail/mixed<br/>summary + follow_ups<br/>rationale, NOT a number"]
+    Out(["JudgingSynthesis<br/>persisted; downstream<br/>tools read overall"])
 
     Start --> StartJ --> Council --> Cover
     Cover -- no, more dims --> Council
