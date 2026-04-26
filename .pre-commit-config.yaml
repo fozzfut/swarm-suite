@@ -1,0 +1,49 @@
+# Lightweight pre-commit hooks. Goal: catch the kinds of issues CI
+# surfaces, locally, in <2 seconds per commit. Anything heavier (the
+# full pytest suite, mypy strict) is left for CI -- per-commit weight
+# matters more than coverage here, since a slow hook just gets
+# bypassed with `--no-verify`.
+#
+# Setup:
+#     pip install pre-commit
+#     pre-commit install
+# Run on demand:
+#     pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        # 500KB cap. Datasheets / docs that need to be larger should
+        # use Git LFS.
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      # ruff lints THEN fixes on commit. Same tool CI runs (advisory
+      # there); here it auto-fixes safe issues so commits stay clean.
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # Custom hook: enforce swarm-core <- swarm-kb <- tools direction.
+      # Pre-existing scripts/check_imports.py is the source of truth;
+      # CI runs the same script.
+      - id: check-imports
+        name: swarm-suite import-direction (scripts/check_imports.py)
+        entry: python scripts/check_imports.py
+        language: system
+        pass_filenames: false
+        # Only triggers when Python sources change, not on every commit.
+        files: '^packages/.*\.py$'

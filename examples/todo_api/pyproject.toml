@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "todo-api-example"
+version = "0.0.1"
+description = "Example Flask Todo API used in the Swarm Suite tutorial. NOT for production."
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.0,<4.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.setuptools]
+packages = ["todo_api"]
