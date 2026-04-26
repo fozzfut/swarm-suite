@@ -1,0 +1,179 @@
+name: "Dependency Drift Expert"
+version: "1.0"
+description: "Detects unused dependencies, missing deps, version conflicts, and manifest/lockfile inconsistencies"
+file_patterns:
+  # Manifests
+  - "pyproject.toml"
+  - "requirements.txt"
+  - "requirements*.txt"
+  - "setup.py"
+  - "setup.cfg"
+  - "Pipfile"
+  - "package.json"
+  - "Cargo.toml"
+  - "go.mod"
+  - "Gemfile"
+  - "pom.xml"
+  - "build.gradle"
+  - "build.gradle.kts"
+  - "*.csproj"
+  - "composer.json"
+  - "mix.exs"
+  - "CMakeLists.txt"
+  # Lock files
+  - "requirements*.txt"
+  - "Pipfile.lock"
+  - "package-lock.json"
+  - "pnpm-lock.yaml"
+  - "yarn.lock"
+  - "Cargo.lock"
+  - "go.sum"
+  - "Gemfile.lock"
+  - "composer.lock"
+  - "mix.lock"
+  # Source files for import analysis
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.rb"
+exclude_patterns:
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+  - "dist/**"
+  - ".venv/**"
+  - "__pycache__/**"
+relevance_signals:
+  imports: []
+  patterns:
+    - "dependencies"
+    - "devDependencies"
+    - "\\[project\\.dependencies\\]"
+    - "\\[dependencies\\]"
+    - "require "
+    - "gem "
+check_rules:
+  - id: "unused-dependency"
+    description: "Package declared in manifest but never imported/used in source code"
+    severity_default: "low"
+    check: |
+      For each declared dependency in the manifest:
+      1. Search source files for imports/requires of that package
+      2. Check if the package provides CLI tools used in scripts
+      3. Check if the package is a build/test dependency used only in that context
+      4. Check if the package is a plugin/extension loaded dynamically
+      Flag dependencies with zero import references.
+      Do NOT flag:
+      - Build tools (webpack, vite, tsc, pytest, jest, cargo-audit)
+      - Type stubs (@types/*, mypy, pyright)
+      - Linters/formatters (eslint, prettier, ruff, clippy)
+      - Runtime plugins loaded by framework (babel presets, pytest plugins, Rails engines)
+      - Dev dependencies in production dependency check
+      - Packages providing binary executables used in scripts
+
+  - id: "missing-dependency"
+    description: "Code imports a package not declared in any manifest"
+    severity_default: "high"
+    check: |
+      For each import in source code:
+      1. Check if the imported package is in the manifest (dependencies or devDependencies)
+      2. Check if it's a standard library module (no manifest entry needed)
+      3. Check if it's a local/relative import (not a package)
+      Flag imports of packages not in any manifest.
+      Language-specific stdlib:
+      - Python: sys, os, json, pathlib, etc. (large stdlib)
+      - Go: standard library packages (fmt, net/http, etc.)
+      - Rust: std::*, core::*
+      - Java: java.*, javax.*
+      - Node: fs, path, http, etc. (built-in modules)
+      - Ruby: built-in requires
+      Do NOT flag:
+      - Standard library imports
+      - Relative/local imports
+      - Conditional/optional imports (try/except, ifdef)
+      - Type-only imports (may be satisfied by a different package)
+
+  - id: "manifest-lockfile-drift"
+    description: "Manifest declares different version constraints than lockfile has resolved"
+    severity_default: "medium"
+    check: |
+      Compare manifest version constraints with lockfile resolved versions:
+      1. Package in manifest but not in lockfile (lockfile not regenerated after adding dep)
+      2. Package in lockfile but removed from manifest (lockfile not regenerated after removing dep)
+      3. Lockfile version outside manifest constraint range (manual lockfile edit or corruption)
+      Applies to:
+      - package.json vs package-lock.json/pnpm-lock.yaml/yarn.lock
+      - Cargo.toml vs Cargo.lock
+      - Gemfile vs Gemfile.lock
+      - Pipfile vs Pipfile.lock
+      - composer.json vs composer.lock
+      - go.mod vs go.sum (different model -- sum is hash verification, not version lock)
+
+  - id: "duplicate-dependency"
+    description: "Same package declared in multiple manifest files with different versions"
+    severity_default: "medium"
+    check: |
+      In monorepos or projects with multiple manifest files:
+      1. Find the same package name in different manifests
+      2. Compare version constraints
+      3. Flag conflicts (one says ^2.0, another says ^3.0)
+      Do NOT flag:
+      - Same version across manifests (intentional consistency)
+      - Different major versions if packages are independent (workspace/monorepo isolation)
+
+severity_guidance:
+  critical: "N/A -- dependency drift rarely causes immediate runtime crashes"
+  high: "Missing dependency (code imports package not in manifest -- install will fail)"
+  medium: "Manifest/lockfile drift, version conflicts between sub-projects"
+  low: "Unused dependency (bloats install, no runtime impact)"
+  info: "Dependency observation, upgrade suggestion"
+
+system_prompt: |
+  You are a Dependency Drift Expert. You find inconsistencies between what code uses
+  and what manifests declare: unused deps, missing deps, and version drift.
+
+  ## Key Principle
+
+  Your scope is the RELATIONSHIP between manifests and code, not the quality
+  of the dependencies themselves. You don't audit for vulnerabilities (that's
+  a different tool), you audit for correctness of the dependency declaration.
+
+  ## Stack Detection
+
+  Auto-detect the project's package ecosystem from manifest files:
+  | Manifest | Ecosystem | Lock File |
+  |----------|-----------|-----------|
+  | package.json | npm/pnpm/yarn | package-lock.json, pnpm-lock.yaml, yarn.lock |
+  | Cargo.toml | Rust/crates | Cargo.lock |
+  | go.mod | Go modules | go.sum |
+  | pyproject.toml | Python/pip | poetry.lock, pdm.lock |
+  | requirements.txt | Python/pip | (is its own lock file) |
+  | Gemfile | Ruby/bundler | Gemfile.lock |
+  | pom.xml | Java/Maven | (no standard lock) |
+  | build.gradle(.kts) | Java/Gradle | gradle.lockfile |
+  | *.csproj | .NET/NuGet | packages.lock.json |
+  | composer.json | PHP/Composer | composer.lock |
+  | mix.exs | Elixir/Hex | mix.lock |
+
+  ## Verification Before Reporting
+
+  1. **Check standard library** -- every language has a stdlib; don't flag stdlib imports as missing
+  2. **Check transitive dependencies** -- a package may be available via a parent dependency
+  3. **Check build/dev separation** -- devDependencies are not needed in production
+  4. **Check dynamic loading** -- plugins, extensions, optional features loaded at runtime
+  5. **Check monorepo structure** -- workspace dependencies may be declared at root level
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's OK |
+  |---------|------------|
+  | pytest/jest in devDependencies | Test runner, not runtime dep |
+  | @types/* packages | Type stubs, no runtime import |
+  | babel/webpack/vite plugins | Build tools, loaded by config not import |
+  | Standard library import | No manifest entry needed |
+  | Transitive dependency | Available via parent package |
+  | Workspace root dependency | Shared across sub-packages |

@@ -1,0 +1,126 @@
+name: "API Contract Expert"
+version: "2.0"
+description: "Verifies function/method signatures match usage, types match contracts, interface implementations are complete"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.h"
+  - "**/*.rb"
+  - "**/*.ex"
+  - "**/*.swift"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "docs/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+relevance_signals:
+  imports: []
+  patterns:
+    # Function/method definitions across languages
+    - "def \\w+\\("
+    - "func \\w+\\("
+    - "function \\w+\\("
+    - "fn \\w+\\("
+    - "(public|private|protected)\\s+\\w+\\s+\\w+\\("
+    - "interface "
+    - "trait "
+    - "protocol "
+    - "abstract class"
+    - "implements "
+check_rules:
+  - id: "signature-caller-mismatch"
+    description: "Function is called with arguments that don't match its definition"
+    severity_default: "critical"
+    check: |
+      Find functions/methods and their call sites. Flag when:
+      1. Caller passes wrong number of positional arguments
+      2. Caller passes keyword/named arguments that don't exist in the signature
+      3. Caller passes arguments of incompatible types (if types are annotated/declared)
+      Do NOT flag:
+      - Variadic functions (*args/**kwargs, ...rest, varargs)
+      - Dynamic dispatch (method resolution at runtime, reflection)
+      - Overloaded methods (check ALL overloads before reporting)
+
+  - id: "return-type-mismatch"
+    description: "Function's actual return values don't match its declared return type"
+    severity_default: "high"
+    check: |
+      Trace ALL return paths in a function. Flag when:
+      1. Some paths return a value, others return nothing (None/nil/void/undefined)
+      2. Return type contradicts declaration (e.g., declares -> int, returns str)
+      3. Error paths return incompatible types
+      Do NOT flag:
+      - Optional/nullable returns when the type is Optional/? annotated
+      - Duck typing in dynamic languages where the return IS compatible
+      - Union types / Result types that include the returned variant
+      CHECK ALL BRANCHES -- "missing return" requires proving NO branch returns.
+
+  - id: "interface-incomplete"
+    description: "Class/struct claims to implement an interface/trait but misses required methods"
+    severity_default: "high"
+    check: |
+      For classes implementing interfaces/traits/protocols/ABCs:
+      1. List all required methods from the interface
+      2. Verify each is implemented in the class
+      3. Verify method signatures match (params, return type)
+      Language-specific:
+      - Python: ABC + @abstractmethod
+      - Go: implicit interface satisfaction (all methods present with matching signatures)
+      - Rust: trait impl blocks
+      - Java/C#/Kotlin: implements/extends
+      - TypeScript: implements
+      Do NOT flag: optional/default methods that don't need overriding.
+
+  - id: "deprecated-api-usage"
+    description: "Code calls functions/methods marked as deprecated"
+    severity_default: "low"
+    check: |
+      Find calls to functions/methods/classes annotated with deprecation markers:
+      - Python: @deprecated, warnings.warn("deprecated")
+      - Java/Kotlin: @Deprecated
+      - TypeScript/JS: @deprecated JSDoc, /** @deprecated */
+      - Rust: #[deprecated]
+      - C#: [Obsolete]
+      - Go: // Deprecated: comment convention
+      Report the deprecated symbol and its suggested replacement if documented.
+
+severity_guidance:
+  critical: "Signature mismatch causes crash or TypeError when called (guaranteed at runtime)"
+  high: "Return type mismatch or missing interface method (likely crash in typed languages, subtle bug in dynamic)"
+  medium: "Inconsistent parameter naming, documentation mismatch"
+  low: "Deprecated usage, missing type hint on internal function"
+  info: "Naming convention observation"
+
+system_prompt: |
+  You are an API Contract Expert. You verify that function signatures, type contracts,
+  and interface implementations are consistent between definition and usage sites.
+
+  ## Verification Before Reporting
+
+  1. **Read the full function** -- don't flag "missing return" without checking ALL branches
+  2. **Check all overloads** -- languages with overloading may have the matching signature elsewhere
+  3. **Check callers** -- a "wrong number of args" finding requires seeing the actual call
+  4. **Check dynamic dispatch** -- in dynamic languages, the real method may be resolved at runtime
+  5. **Check type compatibility** -- subtypes satisfy parent type contracts (Liskov)
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's safe |
+  |---------|--------------|
+  | *args/**kwargs absorbs extra arguments | Variadic signatures accept anything |
+  | Method exists via mixin/metaclass | Dynamic method injection |
+  | Return type is a subclass of declared | Liskov substitution |
+  | Optional param has None default | Intentional nullable |
+  | Overloaded method matches different signature | Check ALL overloads |
+  | Duck typing in dynamic language | Structural compatibility |

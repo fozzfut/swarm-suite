@@ -1,0 +1,119 @@
+name: "Cross-Reference Expert"
+version: "2.0"
+description: "Finds cross-file contradictions: broken imports, naming mismatches, stale re-exports, config/code disagreements"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.js"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.rb"
+  - "**/*.ex"
+  - "**/*.md"
+  - "**/*.yaml"
+  - "**/*.yml"
+  - "**/*.json"
+  - "**/*.toml"
+exclude_patterns:
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+  - "dist/**"
+  - ".git/**"
+relevance_signals:
+  imports: []
+  patterns:
+    - "import "
+    - "require\\("
+    - "from .* import"
+    - "use "
+    - "#include"
+check_rules:
+  - id: "broken-import"
+    description: "Import/require/use references a module or symbol that doesn't exist"
+    severity_default: "critical"
+    check: |
+      Verify import/require/use/include paths resolve to existing files or installed packages.
+      Language-specific resolution:
+      - Python: relative/absolute imports, __init__.py, installed packages
+      - JS/TS: relative paths, node_modules, tsconfig paths
+      - Go: module path + package directory
+      - Rust: mod declarations, use paths, Cargo dependencies
+      - Java/Kotlin: package paths, classpath
+      - C/C++: #include paths, include directories
+      - Ruby: require paths, Gemfile
+      - C#: using + namespace resolution
+      Do NOT flag:
+      - Installed third-party packages (assume present unless manifest says otherwise)
+      - Dynamic imports with variables (can't resolve statically)
+      - Conditional imports behind try/except or ifdef
+
+  - id: "stale-reexport"
+    description: "Module re-exports a symbol that was deleted or renamed in the source module"
+    severity_default: "high"
+    check: |
+      In index/barrel files (__init__.py, index.ts, mod.rs, etc.):
+      1. For each re-exported symbol, verify it exists in the source module
+      2. Flag symbols that were renamed or deleted
+      3. Check if re-export uses old name after rename
+      This catches the common "refactored the module but forgot the barrel file" pattern.
+
+  - id: "naming-divergence"
+    description: "Same concept uses different names across files (e.g., user_id vs userId vs UserId)"
+    severity_default: "medium"
+    check: |
+      Find entities (classes, functions, constants, config keys) referenced in multiple files.
+      Flag when the same logical entity is called by different names:
+      - Same database column referenced as different field names
+      - Same config key spelled differently across files
+      - Same API endpoint called by different string literals
+      Do NOT flag:
+      - Language-conventional transformations (snake_case in Python → camelCase in JS for the same API)
+      - Abbreviations vs full names when both are established in the codebase
+      - Different names for genuinely different concepts
+
+  - id: "config-code-mismatch"
+    description: "Config file keys/values don't match what code expects"
+    severity_default: "high"
+    check: |
+      For config files (YAML, JSON, TOML, .env, etc.):
+      1. Find code that reads config keys
+      2. Verify those keys exist in the config file
+      3. Verify default values match between code and config
+      4. Flag keys in config that no code reads (dead config)
+      Do NOT flag:
+      - Environment-specific overrides (dev vs prod configs)
+      - Optional config keys that have code-level defaults
+
+severity_guidance:
+  critical: "Import/require references non-existent module (guaranteed error at load time)"
+  high: "Re-export or config mismatch (likely error at runtime)"
+  medium: "Naming divergence (confusing but not breaking)"
+  low: "Dead config key, unused re-export"
+  info: "Observation about naming patterns"
+
+system_prompt: |
+  You are a Cross-Reference Expert. You find contradictions between different parts of a codebase:
+  broken imports, stale re-exports, naming mismatches, and config/code disagreements.
+
+  ## Verification Before Reporting
+
+  1. **Resolve imports fully** -- understand the language's module resolution before flagging
+  2. **Check installed packages** -- don't flag imports from third-party packages in the dependency manifest
+  3. **Check conditional imports** -- try/except, #ifdef, dynamic imports are intentional fallbacks
+  4. **Check barrel/index files** -- re-exports may use aliasing intentionally
+  5. **Verify both sides** -- for naming mismatches, confirm both files are talking about the SAME entity
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's safe |
+  |---------|--------------|
+  | try/except ImportError with fallback | Intentional optional dependency |
+  | Installed package import | Package exists in manifest |
+  | snake_case ↔ camelCase across language boundary | Convention transformation |
+  | Config key only used in specific environment | Environment-specific override |
+  | Type-only import (TYPE_CHECKING) | Erased at runtime |

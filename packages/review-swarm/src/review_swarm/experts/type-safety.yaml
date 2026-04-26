@@ -1,0 +1,269 @@
+name: "Type Safety Expert"
+version: "1.0"
+description: "Detects unchecked null/None/nil, unsafe type casts, missing type guards, any/Object abuse, optional chaining gaps, and union type narrowing issues"
+file_patterns:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+  - "**/*.jsx"
+  - "**/*.go"
+  - "**/*.rs"
+  - "**/*.java"
+  - "**/*.kt"
+  - "**/*.cs"
+  - "**/*.cpp"
+  - "**/*.c"
+  - "**/*.rb"
+  - "**/*.swift"
+  - "**/*.dart"
+exclude_patterns:
+  - "tests/**"
+  - "test/**"
+  - "spec/**"
+  - "docs/**"
+  - "node_modules/**"
+  - "vendor/**"
+  - "target/**"
+  - "build/**"
+  - "**/*.d.ts"
+relevance_signals:
+  imports:
+    # Python
+    - "typing"
+    - "mypy"
+    - "pydantic"
+    - "beartype"
+    # JS/TS
+    - "typescript"
+    - "io-ts"
+    - "zod"
+    - "yup"
+    - "superstruct"
+    - "runtypes"
+    # Rust (detected by patterns, crate usage)
+    - "serde"
+    # Java
+    - "javax.annotation"
+    - "jakarta.annotation"
+    - "org.jetbrains.annotations"
+    - "lombok"
+    # C#
+    - "System.Diagnostics.CodeAnalysis"
+    # Go
+    - "encoding/json"
+    # Dart
+    - "freezed"
+  patterns:
+    - "as any"
+    - ": any"
+    - "\\.unwrap\\(\\)"
+    - "\\.expect\\("
+    - "force_cast"
+    - "as!"
+    - "! "
+    - "Optional\\["
+    - "\\| None"
+    - "\\| null"
+    - "\\| undefined"
+    - "Union\\["
+    - "isinstance\\("
+    - "typeof "
+    - "instanceof "
+    - "is None"
+    - "== nil"
+    - "== null"
+    - "dynamic_cast"
+    - "reinterpret_cast"
+    - "unsafe { "
+check_rules:
+  - id: "unchecked-null"
+    description: "Nullable/optional value accessed without null check, risking NullPointerException, panic, or undefined behavior"
+    severity_default: "high"
+    check: |
+      Find places where a value that can be null/None/nil/undefined is dereferenced without a guard:
+      1. Function return values known to be nullable used directly without check
+      2. Optional fields/properties accessed without null guard
+      3. Map/dictionary lookup results used without checking for missing key
+      4. Database query results (.find, .first, .get) used without null check
+      5. JSON deserialization results accessed without null guard on optional fields
+
+      Language-specific:
+      - Python: `Optional[X]` return used without `if result is not None`, `.get()` result used without check
+      - TypeScript: `T | null | undefined` accessed without `if`, `?.`, or `!` (non-null assertion is itself a smell)
+      - Go: error not checked before using the value, `map[key]` without comma-ok idiom
+      - Rust: `.unwrap()` on Option/Result from user data (not compile-time guaranteed Some/Ok)
+      - Java: `@Nullable` return used without null check, `Optional.get()` without `isPresent()`
+      - Kotlin: `!!` (not-null assertion) on values from external sources (Java interop, JSON, DB)
+      - C#: nullable reference (`T?`) accessed without `is not null` check or `?.`
+      - Swift: force unwrap `!` on optional from external data
+      - C/C++: pointer dereference without null check after allocation or lookup
+
+      Do NOT flag:
+      - Values guaranteed non-null by prior control flow (if-check, early return, pattern match)
+      - Constructor-initialized non-null fields
+      - Rust .unwrap() on compile-time provable Some/Ok values (e.g., regex on literal, const parsing)
+      - Kotlin `!!` on platform types where the Java source guarantees non-null
+      - Optional chaining `?.` (that IS the null check)
+      - Go error check present on preceding line (`if err != nil { return }`)
+
+  - id: "unsafe-type-cast"
+    description: "Unchecked type cast that can fail at runtime with ClassCastException, panic, or undefined behavior"
+    severity_default: "high"
+    check: |
+      Find type casts that bypass type checking without validation:
+      1. Force casts without prior type check (instanceof, typeof, is, as?)
+      2. Casting from broad types (any, Object, interface{}, void*) to specific types without validation
+      3. Numeric narrowing casts that can overflow (int64 -> int32, float -> int)
+      4. Unsafe pointer casts in systems languages
+
+      Language-specific:
+      - TypeScript: `as SomeType` without prior type guard, especially `as any` to bypass errors
+      - Python: no runtime cast keyword, but `cast()` from typing is unchecked; flag unsafe `# type: ignore`
+      - Go: type assertion `x.(ConcreteType)` without comma-ok or prior type switch
+      - Rust: `unsafe { transmute() }`, `as` for numeric narrowing without bounds check
+      - Java: `(SpecificType) object` without `instanceof` check
+      - Kotlin: `as` (unsafe cast) instead of `as?` (safe cast) on uncertain types
+      - C#: `(SpecificType)object` without `is` check, instead of `as` + null check
+      - C++: `reinterpret_cast`, `static_cast` of polymorphic types without `dynamic_cast`
+      - Swift: `as!` (force downcast) without prior `is` check
+
+      Do NOT flag:
+      - Casts immediately preceded by type check (if instanceof / typeof / is)
+      - Kotlin `as` after smart-cast (compiler-verified)
+      - Upcasts (child to parent type -- always safe)
+      - Numeric widening casts (int32 -> int64 -- always safe)
+      - Go type assertion with comma-ok: `v, ok := x.(Type)`
+      - Pattern match / type switch that covers all cases
+
+  - id: "any-object-abuse"
+    description: "Excessive use of any/Object/interface{}/void* that disables type checking"
+    severity_default: "medium"
+    check: |
+      Find places where escape-hatch types undermine the type system:
+      1. Function parameters typed as `any` when a more specific type is possible
+      2. Return types of `any` or `Object` that force callers to cast
+      3. Collections typed as `List<any>`, `[]interface{}`, `ArrayList<Object>` without reason
+      4. `@ts-ignore`, `# type: ignore`, `@SuppressWarnings("unchecked")` suppressing real type errors
+      5. JSON parsed to `any`/`map[string]interface{}` and used without schema validation
+
+      Language-specific:
+      - TypeScript: `: any`, `as any`, `@ts-ignore` to bypass type errors
+      - Python: `# type: ignore` on lines with real type mismatches, `Any` in function signatures
+      - Go: `interface{}` / `any` in function signatures when a specific interface would work
+      - Java: raw types (`List` instead of `List<String>`), `Object` parameters
+      - C#: `object` parameters, `dynamic` keyword overuse
+      - Rust: `Box<dyn Any>` when a trait object or enum would be more appropriate
+
+      Do NOT flag:
+      - Generic/template code that is inherently polymorphic (frameworks, serialization libraries)
+      - Truly dynamic contexts (plugin systems, reflection-based DI, scripting bridges)
+      - Test helpers and fixtures using any for flexibility
+      - One or two `any` in a large codebase (noise, not a pattern)
+      - JSON handling at API boundaries where schema validation happens at the boundary
+
+  - id: "missing-type-narrowing"
+    description: "Union or sum type used without narrowing, risking access of wrong variant"
+    severity_default: "medium"
+    check: |
+      Find union/sum/variant types used without proper narrowing/discrimination:
+      1. Union types accessed without type guard (TypeScript `string | number` used as `string`)
+      2. Sum types / tagged unions without exhaustive match (Rust enum, TS discriminated union)
+      3. Optional types unwrapped without check (covered partly by unchecked-null, focus on unions here)
+      4. Result/Either types where only the success path is handled
+      5. Switch/match on discriminant that is missing cases and has no default
+
+      Language-specific:
+      - TypeScript: union type `A | B` used without discriminant check, non-exhaustive switch
+      - Python: `Union[A, B]` used without `isinstance` check, incomplete `match` statement
+      - Rust: non-exhaustive `match` on enum (compiler catches this, but `_` wildcard may hide bugs)
+      - Go: type switch missing cases, `interface` used without type assertion
+      - Java: sealed interface/class without exhaustive switch (Java 17+)
+      - Kotlin: `when` on sealed class missing branches without `else`
+      - C#: switch on abstract record/class missing cases without discard
+
+      Do NOT flag:
+      - Exhaustive match/switch that covers all cases
+      - Wildcard/default case that handles remaining variants appropriately (logging, error)
+      - TypeScript code with strict null checks enabled and the compiler catching it
+      - Rust match exhaustiveness (compiler enforces this -- only flag `_ => {}` hiding meaningful cases)
+
+  - id: "runtime-validation-gap"
+    description: "External data (API response, file, user input) enters the system without runtime type validation"
+    severity_default: "medium"
+    check: |
+      Find trust boundaries where external data is used without runtime validation:
+      1. JSON.parse / json.loads result used directly with a typed assertion but no runtime check
+      2. API response data cast to an interface/type without validation (Zod, io-ts, Pydantic, etc.)
+      3. Environment variables used without parsing/validation
+      4. File content parsed and used without schema validation
+      5. Form data / query params used with assumed types
+
+      Language-specific:
+      - TypeScript: `JSON.parse(data) as MyType` without Zod/io-ts/ajv validation
+      - Python: `json.loads(data)["key"]` without Pydantic/marshmallow/attrs validation
+      - Go: `json.Unmarshal` into struct with no required field validation
+      - Java: Jackson/Gson deserialization without Bean Validation annotations
+      - Rust: `serde_json::from_str` without additional validation beyond deserialization
+      - C#: `JsonSerializer.Deserialize<T>` without FluentValidation or DataAnnotations
+
+      Do NOT flag:
+      - Data from trusted internal sources (own database, signed payloads)
+      - Data already validated by middleware or framework (request body validation)
+      - Strongly typed RPC/gRPC (protobuf provides schema validation)
+      - Configuration files loaded at startup with validation
+      - CLI argument parsing libraries that handle validation (argparse, cobra, clap)
+
+severity_guidance:
+  critical: "Unchecked null/cast in critical path (payment, auth, data write) that will crash or corrupt"
+  high: "Unchecked null or unsafe cast on external data, likely to fail in production"
+  medium: "any/Object abuse weakening type safety, missing type narrowing, unvalidated external data"
+  low: "Minor type safety improvement, non-null assertion on low-risk path"
+  info: "Type safety pattern observation, type system improvement suggestion"
+
+system_prompt: |
+  You are a Type Safety Expert. You find unchecked null/None/nil dereferences, unsafe type casts,
+  excessive use of escape-hatch types (any, Object, interface{}), missing type narrowing on unions,
+  and gaps in runtime validation of external data.
+
+  ## Key Principle
+
+  Type systems exist to catch bugs at compile time, but they have escape hatches. The key questions are:
+  **Is this escape hatch justified, or is it papering over a real type mismatch?**
+  **Could external/untrusted data reach this code path without validation?**
+
+  A single `as any` to work around a library's bad types is tolerable. A pattern of `as any`
+  throughout the codebase means the type system has been defeated.
+
+  ## Verification Before Reporting
+
+  1. **Check for prior narrowing** -- the null check or type guard may be on a preceding line or in a caller
+  2. **Trace the value source** -- is it from internal trusted code or from an external boundary?
+  3. **Check compiler/linter settings** -- strict null checks, strict mode may already catch this
+  4. **Check for validation at the boundary** -- middleware, decorators, or init code may validate first
+  5. **Understand the type system** -- Rust's compiler enforces exhaustive matching, don't duplicate it
+  6. **Check for safe alternatives nearby** -- `as?` instead of `as`, `?.` instead of `.`, comma-ok idiom
+
+  ## Common False Positives (DO NOT report these)
+
+  | Pattern | Why it's OK |
+  |---------|------------|
+  | Null check on preceding line / early return | Value is guaranteed non-null after guard |
+  | Rust `.unwrap()` on literal/const parse | Compile-time provable success |
+  | Go comma-ok type assertion `v, ok := x.(T)` | Safe -- failure returns zero value + false |
+  | Kotlin smart cast after `if (x is Type)` | Compiler verifies the cast |
+  | TypeScript `as` after type guard function | Narrowing already happened |
+  | `any` in generic library / framework code | Inherently polymorphic, type safety at call site |
+  | `# type: ignore` with explanatory comment | Developer acknowledged and justified |
+  | Non-null assertion `!` on DOM element by ID | Common pattern, element is known to exist |
+  | `Optional.get()` after `isPresent()` check | Guarded access |
+  | Test code with loose types | Flexibility in tests is acceptable |
+  | Force unwrap in Swift @IBOutlet | Interface Builder guarantees connection |
+  | Deserialization with downstream validation | Validated before use, just not at parse |
+
+  ## Finding Format
+
+  - **evidence**: show the nullable/untyped value and the unsafe access, with the type signature
+  - **source_ref**: file:line for both the type declaration and the unsafe access point
+  - **type_context**: describe the expected type, the actual type, and what could go wrong
+  - **confidence**: < 0.7 if the value might be narrowed by control flow you haven't fully traced
