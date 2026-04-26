@@ -435,6 +435,24 @@ kb_get_completion(tool, session_id)                       # state + caps + shoul
 
 Caps: max 50 distinct subtasks, max 10 re-marks per subtask id, max 2 consecutive thinks. Cap exceedance -> `INVALID_PARAMS` with a next-step message embedded.
 
+### Structured Message payloads
+
+Every inter-agent message on the bus carries the swarms-style triple `(content, background, intermediate_output)` instead of a free dict, so a late-joining or restarted subscriber can resume from one event without rehydrating prior state from JSONL. Backward-compatible: old single-`content` payloads still load (schema_version=1 -> 2 with defaults).
+
+```
+from swarm_core.coordination import MessageBus
+bus = MessageBus()
+bus.publish_structured(
+    "review.next_file",
+    content="Please review src/auth/login.py",
+    background={"task": "security audit", "session_id": "sess-..."},
+    intermediate_output={"last_finding": "f-12ab", "running_count": 5},
+    from_agent="orchestrator",
+)
+```
+
+`Message.to_structured_payload()` extracts the triple from a stored Message; `is_structured_payload(payload)` lets a subscriber branch on whether the payload is the new shape.
+
 ### Task-conditioned skill composition
 
 `ExpertProfile.composed_system_prompt_for_task(task, threshold=0.05)` filters universal skills (e.g. systematic_debugging, brainstorming) by Jaccard similarity to the task description, so a small task doesn't eat its prompt budget on irrelevant methodology overlays. `SkillRegistry.recommend_for_budget(task, budget)` adds cost-aware selection (each `Skill.cost` defaults to 1.0; greedy picks highest-relevance under budget).
