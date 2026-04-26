@@ -127,13 +127,14 @@ STAGE_INFO = {
     "doc": {
         "name": "Documentation Update",
         "tool": "doc-swarm",
-        "description": "Update documentation to reflect changes.",
+        "description": "Update documentation to reflect changes. OPTIONAL: docs are typically only worth writing once for the final, ready-to-release project. Running them on every fix iteration burns AI tokens with little payoff. Skip this stage during iterative fix cycles; run it once when the code has stabilised (typically just before Hardening / Release).",
         "actions": [
             "1. Run doc_verify() to find stale docs",
             "2. Run doc_generate() to update API docs",
             "3. Review generated documentation",
             "4. Call kb_advance_pipeline(pipeline_id) to complete the pipeline",
         ],
+        "optional": True,
     },
 }
 

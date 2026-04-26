@@ -117,7 +117,9 @@ claude mcp add spec-swarm   -- spec-swarm serve --transport stdio
 
 A **10-stage pipeline** (idea -> production) with **user gates** between every stage. You control the pace -- no automatic progression. Several stages are *optional*: skip Idea/Plan if you already have a design, skip Spec if you're not on embedded.
 
-The diagram below renders natively on GitHub (Mermaid). Light blue boxes are optional; the dashed loop on Fix is the quality-gate retry until the suite emits `stop_clean` or `stop_circuit_breaker`. Every solid arrow crosses an explicit user gate (`kb_advance_pipeline`).
+### High-level overview
+
+The 10 stages with their decision points and the fix-retry loop. Light blue stages are optional; dashed arrows are the fix-stage quality-gate outcomes; every solid arrow crosses an explicit user gate (`kb_advance_pipeline`).
 
 ```mermaid
 flowchart TD
@@ -134,7 +136,7 @@ flowchart TD
     Gate{Quality gate}
     Manual["Manual review<br/>fix cycle unstable"]
     Verify["Stage 5: Verify<br/>regression + VerificationReport<br/><i>fix-swarm</i>"]
-    Doc["Stage 6: Doc<br/>verify stale + generate API ref<br/><i>doc-swarm</i>"]
+    Doc["Stage 6: Doc<br/>verify stale + generate API ref<br/><i>doc-swarm</i><br/>(optional, run once near release)"]
     Hard["Stage 7: Hardening<br/>mypy / coverage / pip-audit / secrets<br/><i>swarm-kb</i>"]
     Release["Stage 8: Release<br/>version bump + changelog + dist<br/><i>swarm-kb</i>"]
     End([Production-ready])
@@ -152,9 +154,9 @@ flowchart TD
     Plan --> Review
     Review --> Fix
     Fix --> Gate
-    Gate -- continue --> Review
-    Gate -- stop_circuit_breaker --> Manual
-    Gate -- stop_clean --> Verify
+    Gate -. continue .-> Review
+    Gate -. stop_circuit_breaker .-> Manual
+    Gate -. stop_clean .-> Verify
     Verify --> Doc
     Doc --> Hard
     Hard --> Release
@@ -164,11 +166,241 @@ flowchart TD
     classDef required fill:#f3f3f3,stroke:#424242,color:#212121
     classDef alarm fill:#ffe1e1,stroke:#c62828,color:#b71c1c
     classDef terminal fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
-    class Idea,Spec,Plan optional
-    class Arch,Review,Fix,Verify,Doc,Hard,Release required
+    class Idea,Spec,Plan,Doc optional
+    class Arch,Review,Fix,Verify,Hard,Release required
     class Manual alarm
     class Start,End terminal
 ```
+
+### Detailed flow -- every capability inside each stage
+
+Each subgraph shows the actual MCP-call sequence for that stage, including all internal loops (idea-question loop, plan-task loop, evidence-aggregation loop, hardening parallel-checks fan-out). Composable artifacts (PGVE / Judging / Debate format) appear where they're typically invoked; they can be invoked from any stage in practice.
+
+```mermaid
+flowchart TD
+    Start([Project start])
+    GQ{Greenfield?}
+
+    subgraph IDEA["Stage 0a: Idea -- swarm-kb (optional)"]
+        direction TB
+        I1[kb_start_idea_session<br/>prompt + project_path]
+        I2{Question to ask?}
+        I3[brainstorming skill:<br/>one question at a time]
+        I4[kb_capture_idea_answer<br/>user answer]
+        I5{Need to surface<br/>2-3 alternatives?}
+        I6[kb_record_idea_alternatives<br/>chosen_id]
+        I7[kb_finalize_idea_design<br/>design.md]
+        I1 --> I2
+        I2 -- yes --> I3 --> I4 --> I2
+        I2 -- no --> I5
+        I5 -- yes --> I6 --> I7
+        I5 -- no --> I7
+    end
+
+    EQ{Embedded?}
+
+    subgraph SPEC["Stage 0b: Spec -- spec-swarm (optional)"]
+        direction TB
+        S1[spec_start_session]
+        S2{More datasheets?}
+        S3[spec_ingest<br/>doc.pdf]
+        S4[spec_check_conflicts<br/>pin / bus / power budget]
+        S5[spec_export_for_arch<br/>hw constraints -> swarm-kb]
+        S1 --> S2
+        S2 -- yes --> S3 --> S2
+        S2 -- no --> S4 --> S5
+    end
+
+    subgraph ARCH["Stage 1: Architecture -- arch-swarm"]
+        direction TB
+        A1[arch_analyze<br/>coupling / complexity / deps]
+        A2{Design question<br/>worth a debate?}
+        A3[Pick format:<br/>open / with_judge / trial /<br/>mediation / council / ...]
+        A4[kb_start_debate format=...]
+        A5[kb_propose / kb_critique<br/>kb_vote / kb_resolve_debate]
+        A6[ADRs in swarm-kb]
+        A1 --> A2
+        A2 -- yes --> A3 --> A4 --> A5 --> A6
+        A2 -- no --> A6
+    end
+
+    PQ{TDD plan?}
+
+    subgraph PLAN["Stage 2: Plan -- swarm-kb (optional)"]
+        direction TB
+        P1[kb_start_plan_session<br/>anchor to ADR ids]
+        P2{More tasks?}
+        P3[writing_plans skill:<br/>2-5 min, tests-first]
+        P4[kb_emit_task<br/>one task]
+        P5[kb_finalize_plan<br/>validates contract]
+        P6{Validation<br/>errors?}
+        P1 --> P2
+        P2 -- yes --> P3 --> P4 --> P2
+        P2 -- no --> P5 --> P6
+        P6 -- yes --> P3
+        P6 -- no --> PEnd[plan.md ready]
+    end
+
+    subgraph REVIEW["Stage 3: Review -- review-swarm"]
+        direction TB
+        R1[orchestrate_review or<br/>kb_route_experts to pre-pick]
+        R2[suggest_experts]
+        R3[Phase 1: claim_file -><br/>post_finding -> release_file]
+        R4[mark_phase_done 1<br/>barrier waits for all experts]
+        R5[Phase 2: cross-check<br/>react / confirm / dispute]
+        R6[mark_phase_done 2]
+        R7[check_decision_compliance<br/>against Stage 1 ADRs]
+        R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7
+    end
+
+    subgraph FIX["Stage 4: Fix -- fix-swarm"]
+        direction TB
+        F1[snapshot_tests<br/>baseline]
+        F2[start_session<br/>review + arch findings]
+        F3[fix_plan / propose_fix<br/>per finding]
+        F4{Need retry-<br/>with-feedback?}
+        F5[Drive PGVE session<br/>kb_start_pgve / submit_candidate /<br/>evaluate_candidate accepted/revise/rejected]
+        F6[Cross-review:<br/>2+ approvals = consensus]
+        F7[apply_approved or<br/>apply_single]
+        F8[kb_check_quality_gate]
+        F1 --> F2 --> F3 --> F4
+        F4 -- yes --> F5 --> F6
+        F4 -- no --> F6
+        F6 --> F7 --> F8
+    end
+
+    Manual["Manual review<br/>fix cycle unstable"]
+
+    subgraph VERIFY["Stage 5: Verify -- fix-swarm"]
+        direction TB
+        V1[check_regression<br/>syntax + tests + re-scan]
+        V2{Build VerificationReport?}
+        V3[kb_start_verification]
+        V4{More evidence?}
+        V5[kb_add_verification_evidence<br/>kind=test_diff / regression_scan /<br/>quality_gate / judging / manual_note]
+        V6[kb_finalise_verification<br/>verdict pass/fail/partial]
+        V1 --> V2
+        V2 -- yes --> V3 --> V4
+        V4 -- yes --> V5 --> V4
+        V4 -- no --> V6
+        V2 -- no --> VOut[regression report only]
+    end
+
+    subgraph DOC["Stage 6: Doc -- doc-swarm (optional)"]
+        direction TB
+        D1[doc_verify<br/>find stale]
+        D2[doc_generate<br/>API ref + ADR cross-refs]
+        D1 --> D2
+    end
+
+    subgraph HARD["Stage 7: Hardening -- swarm-kb"]
+        direction TB
+        H1[kb_start_hardening]
+        H2[mypy --strict]
+        H3[pytest-cov >= 85%]
+        H4[pip-audit CVE scan]
+        H5[gitleaks secrets scan]
+        H6[dep-hygiene]
+        H7[ci-presence check]
+        H8[observability check]
+        H9[kb_get_hardening_report<br/>aggregated report.md]
+        H1 --> H2 --> H9
+        H1 --> H3 --> H9
+        H1 --> H4 --> H9
+        H1 --> H5 --> H9
+        H1 --> H6 --> H9
+        H1 --> H7 --> H9
+        H1 --> H8 --> H9
+    end
+
+    subgraph REL["Stage 8: Release -- swarm-kb"]
+        direction TB
+        L1[kb_start_release]
+        L2[kb_propose_version_bump<br/>git log since last tag]
+        L3[kb_generate_changelog<br/>draft CHANGELOG.md]
+        L4[kb_validate_pyproject<br/>PyPI fields]
+        L5[kb_build_dist<br/>python -m build]
+        L6[kb_release_summary<br/>checklist for twine]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6
+    end
+
+    End([twine upload<br/>by user])
+
+    Start --> GQ
+    GQ -- yes --> IDEA --> EQ
+    GQ -- no --> EQ
+    EQ -- yes --> SPEC --> ARCH
+    EQ -- no --> ARCH
+    ARCH --> PQ
+    PQ -- yes --> PLAN --> REVIEW
+    PQ -- no --> REVIEW
+    REVIEW --> FIX
+    FIX -. continue .-> REVIEW
+    FIX -. stop_circuit_breaker .-> Manual
+    FIX -. stop_clean .-> VERIFY
+    VERIFY --> DOC --> HARD --> REL --> End
+
+    classDef optional fill:#e1f5ff,stroke:#1976d2,color:#0d47a1
+    classDef alarm fill:#ffe1e1,stroke:#c62828,color:#b71c1c
+    classDef terminal fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    class IDEA,SPEC,PLAN,DOC optional
+    class Manual alarm
+    class Start,End terminal
+```
+
+### Composable artifacts in action -- a realistic Fix-stage sequence
+
+Shows how Fix typically composes PGVE (retry-with-feedback), Judging (council scoring of the accepted candidate), and Verification (final gate to Doc) for one finding. Solid arrows = sync MCP calls; dashed arrows = "stored, not actively returned".
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Fix-orchestrator
+    participant PGVE as kb_*_pgve
+    participant Gen as Generator agent
+    participant Eval as Evaluator agent
+    participant Judg as kb_*_judging
+    participant Council as N judges
+    participant Verif as kb_*_verification
+
+    Note over Orch: One finding f-7c2a needs a fix
+    Orch->>PGVE: kb_start_pgve(task_spec)
+    PGVE-->>Orch: pgve_id
+
+    loop until accepted or budget=0
+        Gen->>PGVE: kb_submit_candidate(content, payload)
+        Note right of PGVE: previous_feedback auto-attached
+        PGVE-->>Eval: candidate (with prev feedback)
+        Eval->>PGVE: kb_evaluate_candidate(verdict, feedback)
+        alt verdict=accepted
+            PGVE-->>Orch: status=accepted, accepted_candidate_id
+        else verdict=revise
+            Note over Gen: read previous_feedback,<br/>refine, submit again
+        else verdict=rejected
+            PGVE-->>Orch: status=rejected -- planner rewrites task_spec
+        end
+    end
+
+    Note over Orch: Optional: judge the accepted candidate
+    Orch->>Judg: kb_start_judging(subject_ref=cand_id, dimensions)
+    Judg-->>Orch: judging_id
+    par per dimension
+        Council->>Judg: kb_judge_dimension(verdict, rationale)
+    end
+    Orch->>Judg: kb_resolve_judging(overall, summary)
+    Judg-->>Orch: synthesis (pass / fail / mixed)
+
+    Note over Orch: Build the verification report -- gates Stage 6
+    Orch->>Verif: kb_start_verification(fix_session)
+    Verif-->>Orch: report_id
+    Orch->>Verif: add_evidence kind=test_diff
+    Orch->>Verif: add_evidence kind=quality_gate
+    Orch->>Verif: add_evidence kind=judging<br/>data={judging_id}
+    Orch->>Verif: kb_finalise_verification(overall, summary)
+    Verif-->>Orch: verdict pass/fail/partial<br/>(gates kb_advance_pipeline)
+```
+
+The same composition works elsewhere -- e.g. `arch-swarm` can drive a `trial` debate then judge the winning ADR; `doc-swarm` can drive a `peer_review` debate on generated docs; your own MCP integration can stitch any of the artifacts into a custom flow via the DSL.
 
 Stages at a glance:
 
@@ -229,6 +461,35 @@ orchestrate_debate(project_path, topic="...")             # multi-agent debate
 kb_advance_pipeline(pipeline_id)
 ```
 
+How a debate actually flows (example: the `trial` format -- prosecution / defense / judge with structured phases):
+
+```mermaid
+flowchart TD
+    Start([Question:<br/>"Should we deprecate<br/>the legacy auth flow?"])
+    PickFmt[Pick format from registry<br/>13 protocols available]
+    StartD["kb_start_debate(topic, format='trial')"]
+
+    subgraph Trial["Trial format -- 4 phases"]
+        direction TB
+        Charge[Phase 1: charge<br/><b>prosecution</b> -> kb_propose<br/>names alleged defect + remedy]
+        Defense[Phase 2: defense<br/><b>defense</b> -> kb_critique<br/>verdict=oppose or modify, point-by-point]
+        Rebuttal[Phase 3: rebuttal<br/><b>prosecution</b> -> amended kb_propose<br/>or further kb_critique]
+        Ruling[Phase 4: ruling<br/><b>judge</b> -> kb_resolve_debate<br/>cites which evidence carried]
+        Charge --> Defense --> Rebuttal --> Ruling
+    end
+
+    ADR[ADR in swarm-kb<br/>winning proposal + dissenting opinions<br/>+ structured transcript.md]
+    User[USER GATE -- review ADR,<br/>kb_advance_pipeline]
+
+    Start --> PickFmt --> StartD --> Trial --> ADR --> User
+
+    Note["Other formats use the same<br/>state model (propose / critique /<br/>vote / resolve) but different<br/>actors + phase order:<br/>peer_review / mediation / council /<br/>brainstorming / mentorship / etc."]
+    Trial -.- Note
+
+    classDef trial fill:#fff3e0,stroke:#e65100
+    class Trial trial
+```
+
 ### Stage 2: Implementation Plan (optional, recommended for greenfield)
 
 Convert the ADRs from Stage 1 into a **TDD-grade executable plan**. Drives the `writing_plans` skill: 2-5 minute tasks, failing test first, exact commands.
@@ -248,6 +509,53 @@ kb_advance_pipeline(pipeline_id)                          # -> Review
 orchestrate_review(project_path)                          # full session
 # Or do it manually: start_session / claim_file / post_finding / mark_phase_done / ...
 kb_advance_pipeline(pipeline_id)
+```
+
+How the multi-agent coordination actually works -- claim semantics, the Phase 1 barrier, the cross-check phase, the user gate at the end:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Orchestrator
+    participant Sess as ReviewSwarm session
+    participant E1 as Expert: security
+    participant E2 as Expert: performance
+    participant E3 as Expert: threading
+    participant U as User
+
+    Orch->>Sess: orchestrate_review(scope, task)
+    Sess->>Sess: kb_route_experts (Jaccard, no embedding)<br/>or suggest_experts
+    Sess-->>Orch: assigned experts + file assignments
+
+    Note over E1,E3: Phase 1 -- independent review
+    par each expert claims and reviews in parallel
+        E1->>Sess: claim_file (atomic, no two experts on same file)
+        E1->>Sess: post_finding (actual + expected + source_ref + confidence)
+        E1->>Sess: release_file
+        E1->>Sess: mark_phase_done(1)
+    and
+        E2->>Sess: claim / post / release / mark_phase_done(1)
+    and
+        E3->>Sess: claim / post / release / mark_phase_done(1)
+    end
+
+    Note over Sess: BARRIER -- Phase 2 cannot start until ALL experts mark_phase_done(1)
+    Sess->>Sess: check_phase_ready(2) -> true
+
+    Note over E1,E3: Phase 2 -- cross-check
+    par each expert reacts to others' findings
+        E1->>Sess: react(finding=f-..., reaction=confirm / dispute)
+    and
+        E2->>Sess: react(...)
+    and
+        E3->>Sess: react(...)
+    end
+    Note over Sess: 2+ confirms = confirmed<br/>1+ dispute = disputed
+    Sess->>Sess: check_decision_compliance vs Stage 1 ADRs
+
+    Sess->>U: get_summary (markdown / json / sarif)
+    Note over U: USER GATE -- triage<br/>approve / dismiss / mark_fixed
+    U->>Orch: kb_advance_pipeline -> Stage 4 Fix
 ```
 
 ### Stage 4: Fix
@@ -279,11 +587,16 @@ kb_finalise_verification(report_id, overall="pass", summary="...")  # gates Stag
 kb_advance_pipeline(pipeline_id)
 ```
 
-### Stage 6: Documentation
+### Stage 6: Documentation (optional, run once near release)
 
 Verify existing docs against changed code; generate API reference + ADR cross-refs.
 
+**Why optional**: docs are typically only worth writing once for the *final*, ready-to-release project. Running them on every fix iteration burns AI tokens with little payoff -- the code is still moving. **Skip this stage during iterative fix cycles**; run it once when the code has stabilised (typically just before Hardening / Release). To skip: `kb_skip_stage(pipeline_id, "doc")`; or simply don't invoke `doc_verify` / `doc_generate` and call `kb_advance_pipeline` directly.
+
 ```
+# Skip during iteration:
+kb_skip_stage(pipeline_id, "doc")                         # explicit skip
+# OR: (re-run later)
 doc_verify(project_path)                                  # find stale docs
 doc_generate(project_path)                                # regenerate
 kb_advance_pipeline(pipeline_id)
@@ -291,24 +604,41 @@ kb_advance_pipeline(pipeline_id)
 
 ### Stage 7: Hardening
 
-Aggregates Python-default production-readiness checks into one report. Each check is a subprocess with a timeout; tools that aren't installed degrade gracefully (`installed: false`) so you see exactly what's missing.
+**Why this stage exists, and why it's right before Release**: a release pushed to PyPI / a GitHub tag is publicly observable and effectively un-revertible (you can yank a PyPI version but you can't make it un-downloaded). Hardening is the **last automated quality gate before the artifact leaves your machine**. Anything that doesn't pass here is something you don't want to discover from a user bug report.
 
-| Check | Tool | Pass criterion |
-|---|---|---|
-| type-check | `mypy --strict` (or basedpyright) | 0 errors |
-| coverage | `pytest-cov` | >= configured (default 85%) |
-| dep-audit (security) | `pip-audit` | 0 high/critical CVEs |
-| secrets-scan | `gitleaks` (or naive regex fallback) | 0 high-confidence findings |
-| dep-hygiene | custom | 0 unused, 0 conflicts |
-| ci-presence | filesystem | `.github/workflows/*.yml` exists |
-| observability | filesystem | structured logging configured |
+The verify stage (5) catches regressions *against the code that was changed*. Hardening is broader: it audits the WHOLE project for production-readiness signals that aren't tied to a single fix cycle -- type-check coverage, test coverage threshold, security CVEs in deps, leaked secrets, missing CI, no structured logging. These are slow-burn issues that can pass review/fix yet still bite in production.
+
+It aggregates Python-default production-readiness checks into one report. Each check is a subprocess with a timeout; tools that aren't installed degrade gracefully (`installed: false`) so you see exactly what's missing rather than a crash.
+
+| Check | Tool | Pass criterion | Why it matters at release time |
+|---|---|---|---|
+| type-check | `mypy --strict` (or basedpyright) | 0 errors | Type drift is the #1 source of "works on my machine" regressions across Python versions. |
+| coverage | `pytest-cov` | >= configured (default 85%) | Below threshold = unknown blast radius for any future change. |
+| dep-audit (security) | `pip-audit` | 0 high/critical CVEs | Shipping a CVE in a transitive dep is a publicly disclosable incident. |
+| secrets-scan | `gitleaks` (or naive regex fallback) | 0 high-confidence findings | A leaked AWS key in a tagged release is a permanent compromise. |
+| dep-hygiene | custom | 0 unused, 0 conflicts | Unused deps inflate install size and attack surface. |
+| ci-presence | filesystem | `.github/workflows/*.yml` exists | Without CI you have no automated post-release safety net. |
+| observability | filesystem | structured logging configured | Production debugging without structured logs is grep-and-pray. |
 
 ```
 kb_start_hardening(project_path)
-kb_run_check(sid, check_name)                             # per check
+kb_run_check(sid, check_name)                             # per check (or run all)
 kb_get_hardening_report(sid)                              # aggregated report.md
+# USER GATE: review report.md; address any failures; re-run check
 kb_advance_pipeline(pipeline_id)                          # -> Release
 ```
+
+The order **Verify -> Doc(optional) -> Hardening -> Release** is deliberate: Verify guarantees the recent fixes don't break anything; Doc (when run) generates final user-facing reference; Hardening re-checks the whole project against production criteria; Release packages an artifact you trust enough to publish.
+
+**Why Hardening lives at the end and NOT inside the fix-review loop:**
+
+1. **Cost.** mypy `--strict`, pytest-cov on the full suite, pip-audit hitting PyPI, gitleaks across the entire repo -- each check is seconds to minutes. Running them on every fix iteration multiplies AI-token cost and wall-time by an order of magnitude with little incremental signal.
+2. **Noise mid-iteration.** When you're mid-refactor (half the callers updated, half not), mypy `--strict` will fail loudly even though the iteration is on a correct trajectory. Coverage drops temporarily. These are false alarms during the loop -- they resolve when the iteration ends.
+3. **Whole-project, not change-scoped.** Verify (Stage 5) checks recent changes (`check_regression`). Hardening checks the WHOLE project: dep CVEs, secrets in any file, CI presence, structured logging configured. These are properties of "the artifact you're about to ship", not "the change you just made".
+4. **Some checks are stable across iterations.** `ci-presence`, `observability`, `dep-hygiene` change only when you restructure the project; re-running them every fix is pure waste.
+5. **Per-iteration concerns are already covered.** Review-swarm has a `type-fix` expert that catches type issues during review; `check_regression` runs syntax checks; the quality gate tracks test-pass counts per iteration. The fast/cheap parts of "is this ready" are in the loop already; the slow/expensive parts are pulled out.
+
+**If you disagree with the default split**, the Flow DSL lets you put any check anywhere: `arch -> review -> (fix, hardening_typecheck) -> verify -> hardening -> release`. The default is just a recommendation tuned for typical AI-token budgets, not a hard architectural constraint.
 
 ### Stage 8: Release Prep
 
@@ -340,7 +670,39 @@ kb_judge_dimension(judging_id, judge="threading", dimension="correctness",
 kb_resolve_judging(judging_id, overall="pass", summary="net positive tradeoff")
 ```
 
-Use cases: review-swarm can open a judging on its own findings ("review the reviewer"); fix-swarm can judge a candidate before applying.
+How the council actually works -- one judge per dimension, all in parallel, then a single aggregator step:
+
+```mermaid
+flowchart TD
+    Start([Subject needs<br/>multi-dim verdict])
+    StartJ[kb_start_judging<br/>subject_kind, subject_ref,<br/>dimensions list]
+
+    subgraph Council["Council -- one judge per dimension (parallel)"]
+        direction LR
+        J1["judge: accuracy<br/>kb_judge_dimension<br/>verdict + rationale"]
+        J2["judge: helpfulness<br/>verdict + rationale"]
+        J3["judge: harmlessness<br/>verdict + rationale"]
+        J4["judge: coherence<br/>verdict + rationale"]
+        J5["judge: conciseness<br/>verdict + rationale"]
+        J6["judge: instruction_adherence<br/>verdict + rationale"]
+    end
+
+    Cover{All dimensions<br/>covered?<br/>(is_complete)}
+    Aggr[Aggregator reads<br/>all per-dim verdicts]
+    Resolve["kb_resolve_judging<br/>overall=pass/fail/mixed<br/>summary + follow_ups<br/>(rationale, NOT a number)"]
+    Out([JudgingSynthesis<br/>persisted; downstream<br/>tools read overall]) 
+
+    Start --> StartJ --> Council --> Cover
+    Cover -- no, more dims --> Council
+    Cover -- yes --> Aggr --> Resolve --> Out
+
+    classDef council fill:#fff3e0,stroke:#e65100
+    class Council council
+```
+
+Verdict per dimension: `pass / fail / mixed / abstain`. Aggregator overall: `pass / fail / mixed` (no abstain at the synthesis level). 6 default dimensions; you can pass any custom set at `start_judging`.
+
+Use cases: review-swarm can open a judging on its own findings ("review the reviewer"); fix-swarm can judge a candidate before applying; doc-swarm can judge generated docs against a quality rubric.
 
 ### PGVE Sessions -- Planner-Generator-Evaluator
 
