@@ -14,6 +14,11 @@ testpaths = [
     "packages/fix-swarm/tests",
     "packages/doc-swarm/tests",
 ]
+# Required: same-named test modules across packages
+# (test_cli.py / test_models.py exist in arch / review / fix / doc).
+# Default `prepend` mode collides on basename; `importlib` keeps each
+# in its own namespace.
+addopts = "--import-mode=importlib"
 asyncio_mode = "auto"
 
 [tool.mypy]

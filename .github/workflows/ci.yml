@@ -1,0 +1,82 @@
+name: CI
+
+# Triggers: every push to main + every PR. Manual `workflow_dispatch`
+# kept so the user can re-run from the GitHub UI without a code change.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs on the same ref when a newer push lands; saves
+# minutes when commits stack quickly during active development.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 = floor declared in pyproject; 3.12 = current production
+        # baseline on most distros. Skipping 3.11 keeps the matrix small.
+        python-version: ["3.10", "3.12"]
+        # ubuntu = primary; windows = the OS the suite is dev'd on, and
+        # the one most likely to expose path / file-lock / encoding bugs.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Editable install (all 7 packages, dependency order)
+        # scripts/install_all.py walks INSTALL_ORDER and runs
+        # `pip install -e packages/<name>`. Picks up portalocker and
+        # other deps via each package's pyproject.
+        run: python scripts/install_all.py
+
+      - name: Import-direction check
+        # scripts/check_imports.py enforces swarm-core <- swarm-kb <- tools.
+        # A violation means a tool started reaching back into swarm-core
+        # internals via a private path; fail fast.
+        run: python scripts/check_imports.py
+
+      - name: Run full test suite
+        # Root pyproject.toml's [tool.pytest.ini_options] points
+        # `testpaths` at all 7 packages and turns on importlib mode so
+        # same-named test files across packages don't collide.
+        run: python -m pytest -v --tb=short
+
+  lint:
+    name: ruff + import-direction (Linux 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ruff
+        # Pinned to a recent stable; relax to a range later if the
+        # major bumps stop breaking the rule set we're using.
+        run: pip install "ruff>=0.6,<1.0"
+
+      - name: Ruff check (advisory, non-blocking)
+        # Treat ruff as a lint signal, not a gate. Pre-existing repo
+        # has accumulated style debt; we surface it without failing CI
+        # while we work through it. Move to `--exit-non-zero-on-fix`
+        # and drop `continue-on-error` once the baseline is clean.
+        continue-on-error: true
+        run: ruff check packages/
