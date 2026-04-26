@@ -1,6 +1,6 @@
 [project]
 name = "arch-swarm-ai"
-version = "0.2.4"
+version = "0.3.0"
 description = "Multi-agent architecture brainstorming -- agents debate code design for simplicity, modularity, and reusability"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -17,7 +17,8 @@ classifiers = [
 dependencies = [
     "click>=8.0,<9",
     "mcp>=1.0",
-    "swarm-kb>=0.2.1",
+    "swarm-core>=0.1.0",
+    "swarm-kb>=0.3.0",
 ]
 
 [project.scripts]

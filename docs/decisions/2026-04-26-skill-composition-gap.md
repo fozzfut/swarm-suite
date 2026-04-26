@@ -2,8 +2,30 @@
 
 ## Status
 
-**Open.** Architectural finding from the audit pass. Documented now;
-implementation deferred so it can land as a focused phase.
+**RESOLVED 2026-04-26** in two phases:
+
+**Phase A (commit ae7b8ad):** the user-facing CLI surface --
+`<tool> prompt <expert>` -- now calls `compose_system_prompt()` (or
+`ExpertProfile.composed_system_prompt`) for all 5 tools plus the
+arch-swarm `--debate-roles` variant. Composed prompts (15-25 KB)
+contain all declared + universal skill bodies. Verified by 11 CLI
+smoke tests + Section 4 of `verify_e2e.py`.
+
+**Phase B (this commit):** the per-tool `ExpertProfiler` /
+`FixExpertProfiler` classes are now thin shims (40-50 lines each)
+wrapping `swarm_core.experts.ExpertRegistry` while preserving the
+legacy dict-shaped public API. The 180-line review-swarm and 145-line
+fix-swarm YAML loaders are gone -- replaced by delegation to
+swarm-core. The 7 inherited test_expert_profiler tests pass against
+the shim unchanged.
+
+What's left: the original decision proposed deleting per-tool
+`expert_profiler.py` entirely and migrating callers to the dataclass
+API. Phase B chose **API preservation via shim** instead because:
+- Keeps callers (orchestrator, session_manager, CLI) unchanged.
+- Same DRY win (no duplicate YAML loaders).
+- Same runtime behavior (composition flows correctly).
+- Less risk of breaking inherited tests.
 
 ## Context
 

@@ -2,8 +2,39 @@
 
 ## Status
 
-Phase 1 complete (swarm-core package built, tested, published as
-canonical home). Phase 2-4 pending -- per-tool migration.
+**Most phases complete as of 2026-04-26.**
+
+| Phase | Concern | Status |
+|-------|---------|--------|
+| 1 | swarm-core package built, tested, registered | DONE |
+| 2 | swarm-kb consumes swarm-core (ids, timeutil) | DONE |
+| 3a | review-swarm + fix-swarm models migrated (`Severity`, `MessageType`, `ClaimStatus`, `now_iso`) | DONE |
+| 3b | doc-swarm models migrated | DONE |
+| 3c | spec-swarm models migrated | DONE |
+| 3d | arch-swarm models | N/A (no duplicating enums) |
+| 4 | review-swarm `expert_profiler.py` -> shim around `swarm_core.experts.ExpertRegistry` | DONE |
+| 5 | fix-swarm `expert_profiler.py` -> shim | DONE |
+| 6 | arch-swarm `code_scanner.py` extracted to `swarm_core.code_scan` | DONE |
+| 7 | All 5 tool CLIs surface composed prompts (`<tool> prompt <expert>`) | DONE |
+| 8 | arch-swarm `agents.render_prompt` appends universal skills to debate roles | DONE |
+
+**Remaining (low-priority maintenance):**
+- `session_manager.py` extraction -- review-swarm has the richest
+  implementation; fix-swarm has its own simpler one. Both work; could
+  share a `SessionLifecycle` subclass + composition. Not blocking.
+- `report_generator.py` markdown helpers consolidation -- already partly
+  in `swarm_core.reports.markdown`; per-tool report classes still
+  generate their own tables. Cosmetic DRY gain.
+- `logging_config.py` per-tool setup -- 4 of 6 packages. swarm-core's
+  `logging_setup` exists; tools could switch. Not user-visible.
+- MCP server scaffolding consolidation via `swarm_core.mcp.MCPApp` --
+  intentionally deferred (each tool's FastMCP setup has tool-specific
+  notification options; the MCPApp design is the registry, not the
+  runtime, and that decision still holds).
+
+The core mission of the extraction (DRY single-source-of-truth for
+shared concerns + composition reaching AI prompts) is complete. The
+remaining items are size optimizations not shape changes.
 
 ## Context
 
