@@ -1,0 +1,26 @@
+[tool.pytest.ini_options]
+# Aggregated test config. Each package keeps its own pytest.ini_options
+# inside its pyproject.toml; this top-level config is for running
+# `pytest packages/<name>/tests` from the repo root with consistent flags.
+testpaths = [
+    "packages/swarm-core/tests",
+    "packages/swarm-kb/tests",
+    "packages/spec-swarm/tests",
+    "packages/arch-swarm/tests",
+    "packages/review-swarm/tests",
+    "packages/fix-swarm/tests",
+    "packages/doc-swarm/tests",
+]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_redundant_casts = true
+check_untyped_defs = true
+no_implicit_optional = true
+exclude = ["packages/.*/dist", "packages/.*/build"]
+
+[[tool.mypy.overrides]]
+module = ["mcp.*", "yaml.*", "click.*"]
+ignore_missing_imports = true

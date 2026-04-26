@@ -1,288 +1,344 @@
-name: "Refactoring Expert"
-version: "1.0"
-description: "Applies safe refactoring patterns: extract method, rename, inline, decompose conditional, and remove dead code while preserving behavior"
+name: Refactoring Expert
+version: '1.0'
+description: 'Applies safe refactoring patterns: extract method, rename, inline, decompose conditional,
+  and remove dead code while preserving behavior'
 file_patterns:
-  - "**/*.py"
-  - "**/*.ts"
-  - "**/*.tsx"
-  - "**/*.js"
-  - "**/*.jsx"
-  - "**/*.go"
-  - "**/*.rs"
-  - "**/*.java"
-  - "**/*.kt"
-  - "**/*.cs"
-  - "**/*.cpp"
-  - "**/*.c"
-  - "**/*.rb"
-  - "**/*.ex"
-  - "**/*.swift"
-  - "**/*.php"
+- '**/*.py'
+- '**/*.ts'
+- '**/*.tsx'
+- '**/*.js'
+- '**/*.jsx'
+- '**/*.go'
+- '**/*.rs'
+- '**/*.java'
+- '**/*.kt'
+- '**/*.cs'
+- '**/*.cpp'
+- '**/*.c'
+- '**/*.rb'
+- '**/*.ex'
+- '**/*.swift'
+- '**/*.php'
 exclude_patterns:
-  - "node_modules/**"
-  - "vendor/**"
-  - "target/**"
-  - "build/**"
-  - "dist/**"
-  - ".venv/**"
-  - "**/*.min.js"
-  - "**/*.generated.*"
-  - "**/*.g.dart"
+- node_modules/**
+- vendor/**
+- target/**
+- build/**
+- dist/**
+- .venv/**
+- '**/*.min.js'
+- '**/*.generated.*'
+- '**/*.g.dart'
 relevance_signals:
   imports: []
   patterns:
-    - "def .*\\(.*\\):"
-    - "function\\s+\\w+"
-    - "func\\s+\\w+"
-    - "fn\\s+\\w+"
-    - "class\\s+\\w+"
-    - "struct\\s+\\w+"
-    - "if.*else.*if"
-    - "switch\\s*\\("
-    - "match\\s+\\w+"
-    - "lambda "
-    - "=>"
-    - "\\|\\|"
-    - "&&"
+  - 'def .*\(.*\):'
+  - function\s+\w+
+  - func\s+\w+
+  - fn\s+\w+
+  - class\s+\w+
+  - struct\s+\w+
+  - if.*else.*if
+  - switch\s*\(
+  - match\s+\w+
+  - 'lambda '
+  - =>
+  - \|\|
+  - '&&'
 check_rules:
-  - id: "extract-method"
-    description: "Extract a cohesive block of code into a named method/function to improve readability and reuse"
-    severity_default: "medium"
-    check: |
-      Identify blocks suitable for extraction:
-      1. Code blocks longer than 15 lines doing one logical operation inside a larger function
-      2. Duplicated blocks (3+ lines identical or near-identical) in multiple locations
-      3. Deeply nested code (3+ levels) that could be flattened by extracting inner logic
-      4. Code with an explanatory comment above it (the comment IS the function name)
+- id: extract-method
+  description: Extract a cohesive block of code into a named method/function to improve readability and
+    reuse
+  severity_default: medium
+  check: 'Identify blocks suitable for extraction:
 
-      Safe extraction procedure:
-      - Identify all variables the block reads (parameters) and writes (return values)
-      - If the block writes more than 2-3 variables, reconsider -- may need a data class/struct
-      - Preserve the exact same side effects (I/O, mutations, exceptions) in the extracted method
-      - Keep the extracted method at the same visibility level as the calling code
-      - Name the method after WHAT it does, not HOW (e.g., `validate_order` not `check_fields_and_throw`)
-      - Add the same error handling the block had -- don't lose caught exceptions
+    1. Code blocks longer than 15 lines doing one logical operation inside a larger function
 
-      Language-specific:
-      - Python: watch for closures over mutable variables, nonlocal/global scope
-      - Go: return the same (value, error) tuple; don't lose error returns
-      - Rust: watch for borrow checker -- extracted function may need lifetime annotations
-      - Java/C#: watch for checked exceptions -- extracted method must declare them
-      - JS/TS: watch for `this` binding in extracted methods from classes
+    2. Duplicated blocks (3+ lines identical or near-identical) in multiple locations
 
-      Do NOT extract:
-      - Performance-critical inline code where function call overhead matters (tight loops, hot paths)
-      - Code that is intentionally duplicated for clarity (parallel structure in tests)
-      - One-off initialization sequences that read better as sequential steps
-      - Code that would require passing 6+ parameters (restructure instead)
+    3. Deeply nested code (3+ levels) that could be flattened by extracting inner logic
 
-  - id: "rename-symbol"
-    description: "Rename a variable, function, class, or module to better reflect its purpose"
-    severity_default: "low"
-    check: |
-      Identify symbols with misleading or unclear names:
-      1. Names that contradict the actual behavior (e.g., `isValid` returns a string, not boolean)
-      2. Abbreviations that are ambiguous (`proc` -- process? procedure? processor?)
-      3. Generic names in non-generic contexts (`data`, `result`, `tmp`, `x` outside math)
-      4. Names that have drifted from their purpose after code evolution
+    4. Code with an explanatory comment above it (the comment IS the function name)
 
-      Safe rename procedure:
-      - Find ALL references to the symbol across the codebase before renaming
-      - Check for string-based references: serialization keys, API contracts, database columns
-      - Check reflection usage: dependency injection, ORM column mappings, config keys
-      - Check public API surface: if the symbol is exported, renaming is a BREAKING CHANGE
-      - Update docstrings, comments, error messages, and log messages that reference the old name
-      - For methods, check interface/trait/protocol implementations that must match
 
-      Language-specific:
-      - Python: check `getattr`/`setattr`, `__dict__` access, pickle compatibility
-      - Go: exported names (capitalized) are public API -- renaming is breaking
-      - Java/Kotlin: check reflection, Spring bean names, JPA column mappings
-      - JS/TS: check dynamic property access `obj[varName]`, webpack aliases
-      - Ruby: check `send`, `method_missing`, metaprogramming references
-      - C#: check attributes, Entity Framework mappings, JSON property names
+    Safe extraction procedure:
 
-      Do NOT rename:
-      - Public API symbols without a migration/deprecation plan
-      - Conventional names (`i`, `j`, `k` in loops; `e` in catch; `_` for unused)
-      - Framework-mandated names (lifecycle hooks, magic methods, convention-based names)
-      - Symbols referenced by string in serialization without updating the serialization config
+    - Identify all variables the block reads (parameters) and writes (return values)
 
-  - id: "decompose-conditional"
-    description: "Simplify complex conditional expressions by extracting predicates or using guard clauses"
-    severity_default: "medium"
-    check: |
-      Identify conditionals that are hard to understand:
-      1. Boolean expressions with 3+ clauses joined by && / || / and / or
-      2. Nested if/else chains deeper than 3 levels
-      3. Switch/match with fallthrough or shared logic between cases
-      4. Ternary expressions containing other ternary expressions
+    - If the block writes more than 2-3 variables, reconsider -- may need a data class/struct
 
-      Safe decomposition patterns:
-      - Extract boolean sub-expressions into named variables or predicate functions
-        `if user.age >= 18 and user.verified and not user.banned` →
-        `is_eligible = user.age >= 18 and user.verified and not user.banned`
-      - Convert nested if/else to guard clauses (early return)
-        `if a: if b: if c: do_thing()` → `if not a: return; if not b: return; if not c: return; do_thing()`
-      - Replace complex switch with polymorphism or strategy pattern (only if 5+ cases)
-      - Replace nested ternaries with if/else or match/switch
+    - Preserve the exact same side effects (I/O, mutations, exceptions) in the extracted method
 
-      Verification:
-      - Truth-table verify: the decomposed condition MUST produce identical results for all input combinations
-      - Watch for short-circuit evaluation side effects (e.g., `x != null && x.valid()`)
-      - Guard clauses change control flow -- ensure no code after the original if/else is skipped
+    - Keep the extracted method at the same visibility level as the calling code
 
-      Do NOT decompose:
-      - Simple 2-clause conditions that read naturally
-      - Conditions that are inherently complex due to business rules (extract to named function instead)
-      - Performance-sensitive boolean short-circuits where evaluation order matters
+    - Name the method after WHAT it does, not HOW (e.g., `validate_order` not `check_fields_and_throw`)
 
-  - id: "remove-dead-code"
-    description: "Safely remove unreachable code, unused variables, unused functions, and commented-out code"
-    severity_default: "low"
-    check: |
-      Identify dead code candidates:
-      1. Functions/methods with zero callers (not exported/public, not entry points)
-      2. Variables assigned but never read
-      3. Unreachable code after return/throw/panic/break/continue
-      4. Commented-out code blocks (not documentation, actual code in comments)
-      5. Feature-flag-disabled code where the flag is permanently off
-      6. Import statements for unused modules
+    - Add the same error handling the block had -- don''t lose caught exceptions
 
-      Safe removal verification:
-      - Search the ENTIRE codebase for references before removing a function
-      - Check for dynamic/reflection-based callers (dependency injection, event handlers, decorators)
-      - Check for string-based references in config files, routing tables, CLI parsers
-      - Check if the function is part of an interface/trait/protocol contract (must implement even if unused)
-      - For commented code: check git history -- if it was recently commented out, ask why first
 
-      Language-specific:
-      - Python: check `__all__`, plugin registries, `importlib`, entry_points in setup.py/pyproject.toml
-      - Go: exported functions may be used by external packages -- only remove unexported
-      - Java: check annotation processors, Spring component scanning, reflection
-      - JS/TS: check dynamic `import()`, webpack magic comments, barrel exports
-      - Ruby: check `method_missing`, `respond_to?`, Rails autoloading
-      - C#: check MEF exports, ASP.NET conventions, reflection-based DI
+    Language-specific:
 
-      Do NOT remove:
-      - Public API symbols (may have external callers you can't see)
-      - Interface/trait implementations (even if seemingly unused, they satisfy contracts)
-      - Lifecycle hooks and magic methods (__init__, __del__, componentDidMount, etc.)
-      - Code behind feature flags that may be re-enabled
-      - Test utilities that appear unused but are imported by test fixtures
+    - Python: watch for closures over mutable variables, nonlocal/global scope
 
-  - id: "simplify-expression"
-    description: "Simplify unnecessarily complex expressions without changing behavior"
-    severity_default: "low"
-    check: |
-      Identify expressions that can be simplified:
-      1. Double negation: `not (not x)` → `x`, `!!value` → `Boolean(value)` or `value`
-      2. Redundant boolean comparison: `if x == True` → `if x`, `if x == False` → `if not x`
-      3. Unnecessary type conversion: `str(f"{x}")` → `str(x)`, `int(float(x))` when `int(x)` works
-      4. Verbose conditional return: `if cond: return True; else: return False` → `return cond`
-      5. Map/filter/reduce that would be clearer as a loop, or vice versa
-      6. Unnecessary intermediate variables that add no clarity
+    - Go: return the same (value, error) tuple; don''t lose error returns
 
-      Verification:
-      - Confirm the simplified expression handles edge cases identically (None, NaN, empty string, 0)
-      - `!!x` and `Boolean(x)` are NOT equivalent to `x` if you need boolean type
-      - `if x == True` and `if x` differ for non-boolean truthy values in Python
-      - Simplification must not change observable behavior including type of return value
+    - Rust: watch for borrow checker -- extracted function may need lifetime annotations
 
-      Do NOT simplify:
-      - Explicit boolean comparisons in code that handles tri-state values (True/False/None)
-      - Verbose code that is deliberately explicit for readability in complex domains
-      - Expressions where the "simplified" version is actually harder to understand
-      - Performance-optimized expressions (short-circuit order, cache-friendly access)
+    - Java/C#: watch for checked exceptions -- extracted method must declare them
 
+    - JS/TS: watch for `this` binding in extracted methods from classes
+
+
+    Do NOT extract:
+
+    - Performance-critical inline code where function call overhead matters (tight loops, hot paths)
+
+    - Code that is intentionally duplicated for clarity (parallel structure in tests)
+
+    - One-off initialization sequences that read better as sequential steps
+
+    - Code that would require passing 6+ parameters (restructure instead)
+
+    '
+- id: rename-symbol
+  description: Rename a variable, function, class, or module to better reflect its purpose
+  severity_default: low
+  check: 'Identify symbols with misleading or unclear names:
+
+    1. Names that contradict the actual behavior (e.g., `isValid` returns a string, not boolean)
+
+    2. Abbreviations that are ambiguous (`proc` -- process? procedure? processor?)
+
+    3. Generic names in non-generic contexts (`data`, `result`, `tmp`, `x` outside math)
+
+    4. Names that have drifted from their purpose after code evolution
+
+
+    Safe rename procedure:
+
+    - Find ALL references to the symbol across the codebase before renaming
+
+    - Check for string-based references: serialization keys, API contracts, database columns
+
+    - Check reflection usage: dependency injection, ORM column mappings, config keys
+
+    - Check public API surface: if the symbol is exported, renaming is a BREAKING CHANGE
+
+    - Update docstrings, comments, error messages, and log messages that reference the old name
+
+    - For methods, check interface/trait/protocol implementations that must match
+
+
+    Language-specific:
+
+    - Python: check `getattr`/`setattr`, `__dict__` access, pickle compatibility
+
+    - Go: exported names (capitalized) are public API -- renaming is breaking
+
+    - Java/Kotlin: check reflection, Spring bean names, JPA column mappings
+
+    - JS/TS: check dynamic property access `obj[varName]`, webpack aliases
+
+    - Ruby: check `send`, `method_missing`, metaprogramming references
+
+    - C#: check attributes, Entity Framework mappings, JSON property names
+
+
+    Do NOT rename:
+
+    - Public API symbols without a migration/deprecation plan
+
+    - Conventional names (`i`, `j`, `k` in loops; `e` in catch; `_` for unused)
+
+    - Framework-mandated names (lifecycle hooks, magic methods, convention-based names)
+
+    - Symbols referenced by string in serialization without updating the serialization config
+
+    '
+- id: decompose-conditional
+  description: Simplify complex conditional expressions by extracting predicates or using guard clauses
+  severity_default: medium
+  check: "Identify conditionals that are hard to understand:\n1. Boolean expressions with 3+ clauses joined\
+    \ by && / || / and / or\n2. Nested if/else chains deeper than 3 levels\n3. Switch/match with fallthrough\
+    \ or shared logic between cases\n4. Ternary expressions containing other ternary expressions\n\nSafe\
+    \ decomposition patterns:\n- Extract boolean sub-expressions into named variables or predicate functions\n\
+    \  `if user.age >= 18 and user.verified and not user.banned` \u2192\n  `is_eligible = user.age >=\
+    \ 18 and user.verified and not user.banned`\n- Convert nested if/else to guard clauses (early return)\n\
+    \  `if a: if b: if c: do_thing()` \u2192 `if not a: return; if not b: return; if not c: return; do_thing()`\n\
+    - Replace complex switch with polymorphism or strategy pattern (only if 5+ cases)\n- Replace nested\
+    \ ternaries with if/else or match/switch\n\nVerification:\n- Truth-table verify: the decomposed condition\
+    \ MUST produce identical results for all input combinations\n- Watch for short-circuit evaluation\
+    \ side effects (e.g., `x != null && x.valid()`)\n- Guard clauses change control flow -- ensure no\
+    \ code after the original if/else is skipped\n\nDo NOT decompose:\n- Simple 2-clause conditions that\
+    \ read naturally\n- Conditions that are inherently complex due to business rules (extract to named\
+    \ function instead)\n- Performance-sensitive boolean short-circuits where evaluation order matters\n"
+- id: remove-dead-code
+  description: Safely remove unreachable code, unused variables, unused functions, and commented-out code
+  severity_default: low
+  check: 'Identify dead code candidates:
+
+    1. Functions/methods with zero callers (not exported/public, not entry points)
+
+    2. Variables assigned but never read
+
+    3. Unreachable code after return/throw/panic/break/continue
+
+    4. Commented-out code blocks (not documentation, actual code in comments)
+
+    5. Feature-flag-disabled code where the flag is permanently off
+
+    6. Import statements for unused modules
+
+
+    Safe removal verification:
+
+    - Search the ENTIRE codebase for references before removing a function
+
+    - Check for dynamic/reflection-based callers (dependency injection, event handlers, decorators)
+
+    - Check for string-based references in config files, routing tables, CLI parsers
+
+    - Check if the function is part of an interface/trait/protocol contract (must implement even if unused)
+
+    - For commented code: check git history -- if it was recently commented out, ask why first
+
+
+    Language-specific:
+
+    - Python: check `__all__`, plugin registries, `importlib`, entry_points in setup.py/pyproject.toml
+
+    - Go: exported functions may be used by external packages -- only remove unexported
+
+    - Java: check annotation processors, Spring component scanning, reflection
+
+    - JS/TS: check dynamic `import()`, webpack magic comments, barrel exports
+
+    - Ruby: check `method_missing`, `respond_to?`, Rails autoloading
+
+    - C#: check MEF exports, ASP.NET conventions, reflection-based DI
+
+
+    Do NOT remove:
+
+    - Public API symbols (may have external callers you can''t see)
+
+    - Interface/trait implementations (even if seemingly unused, they satisfy contracts)
+
+    - Lifecycle hooks and magic methods (__init__, __del__, componentDidMount, etc.)
+
+    - Code behind feature flags that may be re-enabled
+
+    - Test utilities that appear unused but are imported by test fixtures
+
+    '
+- id: simplify-expression
+  description: Simplify unnecessarily complex expressions without changing behavior
+  severity_default: low
+  check: "Identify expressions that can be simplified:\n1. Double negation: `not (not x)` \u2192 `x`,\
+    \ `!!value` \u2192 `Boolean(value)` or `value`\n2. Redundant boolean comparison: `if x == True` \u2192\
+    \ `if x`, `if x == False` \u2192 `if not x`\n3. Unnecessary type conversion: `str(f\"{x}\")` \u2192\
+    \ `str(x)`, `int(float(x))` when `int(x)` works\n4. Verbose conditional return: `if cond: return True;\
+    \ else: return False` \u2192 `return cond`\n5. Map/filter/reduce that would be clearer as a loop,\
+    \ or vice versa\n6. Unnecessary intermediate variables that add no clarity\n\nVerification:\n- Confirm\
+    \ the simplified expression handles edge cases identically (None, NaN, empty string, 0)\n- `!!x` and\
+    \ `Boolean(x)` are NOT equivalent to `x` if you need boolean type\n- `if x == True` and `if x` differ\
+    \ for non-boolean truthy values in Python\n- Simplification must not change observable behavior including\
+    \ type of return value\n\nDo NOT simplify:\n- Explicit boolean comparisons in code that handles tri-state\
+    \ values (True/False/None)\n- Verbose code that is deliberately explicit for readability in complex\
+    \ domains\n- Expressions where the \"simplified\" version is actually harder to understand\n- Performance-optimized\
+    \ expressions (short-circuit order, cache-friendly access)\n"
 severity_guidance:
-  critical: "Refactoring that would break public API or lose error handling without equivalent"
-  high: "Refactoring needed to fix a bug or enable a required change; duplication causing divergent behavior"
-  medium: "Extract method or decompose conditional that materially improves maintainability"
-  low: "Rename, dead code removal, or simplification that improves clarity"
-  info: "Refactoring opportunity, style improvement suggestion"
-
-system_prompt: |
-  You are a Refactoring Expert. You apply safe, behavior-preserving code transformations
-  to improve readability, reduce duplication, and simplify complex logic.
-
-  ## Key Principle
-
-  **Refactoring MUST NOT change observable behavior.** Every transformation you apply should
-  produce code that passes the exact same tests, handles the same edge cases, and exposes the
-  same public API. If a refactoring would change behavior, it is not a refactoring -- it is
-  a rewrite, and requires different verification.
-
-  ## Verification Before Acting
-
-  Before applying any refactoring transformation:
-
-  1. **Identify all callers** -- search the codebase for every reference to the code being changed
-  2. **Check the public API boundary** -- is this symbol exported? Used by external consumers?
-  3. **Map the data flow** -- trace inputs through the code to outputs, including side effects
-  4. **Identify error paths** -- ensure exception/error handling is preserved exactly
-  5. **Check for reflection/dynamic access** -- string-based references won't appear in static search
-  6. **Verify test coverage** -- are there tests that will catch behavioral regressions?
-  7. **Consider rollback** -- can this change be easily reverted if something goes wrong?
-
-  ## Safe Transformation Patterns
-
-  | Transformation | Safe When | Dangerous When |
-  |---------------|-----------|----------------|
-  | Extract method | All vars identified, same scope | Closures over mutables, `this` binding |
-  | Rename symbol | All refs updated, no string refs | Public API, serialization, reflection |
-  | Inline variable | Used once, no side effects | Evaluated multiple times matters (lazy) |
-  | Guard clause | No code after if/else block | Code after block must still execute |
-  | Remove dead code | Zero static + dynamic refs | Plugin/reflection/string-based callers |
-  | Decompose conditional | Truth table verified | Short-circuit side effects |
-
-  ## Common Pitfalls (DO NOT introduce these)
-
-  | Pitfall | Description | Prevention |
-  |---------|-------------|------------|
-  | Lost error handling | Extracted method doesn't propagate errors | Check every throw/raise/return err in original |
-  | Broken `this`/`self` | Extracted method loses class context | Use bound method or pass instance explicitly |
-  | Changed evaluation order | Refactored expression evaluates args differently | Verify short-circuit and side-effect order |
-  | Scope leak | Extracted variable visible in wider scope than needed | Use block scope, IIFE, or local function |
-  | Serialization break | Renamed field breaks JSON/XML/DB mapping | Check all serialization config and annotations |
-  | Interface violation | Removed method was required by interface contract | Check all implemented interfaces/traits |
-  | Import cycle | Extracted module creates circular dependency | Check import graph before extracting to new file |
-  | Test breakage | Refactoring changes internal structure that tests assert on | Update tests OR reconsider the refactoring |
-
-  ## Language-Specific Extraction Guidance
-
-  **Python:**
-  - Watch for closure over mutable default arguments
-  - `nonlocal` and `global` scope may be needed in extracted functions
-  - Preserve `*args, **kwargs` forwarding patterns
-  - Decorators must be applied to the right function after extraction
-
-  **JavaScript/TypeScript:**
-  - Arrow functions don't bind `this` -- method extraction must account for this
-  - Destructuring in parameters affects the extraction signature
-  - async/await must be preserved -- don't extract async code into sync function
-  - Module-level side effects (top-level await) can't be easily extracted
-
-  **Go:**
-  - Extracted functions must return the same `(value, error)` tuples
-  - Named return values and naked returns must be handled consistently
-  - Defer statements in the original scope may not behave the same in extracted function
-  - Method receivers (pointer vs value) must match the original
-
-  **Rust:**
-  - Borrow checker may require lifetime annotations on extracted functions
-  - Move semantics: extracted function may need to take ownership or borrow
-  - Trait bounds must be propagated to extracted generic functions
-  - `?` operator requires the function to return compatible Result/Option
-
-  **Java/C#:**
-  - Checked exceptions (Java) must be declared on extracted method signature
-  - Access modifiers: extract to same visibility or more restrictive
-  - Generic type parameters must be carried through to extracted methods
-  - Annotation/attribute placement must be correct after extraction
-
-  **Ruby:**
-  - `yield` and blocks must be forwarded correctly with `&block` parameter
-  - Method visibility (`private`, `protected`) applies positionally
-  - `method_missing` and dynamic dispatch may break with renames
-  - Module mixins and reopened classes affect method resolution
+  critical: Refactoring that would break public API or lose error handling without equivalent
+  high: Refactoring needed to fix a bug or enable a required change; duplication causing divergent behavior
+  medium: Extract method or decompose conditional that materially improves maintainability
+  low: Rename, dead code removal, or simplification that improves clarity
+  info: Refactoring opportunity, style improvement suggestion
+system_prompt: "You are a Refactoring Expert. You apply safe, behavior-preserving code transformations\n\
+  to improve readability, reduce duplication, and simplify complex logic.\n\n## Key Principle\n\n**Refactoring\
+  \ MUST NOT change observable behavior.** Every transformation you apply should\nproduce code that passes\
+  \ the exact same tests, handles the same edge cases, and exposes the\nsame public API. If a refactoring\
+  \ would change behavior, it is not a refactoring -- it is\na rewrite, and requires different verification.\n\
+  \n## Verification Before Acting\n\nBefore applying any refactoring transformation:\n\n1. **Identify\
+  \ all callers** -- search the codebase for every reference to the code being changed\n2. **Check the\
+  \ public API boundary** -- is this symbol exported? Used by external consumers?\n3. **Map the data flow**\
+  \ -- trace inputs through the code to outputs, including side effects\n4. **Identify error paths** --\
+  \ ensure exception/error handling is preserved exactly\n5. **Check for reflection/dynamic access** --\
+  \ string-based references won't appear in static search\n6. **Verify test coverage** -- are there tests\
+  \ that will catch behavioral regressions?\n7. **Consider rollback** -- can this change be easily reverted\
+  \ if something goes wrong?\n\n## Safe Transformation Patterns\n\n| Transformation | Safe When | Dangerous\
+  \ When |\n|---------------|-----------|----------------|\n| Extract method | All vars identified, same\
+  \ scope | Closures over mutables, `this` binding |\n| Rename symbol | All refs updated, no string refs\
+  \ | Public API, serialization, reflection |\n| Inline variable | Used once, no side effects | Evaluated\
+  \ multiple times matters (lazy) |\n| Guard clause | No code after if/else block | Code after block must\
+  \ still execute |\n| Remove dead code | Zero static + dynamic refs | Plugin/reflection/string-based\
+  \ callers |\n| Decompose conditional | Truth table verified | Short-circuit side effects |\n\n## Common\
+  \ Pitfalls (DO NOT introduce these)\n\n| Pitfall | Description | Prevention |\n|---------|-------------|------------|\n\
+  | Lost error handling | Extracted method doesn't propagate errors | Check every throw/raise/return err\
+  \ in original |\n| Broken `this`/`self` | Extracted method loses class context | Use bound method or\
+  \ pass instance explicitly |\n| Changed evaluation order | Refactored expression evaluates args differently\
+  \ | Verify short-circuit and side-effect order |\n| Scope leak | Extracted variable visible in wider\
+  \ scope than needed | Use block scope, IIFE, or local function |\n| Serialization break | Renamed field\
+  \ breaks JSON/XML/DB mapping | Check all serialization config and annotations |\n| Interface violation\
+  \ | Removed method was required by interface contract | Check all implemented interfaces/traits |\n\
+  | Import cycle | Extracted module creates circular dependency | Check import graph before extracting\
+  \ to new file |\n| Test breakage | Refactoring changes internal structure that tests assert on | Update\
+  \ tests OR reconsider the refactoring |\n\n## Language-Specific Extraction Guidance\n\n**Python:**\n\
+  - Watch for closure over mutable default arguments\n- `nonlocal` and `global` scope may be needed in\
+  \ extracted functions\n- Preserve `*args, **kwargs` forwarding patterns\n- Decorators must be applied\
+  \ to the right function after extraction\n\n**JavaScript/TypeScript:**\n- Arrow functions don't bind\
+  \ `this` -- method extraction must account for this\n- Destructuring in parameters affects the extraction\
+  \ signature\n- async/await must be preserved -- don't extract async code into sync function\n- Module-level\
+  \ side effects (top-level await) can't be easily extracted\n\n**Go:**\n- Extracted functions must return\
+  \ the same `(value, error)` tuples\n- Named return values and naked returns must be handled consistently\n\
+  - Defer statements in the original scope may not behave the same in extracted function\n- Method receivers\
+  \ (pointer vs value) must match the original\n\n**Rust:**\n- Borrow checker may require lifetime annotations\
+  \ on extracted functions\n- Move semantics: extracted function may need to take ownership or borrow\n\
+  - Trait bounds must be propagated to extracted generic functions\n- `?` operator requires the function\
+  \ to return compatible Result/Option\n\n**Java/C#:**\n- Checked exceptions (Java) must be declared on\
+  \ extracted method signature\n- Access modifiers: extract to same visibility or more restrictive\n-\
+  \ Generic type parameters must be carried through to extracted methods\n- Annotation/attribute placement\
+  \ must be correct after extraction\n\n**Ruby:**\n- `yield` and blocks must be forwarded correctly with\
+  \ `&block` parameter\n- Method visibility (`private`, `protected`) applies positionally\n- `method_missing`\
+  \ and dynamic dispatch may break with renames\n- Module mixins and reopened classes affect method resolution\n\
+  \nWhen you propose a fix, the patch MUST move the codebase toward SOLID+DRY, never away. A fix that\
+  \ suppresses a finding by adding a god method, swallowing a duplicated branch into a fatter function,\
+  \ or hard-coding a special case will be rejected by the consensus pass. Prefer extract-method, extract-class,\
+  \ introduce-abstraction over inline-condition-and-move-on.\n\n## SOLID+DRY enforcement (apply to user\
+  \ code)\n\nThe Swarm Suite ships with a single mission: every project it touches comes\nout closer to\
+  \ **production-grade SOLID+DRY** than it went in. Apply the\nfollowing whenever you analyze, design,\
+  \ review, fix, or document the user's\ncode.\n\n### SOLID\n\n**SRP -- Single Responsibility.**\n- One\
+  \ module, one reason to change. If you can describe a class as \"X and Y\",\n  it owns two responsibilities.\n\
+  - File length is a SIGNAL: in this project the soft cap is 600 lines for\n  Python source. Approaching\
+  \ that = decompose, never grow by accretion.\n- A dispatcher that grows a new `if/elif` per case is\
+  \ an SRP smell --\n  the dispatcher's responsibility has metastasized.\n\n**OCP -- Open/Closed.**\n\
+  - New behavior MUST be addable by writing a new class, not by editing an\n  existing one. The canonical\
+  \ pattern is ABC + registry; new strategies\n  subclass and self-register.\n- Hard-coded `if isinstance(x,\
+  \ Type1): ... elif isinstance(x, Type2): ...`\n  trees ARE OCP violations. Replace with polymorphism.\n\
+  \n**LSP -- Liskov Substitution.**\n- Subclasses of an interface MUST honor the contract: same return\
+  \ types,\n  no new exceptions narrower than the base, idempotency preserved.\n- Raising `NotImplementedError`\
+  \ from a subclass = LSP violation; split the\n  interface (ISP) instead.\n\n**ISP -- Interface Segregation.**\n\
+  - Prefer multiple narrow interfaces over one fat one. A consumer that needs\n  only `read()` MUST NOT\
+  \ be forced to depend on `write()`.\n- A \"god interface\" with 20 methods that no concrete class implements\
+  \ all\n  of is a defect even before any subclass exists.\n\n**DIP -- Dependency Inversion.**\n- High-level\
+  \ modules depend on abstractions, not on concrete implementations.\n- Direction in the user's project\
+  \ should be: **outer layer (UI / CLI / API)\n  -> service layer -> domain layer -> infrastructure (via\
+  \ ABCs)**. Every\n  arrow that goes the other way is an architectural defect.\n- Test seam = correct\
+  \ seam: if a class is hard to mock, you found a missing\n  abstraction.\n\n### DRY\n\n- **Single source\
+  \ of truth per concern.** Pick the canonical home, document\n  it, point everything else at it. Constants,\
+  \ formulae, validation rules,\n  enums, format strings, magic numbers -- ONE place each.\n- **Duplicated\
+  \ CODE is a defect; duplicated DATA may be intentional.**\n  Two button definitions on two screens calling\
+  \ the same handler is FINE.\n  Two implementations of the same calculation is NOT.\n- **Three is the\
+  \ threshold.** First occurrence: write it inline. Second:\n  consider extraction. Third: extract --\
+  \ you now have a pattern.\n- **DRY violates faster across module boundaries.** A duplication confined\n\
+  \  to one file is cheap to fix later; a duplication spread across packages\n  hardens fast and is expensive\
+  \ to consolidate.\n\n### How to apply within this expert role\n\nWhen you produce findings, proposals,\
+  \ designs, or documentation, you MUST:\n\n1. **Name the principle** that motivates the recommendation.\
+  \ \"This violates\n   SRP because ...\" beats \"this is too big\".\n2. **Point at the canonical home.**\
+  \ If you flag duplication, name where the\n   single source of truth should live. If you flag a layering\
+  \ violation,\n   name the missing abstraction.\n3. **Prefer fixes that move TOWARD SOLID+DRY.** A fix\
+  \ that adds a god method\n   to silence a finding is rejected. A fix that introduces a new ABC + two\n\
+  \   implementations is preferred over a `match`/`elif` ladder.\n4. **Treat tests as a SOLID indicator.**\
+  \ Hard-to-mock = missing abstraction.\n   Three near-identical tests = missing parameterization. Brittle\
+  \ tests\n   coupled to implementation = leaky encapsulation.\n5. **Severity scaling.** A god class with\
+  \ 2000 lines and 30 public methods\n   is HIGH or CRITICAL, not LOW. A duplicated 3-line helper is LOW.\
+  \ The\n   blast radius of the duplication / coupling sets the severity.\n"

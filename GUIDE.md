@@ -1,12 +1,19 @@
-# Swarm Suite — Complete Guide
+# Swarm Suite -- Complete Guide
 
 ## What is Swarm Suite
 
-Swarm Suite is a set of 6 MCP servers (133 tools, 53 expert profiles) for AI-assisted software development. AI agents (Claude Code, Cursor, Windsurf, Cline) call these tools to analyze specifications, design architecture, review code, apply fixes, check for regressions, and update documentation.
+Swarm Suite is a set of **7 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`) -- 133+ MCP tools and 53 expert profiles -- for AI-assisted Python project development from **idea to production**.
 
-No tool contains AI. They provide infrastructure — storage, coordination, debate engine, quality gates. The AI agent does the thinking.
+AI agents (Claude Code, Cursor, Windsurf, Cline) call these tools to capture ideas, analyze hardware specifications, design architecture, plan implementation, review code, apply fixes, regenerate docs, harden for release, and ship -- with **SOLID + DRY** enforced at every stage.
 
-All tools communicate through a shared knowledge base (swarm-kb). No tool imports another directly. Each tool works independently if swarm-kb is unavailable.
+No tool contains AI. They provide infrastructure: storage, coordination primitives, debate engine, quality gates, expert prompt registry, CLAUDE.md keeper. The AI agent does the thinking.
+
+**Architecture:**
+- `swarm-core` is the foundation (models, expert registry, session lifecycle, coordination primitives, MCP scaffolding, CLAUDE.md keeper).
+- `swarm-kb` is the storage layer (findings, decisions, debates, pipelines).
+- The five `*-swarm` tools depend only on `swarm-core` + `swarm-kb` -- never on each other. Layering enforced by `scripts/check_imports.py`.
+
+For the layering rules see `docs/architecture/layering.md`. For the full pipeline spec see `docs/architecture/pipeline-stages.md`.
 
 ---
 
@@ -14,10 +21,15 @@ All tools communicate through a shared knowledge base (swarm-kb). No tool import
 
 ```bash
 # Full suite
-pip install swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
+pip install swarm-core swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
 
 # With PDF support (for datasheets and documentation)
 pip install swarm-kb[pdf] spec-swarm-ai[pdf]
+
+# Monorepo dev install (editable, dependency-ordered)
+git clone https://github.com/fozzfut/swarm-suite
+cd swarm-suite
+python scripts/install_all.py
 ```
 
 ### MCP Server Setup

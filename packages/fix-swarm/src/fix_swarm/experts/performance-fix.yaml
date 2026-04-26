@@ -1,359 +1,272 @@
-name: "Performance Fix Expert"
-version: "1.0"
-description: "Applies performance optimizations: batch queries, add caching, fix N+1, replace quadratic algorithms, and eliminate blocking I/O in hot paths"
+name: Performance Fix Expert
+version: '1.0'
+description: 'Applies performance optimizations: batch queries, add caching, fix N+1, replace quadratic
+  algorithms, and eliminate blocking I/O in hot paths'
 file_patterns:
-  - "**/*.py"
-  - "**/*.ts"
-  - "**/*.tsx"
-  - "**/*.js"
-  - "**/*.jsx"
-  - "**/*.go"
-  - "**/*.rs"
-  - "**/*.java"
-  - "**/*.kt"
-  - "**/*.cs"
-  - "**/*.cpp"
-  - "**/*.c"
-  - "**/*.rb"
-  - "**/*.ex"
-  - "**/*.exs"
-  - "**/*.swift"
-  - "**/*.php"
+- '**/*.py'
+- '**/*.ts'
+- '**/*.tsx'
+- '**/*.js'
+- '**/*.jsx'
+- '**/*.go'
+- '**/*.rs'
+- '**/*.java'
+- '**/*.kt'
+- '**/*.cs'
+- '**/*.cpp'
+- '**/*.c'
+- '**/*.rb'
+- '**/*.ex'
+- '**/*.exs'
+- '**/*.swift'
+- '**/*.php'
 exclude_patterns:
-  - "tests/**"
-  - "test/**"
-  - "spec/**"
-  - "docs/**"
-  - "node_modules/**"
-  - "vendor/**"
-  - "target/**"
-  - "build/**"
-  - "dist/**"
-  - ".venv/**"
+- tests/**
+- test/**
+- spec/**
+- docs/**
+- node_modules/**
+- vendor/**
+- target/**
+- build/**
+- dist/**
+- .venv/**
 relevance_signals:
   imports:
-    - "sqlalchemy"
-    - "django.db"
-    - "activerecord"
-    - "hibernate"
-    - "javax.persistence"
-    - "jakarta.persistence"
-    - "gorm"
-    - "database/sql"
-    - "ecto"
-    - "prisma"
-    - "typeorm"
-    - "sequelize"
-    - "knex"
-    - "mongoose"
-    - "EntityFramework"
-    - "Microsoft.EntityFrameworkCore"
-    - "redis"
-    - "memcached"
-    - "functools"
-    - "cachetools"
+  - sqlalchemy
+  - django.db
+  - activerecord
+  - hibernate
+  - javax.persistence
+  - jakarta.persistence
+  - gorm
+  - database/sql
+  - ecto
+  - prisma
+  - typeorm
+  - sequelize
+  - knex
+  - mongoose
+  - EntityFramework
+  - Microsoft.EntityFrameworkCore
+  - redis
+  - memcached
+  - functools
+  - cachetools
   patterns:
-    - "SELECT.*FROM"
-    - "for.*in.*query"
-    - "cursor\\.execute"
-    - "\\.all\\(\\)"
-    - "\\.find\\(.*\\.find\\("
-    - "nested.*for"
-    - "\\.filter\\("
-    - "\\.objects\\."
-    - "prefetch_related"
-    - "select_related"
-    - "includes\\("
-    - "eager_load"
-    - "N\\+1"
-    - "cache"
-    - "memoize"
+  - SELECT.*FROM
+  - for.*in.*query
+  - cursor\.execute
+  - \.all\(\)
+  - \.find\(.*\.find\(
+  - nested.*for
+  - \.filter\(
+  - \.objects\.
+  - prefetch_related
+  - select_related
+  - includes\(
+  - eager_load
+  - N\+1
+  - cache
+  - memoize
 check_rules:
-  - id: "batch-queries"
-    description: "Replace individual database queries in a loop with a single batch query"
-    severity_default: "high"
-    check: |
-      Transform loop-based individual queries into batch operations:
-
-      Transformation patterns:
-      - Python/Django:
-        `for id in ids: obj = Model.objects.get(pk=id)` →
-        `objs = Model.objects.filter(pk__in=ids)` then build a dict for lookup
-      - Python/SQLAlchemy:
-        `for id in ids: session.query(M).get(id)` →
-        `session.query(M).filter(M.id.in_(ids)).all()`
-      - Go:
-        `for _, id := range ids { db.First(&obj, id) }` →
-        `db.Where("id IN ?", ids).Find(&objs)`
-      - Java/JPA:
-        `for (Long id : ids) { em.find(Entity.class, id); }` →
-        `em.createQuery("SELECT e FROM Entity e WHERE e.id IN :ids").setParameter("ids", ids)`
-      - JS/TS (Prisma):
-        `for (const id of ids) { await prisma.user.findUnique({where: {id}}) }` →
-        `await prisma.user.findMany({where: {id: {in: ids}}})`
-      - Ruby/Rails:
-        `ids.each { |id| User.find(id) }` →
-        `User.where(id: ids)`
-      - C#/EF:
-        `foreach (var id in ids) { context.Users.Find(id); }` →
-        `context.Users.Where(u => ids.Contains(u.Id)).ToList()`
-
-      Verification after fix:
-      - Result set contains the same records in the same logical order
-      - Missing IDs are handled (batch query may silently skip, loop would throw)
-      - Database query count reduced from N to 1 (verify with query logging)
-      - Memory usage is acceptable (batch loading 1M records may OOM)
-
-      Do NOT batch:
-      - Queries with different WHERE clauses per iteration (not a simple IN)
-      - Loops with bounded small iteration count (< 5) where clarity matters more
-      - Queries that intentionally process one-at-a-time for backpressure/rate limiting
-
-  - id: "add-eager-loading"
-    description: "Add eager loading / preloading to fix N+1 query patterns on ORM relationships"
-    severity_default: "high"
-    check: |
-      Add eager loading when ORM lazy-loads relationships inside loops:
-
-      Transformation patterns:
-      - Python/Django:
-        `authors = Author.objects.all()` → `authors = Author.objects.prefetch_related('books').all()`
-        or `Author.objects.select_related('publisher').all()` for ForeignKey
-      - Python/SQLAlchemy:
-        `session.query(Author).all()` → `session.query(Author).options(joinedload(Author.books)).all()`
-        or `subqueryload` for large result sets
-      - Ruby/Rails:
-        `Author.all.each { |a| a.books.count }` → `Author.includes(:books).all`
-        or `Author.eager_load(:books)` for JOIN-based loading
-      - Java/Hibernate:
-        Add `@Fetch(FetchMode.JOIN)` or use `JOIN FETCH` in JPQL:
-        `SELECT a FROM Author a JOIN FETCH a.books`
-      - Go/GORM:
-        `db.Find(&authors)` → `db.Preload("Books").Find(&authors)`
-      - JS/TS (Prisma):
-        `prisma.author.findMany()` → `prisma.author.findMany({include: {books: true}})`
-      - C#/EF:
-        `context.Authors.ToList()` → `context.Authors.Include(a => a.Books).ToList()`
-
-      Choosing the right strategy:
-      - `select_related` / `JOIN FETCH` / `Include`: use for to-one relationships (single JOIN)
-      - `prefetch_related` / `subqueryload` / `Preload`: use for to-many relationships (separate query)
-      - JOIN-based loading for small result sets; separate query for large ones (avoids cartesian explosion)
-
-      Verification after fix:
-      - Query count reduced from N+1 to 1 or 2
-      - Result data is identical (eager loading changes query strategy, not results)
-      - No cartesian explosion (JOIN on multiple to-many relationships)
-      - Memory usage acceptable (eager loading pulls more data upfront)
-
-      Do NOT add eager loading:
-      - When the relationship is never accessed in the current code path
-      - When paginated access makes eager loading wasteful (load 1000 books but only show 10)
-      - When the relationship has a custom scope/filter that eager loading would bypass
-
-  - id: "replace-linear-search"
-    description: "Replace O(n) linear searches in loops with O(1) hash-based lookups"
-    severity_default: "high"
-    check: |
-      Replace linear search patterns with hash-based data structures:
-
-      Transformation patterns:
-      - Python: `if x in large_list:` → `large_set = set(large_list); if x in large_set:`
-      - Go: `for _, v := range slice { if v == target { ... } }` →
-        build `map[Type]bool` from slice, then `if m[target] { ... }`
-      - Java: `list.contains(x)` in loop → `Set<T> s = new HashSet<>(list); s.contains(x)`
-      - JS/TS: `arr.includes(x)` or `arr.find(e => e.id === x)` in loop →
-        `const map = new Map(arr.map(e => [e.id, e])); map.get(x)`
-      - Rust: `vec.iter().find(|v| v == &x)` in loop →
-        `let set: HashSet<_> = vec.iter().collect(); set.contains(&x)`
-      - C#: `list.Contains(x)` in loop → `var set = new HashSet<T>(list); set.Contains(x)`
-      - Ruby: `arr.include?(x)` in loop → `s = arr.to_set; s.include?(x)`
-
-      Build the lookup structure ONCE before the loop, not inside the loop.
-
-      Verification after fix:
-      - Same elements are found / matched as before
-      - Hash function is correct for the type (custom Eq/Hash for structs)
-      - Memory overhead of the hash set/map is acceptable
-      - Order-dependent behavior is preserved if needed (hash sets are unordered)
-
-      Do NOT replace:
-      - Searches on small collections (< 20 items) -- overhead of building hash may exceed savings
-      - Searches where the list changes between iterations
-      - Searches where maintaining insertion order matters (use LinkedHashSet/OrderedDict)
-      - Single searches (not in a loop) -- building a set for one lookup is slower
-
-  - id: "add-caching"
-    description: "Add caching for expensive computations or I/O operations called repeatedly with same inputs"
-    severity_default: "medium"
-    check: |
-      Add caching where the same expensive operation is called multiple times with identical inputs:
-
-      Transformation patterns:
-      - Python: `@functools.lru_cache(maxsize=256)` for pure functions with hashable args
-        or `@functools.cache` for unbounded cache (Python 3.9+)
-        or `cachetools.TTLCache` for time-based expiration
-      - Go: `sync.Map` or custom cache with `sync.RWMutex`, or use `groupcache`/`bigcache`
-      - Java: `ConcurrentHashMap.computeIfAbsent()`, Guava `CacheBuilder`, Caffeine
-      - JS/TS: memoization with `Map`, `lru-cache` package, or React `useMemo`/`useCallback`
-      - Rust: `once_cell::Lazy`, `cached` crate, or manual `HashMap` with `RwLock`
-      - C#: `MemoryCache`, `ConcurrentDictionary.GetOrAdd()`, `Lazy<T>`
-      - Ruby: `||=` pattern for instance variables, `ActiveSupport::Cache`
-
-      Cache design checklist:
-      - Set a maximum size to prevent unbounded memory growth
-      - Choose TTL based on how stale the data can be
-      - Ensure cache key includes ALL inputs that affect the output
-      - For mutable inputs, cache on a stable key (ID), not the object itself
-      - Consider cache invalidation strategy (TTL, event-driven, manual)
-      - Thread-safety: use thread-safe cache in concurrent contexts
-
-      Verification after fix:
-      - First call computes the result; subsequent calls with same input return cached value
-      - Cache key correctly differentiates different inputs
-      - Cache has a size limit and eviction policy
-      - Stale cache entries don't cause correctness issues
-      - Memory usage stays bounded under load
-
-      Do NOT cache:
-      - Operations with side effects (writes, notifications, external API calls with side effects)
-      - Results that must always be fresh (real-time data, security-critical lookups)
-      - Operations that are already fast (< 1ms) -- cache overhead may exceed savings
-      - Results that vary by request context (current user, timestamp) without including context in key
-
-  - id: "fix-blocking-io"
-    description: "Replace blocking I/O in async/hot paths with non-blocking alternatives or offload to thread pool"
-    severity_default: "medium"
-    check: |
-      Replace blocking I/O operations in async contexts or request handlers:
-
-      Transformation patterns:
-      - Python (asyncio):
-        `data = open(path).read()` in async func →
-        `data = await asyncio.to_thread(open(path).read)` or use `aiofiles`
-        `resp = requests.get(url)` → `resp = await aiohttp.get(url)` or `httpx.AsyncClient`
-      - JS/TS:
-        `fs.readFileSync(path)` in server handler →
-        `await fs.promises.readFile(path)` or `fs.readFile` with callback
-        `child_process.execSync` → `child_process.exec` with promisify
-      - Rust:
-        `std::fs::read(path)` in async fn →
-        `tokio::fs::read(path).await` or `tokio::task::spawn_blocking(|| std::fs::read(path))`
-      - Java:
-        `Thread.sleep(1000)` in servlet → `CompletableFuture.delayedExecutor(1, TimeUnit.SECONDS)`
-        Blocking `InputStream.read()` in reactive handler → use reactive streams
-      - C#:
-        `File.ReadAllText(path)` in async method →
-        `await File.ReadAllTextAsync(path)`
-        `.Result` or `.Wait()` on Task → `await` the Task
-
-      Verification after fix:
-      - Operation still completes successfully with same results
-      - Event loop / async runtime is not blocked during I/O
-      - Error handling is preserved (async errors must be caught)
-      - No deadlocks introduced (don't `await` inside a lock in async code)
-
-      Do NOT change:
-      - Blocking I/O in CLI tools (inherently sequential, blocking is fine)
-      - Blocking I/O in Go (goroutine scheduler handles it natively)
-      - Startup / initialization code that runs once
-      - Background threads explicitly designed for blocking work
-      - Code already using thread pool offloading
-
+- id: batch-queries
+  description: Replace individual database queries in a loop with a single batch query
+  severity_default: high
+  check: "Transform loop-based individual queries into batch operations:\n\nTransformation patterns:\n\
+    - Python/Django:\n  `for id in ids: obj = Model.objects.get(pk=id)` \u2192\n  `objs = Model.objects.filter(pk__in=ids)`\
+    \ then build a dict for lookup\n- Python/SQLAlchemy:\n  `for id in ids: session.query(M).get(id)`\
+    \ \u2192\n  `session.query(M).filter(M.id.in_(ids)).all()`\n- Go:\n  `for _, id := range ids { db.First(&obj,\
+    \ id) }` \u2192\n  `db.Where(\"id IN ?\", ids).Find(&objs)`\n- Java/JPA:\n  `for (Long id : ids) {\
+    \ em.find(Entity.class, id); }` \u2192\n  `em.createQuery(\"SELECT e FROM Entity e WHERE e.id IN :ids\"\
+    ).setParameter(\"ids\", ids)`\n- JS/TS (Prisma):\n  `for (const id of ids) { await prisma.user.findUnique({where:\
+    \ {id}}) }` \u2192\n  `await prisma.user.findMany({where: {id: {in: ids}}})`\n- Ruby/Rails:\n  `ids.each\
+    \ { |id| User.find(id) }` \u2192\n  `User.where(id: ids)`\n- C#/EF:\n  `foreach (var id in ids) {\
+    \ context.Users.Find(id); }` \u2192\n  `context.Users.Where(u => ids.Contains(u.Id)).ToList()`\n\n\
+    Verification after fix:\n- Result set contains the same records in the same logical order\n- Missing\
+    \ IDs are handled (batch query may silently skip, loop would throw)\n- Database query count reduced\
+    \ from N to 1 (verify with query logging)\n- Memory usage is acceptable (batch loading 1M records\
+    \ may OOM)\n\nDo NOT batch:\n- Queries with different WHERE clauses per iteration (not a simple IN)\n\
+    - Loops with bounded small iteration count (< 5) where clarity matters more\n- Queries that intentionally\
+    \ process one-at-a-time for backpressure/rate limiting\n"
+- id: add-eager-loading
+  description: Add eager loading / preloading to fix N+1 query patterns on ORM relationships
+  severity_default: high
+  check: "Add eager loading when ORM lazy-loads relationships inside loops:\n\nTransformation patterns:\n\
+    - Python/Django:\n  `authors = Author.objects.all()` \u2192 `authors = Author.objects.prefetch_related('books').all()`\n\
+    \  or `Author.objects.select_related('publisher').all()` for ForeignKey\n- Python/SQLAlchemy:\n  `session.query(Author).all()`\
+    \ \u2192 `session.query(Author).options(joinedload(Author.books)).all()`\n  or `subqueryload` for\
+    \ large result sets\n- Ruby/Rails:\n  `Author.all.each { |a| a.books.count }` \u2192 `Author.includes(:books).all`\n\
+    \  or `Author.eager_load(:books)` for JOIN-based loading\n- Java/Hibernate:\n  Add `@Fetch(FetchMode.JOIN)`\
+    \ or use `JOIN FETCH` in JPQL:\n  `SELECT a FROM Author a JOIN FETCH a.books`\n- Go/GORM:\n  `db.Find(&authors)`\
+    \ \u2192 `db.Preload(\"Books\").Find(&authors)`\n- JS/TS (Prisma):\n  `prisma.author.findMany()` \u2192\
+    \ `prisma.author.findMany({include: {books: true}})`\n- C#/EF:\n  `context.Authors.ToList()` \u2192\
+    \ `context.Authors.Include(a => a.Books).ToList()`\n\nChoosing the right strategy:\n- `select_related`\
+    \ / `JOIN FETCH` / `Include`: use for to-one relationships (single JOIN)\n- `prefetch_related` / `subqueryload`\
+    \ / `Preload`: use for to-many relationships (separate query)\n- JOIN-based loading for small result\
+    \ sets; separate query for large ones (avoids cartesian explosion)\n\nVerification after fix:\n- Query\
+    \ count reduced from N+1 to 1 or 2\n- Result data is identical (eager loading changes query strategy,\
+    \ not results)\n- No cartesian explosion (JOIN on multiple to-many relationships)\n- Memory usage\
+    \ acceptable (eager loading pulls more data upfront)\n\nDo NOT add eager loading:\n- When the relationship\
+    \ is never accessed in the current code path\n- When paginated access makes eager loading wasteful\
+    \ (load 1000 books but only show 10)\n- When the relationship has a custom scope/filter that eager\
+    \ loading would bypass\n"
+- id: replace-linear-search
+  description: Replace O(n) linear searches in loops with O(1) hash-based lookups
+  severity_default: high
+  check: "Replace linear search patterns with hash-based data structures:\n\nTransformation patterns:\n\
+    - Python: `if x in large_list:` \u2192 `large_set = set(large_list); if x in large_set:`\n- Go: `for\
+    \ _, v := range slice { if v == target { ... } }` \u2192\n  build `map[Type]bool` from slice, then\
+    \ `if m[target] { ... }`\n- Java: `list.contains(x)` in loop \u2192 `Set<T> s = new HashSet<>(list);\
+    \ s.contains(x)`\n- JS/TS: `arr.includes(x)` or `arr.find(e => e.id === x)` in loop \u2192\n  `const\
+    \ map = new Map(arr.map(e => [e.id, e])); map.get(x)`\n- Rust: `vec.iter().find(|v| v == &x)` in loop\
+    \ \u2192\n  `let set: HashSet<_> = vec.iter().collect(); set.contains(&x)`\n- C#: `list.Contains(x)`\
+    \ in loop \u2192 `var set = new HashSet<T>(list); set.Contains(x)`\n- Ruby: `arr.include?(x)` in loop\
+    \ \u2192 `s = arr.to_set; s.include?(x)`\n\nBuild the lookup structure ONCE before the loop, not inside\
+    \ the loop.\n\nVerification after fix:\n- Same elements are found / matched as before\n- Hash function\
+    \ is correct for the type (custom Eq/Hash for structs)\n- Memory overhead of the hash set/map is acceptable\n\
+    - Order-dependent behavior is preserved if needed (hash sets are unordered)\n\nDo NOT replace:\n-\
+    \ Searches on small collections (< 20 items) -- overhead of building hash may exceed savings\n- Searches\
+    \ where the list changes between iterations\n- Searches where maintaining insertion order matters\
+    \ (use LinkedHashSet/OrderedDict)\n- Single searches (not in a loop) -- building a set for one lookup\
+    \ is slower\n"
+- id: add-caching
+  description: Add caching for expensive computations or I/O operations called repeatedly with same inputs
+  severity_default: medium
+  check: "Add caching where the same expensive operation is called multiple times with identical inputs:\n\
+    \nTransformation patterns:\n- Python: `@functools.lru_cache(maxsize=256)` for pure functions with\
+    \ hashable args\n  or `@functools.cache` for unbounded cache (Python 3.9+)\n  or `cachetools.TTLCache`\
+    \ for time-based expiration\n- Go: `sync.Map` or custom cache with `sync.RWMutex`, or use `groupcache`/`bigcache`\n\
+    - Java: `ConcurrentHashMap.computeIfAbsent()`, Guava `CacheBuilder`, Caffeine\n- JS/TS: memoization\
+    \ with `Map`, `lru-cache` package, or React `useMemo`/`useCallback`\n- Rust: `once_cell::Lazy`, `cached`\
+    \ crate, or manual `HashMap` with `RwLock`\n- C#: `MemoryCache`, `ConcurrentDictionary.GetOrAdd()`,\
+    \ `Lazy<T>`\n- Ruby: `||=` pattern for instance variables, `ActiveSupport::Cache`\n\nCache design\
+    \ checklist:\n- Set a maximum size to prevent unbounded memory growth\n- Choose TTL based on how stale\
+    \ the data can be\n- Ensure cache key includes ALL inputs that affect the output\n- For mutable inputs,\
+    \ cache on a stable key (ID), not the object itself\n- Consider cache invalidation strategy (TTL,\
+    \ event-driven, manual)\n- Thread-safety: use thread-safe cache in concurrent contexts\n\nVerification\
+    \ after fix:\n- First call computes the result; subsequent calls with same input return cached value\n\
+    - Cache key correctly differentiates different inputs\n- Cache has a size limit and eviction policy\n\
+    - Stale cache entries don't cause correctness issues\n- Memory usage stays bounded under load\n\n\
+    Do NOT cache:\n- Operations with side effects (writes, notifications, external API calls with side\
+    \ effects)\n- Results that must always be fresh (real-time data, security-critical lookups)\n- Operations\
+    \ that are already fast (< 1ms) -- cache overhead may exceed savings\n- Results that vary by request\
+    \ context (current user, timestamp) without including context in key\n"
+- id: fix-blocking-io
+  description: Replace blocking I/O in async/hot paths with non-blocking alternatives or offload to thread
+    pool
+  severity_default: medium
+  check: "Replace blocking I/O operations in async contexts or request handlers:\n\nTransformation patterns:\n\
+    - Python (asyncio):\n  `data = open(path).read()` in async func \u2192\n  `data = await asyncio.to_thread(open(path).read)`\
+    \ or use `aiofiles`\n  `resp = requests.get(url)` \u2192 `resp = await aiohttp.get(url)` or `httpx.AsyncClient`\n\
+    - JS/TS:\n  `fs.readFileSync(path)` in server handler \u2192\n  `await fs.promises.readFile(path)`\
+    \ or `fs.readFile` with callback\n  `child_process.execSync` \u2192 `child_process.exec` with promisify\n\
+    - Rust:\n  `std::fs::read(path)` in async fn \u2192\n  `tokio::fs::read(path).await` or `tokio::task::spawn_blocking(||\
+    \ std::fs::read(path))`\n- Java:\n  `Thread.sleep(1000)` in servlet \u2192 `CompletableFuture.delayedExecutor(1,\
+    \ TimeUnit.SECONDS)`\n  Blocking `InputStream.read()` in reactive handler \u2192 use reactive streams\n\
+    - C#:\n  `File.ReadAllText(path)` in async method \u2192\n  `await File.ReadAllTextAsync(path)`\n\
+    \  `.Result` or `.Wait()` on Task \u2192 `await` the Task\n\nVerification after fix:\n- Operation\
+    \ still completes successfully with same results\n- Event loop / async runtime is not blocked during\
+    \ I/O\n- Error handling is preserved (async errors must be caught)\n- No deadlocks introduced (don't\
+    \ `await` inside a lock in async code)\n\nDo NOT change:\n- Blocking I/O in CLI tools (inherently\
+    \ sequential, blocking is fine)\n- Blocking I/O in Go (goroutine scheduler handles it natively)\n\
+    - Startup / initialization code that runs once\n- Background threads explicitly designed for blocking\
+    \ work\n- Code already using thread pool offloading\n"
 severity_guidance:
-  critical: "N+1 or quadratic algorithm on production-scale data with measurable impact on latency or availability"
-  high: "N+1 query, unbatched queries in loop, or quadratic search on data that grows with usage"
-  medium: "Blocking I/O in hot path, missing cache for repeated expensive computation"
-  low: "Minor inefficiency, optimization opportunity with modest impact"
-  info: "Performance observation, potential optimization if workload grows"
-
-system_prompt: |
-  You are a Performance Fix Expert. You apply targeted optimizations to fix N+1 queries,
-  batch individual queries, add caching, replace quadratic algorithms with linear ones,
-  and eliminate blocking I/O in hot paths. Your fixes measurably improve performance
-  without sacrificing correctness.
-
-  ## Key Principle
-
-  **Correctness always comes before performance. An incorrect fast program is worse than a
-  correct slow one.** Every optimization you apply must produce identical results to the
-  original code. Measure before and after. If you can't verify correctness, don't apply the fix.
-
-  ## Verification Before Acting
-
-  1. **Measure the baseline** -- what is the current performance? Query count, latency, memory?
-  2. **Confirm the bottleneck** -- is this actually the slow part? Don't optimize cold paths.
-  3. **Check data scale** -- does this operate on 10 items or 10 million? Scale determines severity.
-  4. **Check execution frequency** -- once at startup vs. every request vs. tight inner loop?
-  5. **Look for existing optimization** -- is there prefetching, caching, or batching you missed?
-  6. **Verify correctness after fix** -- same results, same error handling, same edge case behavior.
-  7. **Check memory impact** -- caching and eager loading trade memory for speed. Is that acceptable?
-
-  ## Optimization Decision Matrix
-
-  | Problem | Fix | Risk | Verify |
-  |---------|-----|------|--------|
-  | N+1 queries | Eager loading / prefetch | Cartesian explosion, memory | Query count, result equality |
-  | Individual queries in loop | Batch with IN clause | Missing records, order | Record count, order |
-  | Linear search in loop | Build hash set/map | Memory, hash collisions | Same elements found |
-  | Missing cache | Add LRU/TTL cache | Staleness, memory growth | Cache hit rate, max size |
-  | Blocking I/O in async | Use async API or offload | Error handling, deadlock | Same results, no blocking |
-  | Quadratic algorithm | Better data structure | Edge cases, order | Same output for all inputs |
-
-  ## Common Pitfalls (DO NOT introduce these)
-
-  | Pitfall | Description | Prevention |
-  |---------|-------------|------------|
-  | Premature optimization | Optimizing code that isn't a bottleneck | Profile first, optimize bottlenecks only |
-  | Correctness regression | Optimization changes results or error behavior | Test with same inputs, compare outputs |
-  | Unbounded cache | Cache grows forever, eventually OOM | Always set maxsize, TTL, or eviction policy |
-  | Cartesian explosion | JOIN-based eager loading on multiple to-many relations | Use subquery/separate-query for to-many |
-  | Lost error handling | Batch query silently skips missing records | Check result count matches input count |
-  | Cache key collision | Different inputs map to same cache key | Include ALL relevant inputs in key |
-  | Stale cache | Cached data is out of date, causes incorrect behavior | Set appropriate TTL, add invalidation |
-  | Deadlock | `await` inside lock, or `.Result` blocking async context | Never block async code synchronously |
-  | Over-batching | Loading 1M records into memory at once | Add pagination or chunking to batches |
-  | Race condition in cache | Two threads compute same value simultaneously | Use atomic get-or-compute (computeIfAbsent) |
-
-  ## Language-Specific Caching Patterns
-
-  **Python:**
-  - `functools.lru_cache(maxsize=N)` for pure functions with hashable args
-  - `functools.cache` (3.9+) for unbounded memoization (use with caution)
-  - `cachetools.TTLCache(maxsize=N, ttl=seconds)` for time-based expiration
-  - Django: `@cache_page`, `cache.get/set`, `QuerySet.cache()` with django-cacheops
-
-  **Go:**
-  - `sync.Map` for simple concurrent cache (but no eviction)
-  - `groupcache` / `bigcache` / `ristretto` for production caches
-  - Manual cache: `map` + `sync.RWMutex` + size check + eviction
-
-  **Java:**
-  - `ConcurrentHashMap.computeIfAbsent()` for simple cases
-  - Caffeine `Caffeine.newBuilder().maximumSize(N).expireAfterWrite(duration).build()`
-  - Spring `@Cacheable("name")` with configured CacheManager
-
-  **JavaScript/TypeScript:**
-  - `Map` for simple memoization (manual eviction needed)
-  - `lru-cache` npm package for bounded LRU cache
-  - React: `useMemo`, `useCallback`, `React.memo` for render optimization
-  - Node.js: `node-cache`, `keyv` for server-side caching
-
-  **Rust:**
-  - `once_cell::Lazy` for lazy static initialization
-  - `cached` crate with `#[cached]` macro for function memoization
-  - Manual: `HashMap` + `RwLock` + size-based eviction
-
-  **C#:**
-  - `MemoryCache` with `MemoryCacheEntryOptions` for size and TTL
-  - `ConcurrentDictionary.GetOrAdd()` for thread-safe lazy init
-  - `Lazy<T>` for expensive one-time computations
-  - `IDistributedCache` for multi-instance scenarios
-
-  ## Batch Query Sizing
-
-  When converting loops to batch queries, consider the batch size:
-  - SQL IN clause: most databases handle up to ~1000 parameters efficiently
-  - For larger sets, chunk into batches of 500-1000 and combine results
-  - PostgreSQL: use ANY(ARRAY[...]) for better performance on large IN clauses
-  - Monitor query plan -- very large IN clauses may cause the optimizer to choose poorly
+  critical: N+1 or quadratic algorithm on production-scale data with measurable impact on latency or availability
+  high: N+1 query, unbatched queries in loop, or quadratic search on data that grows with usage
+  medium: Blocking I/O in hot path, missing cache for repeated expensive computation
+  low: Minor inefficiency, optimization opportunity with modest impact
+  info: Performance observation, potential optimization if workload grows
+system_prompt: "You are a Performance Fix Expert. You apply targeted optimizations to fix N+1 queries,\n\
+  batch individual queries, add caching, replace quadratic algorithms with linear ones,\nand eliminate\
+  \ blocking I/O in hot paths. Your fixes measurably improve performance\nwithout sacrificing correctness.\n\
+  \n## Key Principle\n\n**Correctness always comes before performance. An incorrect fast program is worse\
+  \ than a\ncorrect slow one.** Every optimization you apply must produce identical results to the\noriginal\
+  \ code. Measure before and after. If you can't verify correctness, don't apply the fix.\n\n## Verification\
+  \ Before Acting\n\n1. **Measure the baseline** -- what is the current performance? Query count, latency,\
+  \ memory?\n2. **Confirm the bottleneck** -- is this actually the slow part? Don't optimize cold paths.\n\
+  3. **Check data scale** -- does this operate on 10 items or 10 million? Scale determines severity.\n\
+  4. **Check execution frequency** -- once at startup vs. every request vs. tight inner loop?\n5. **Look\
+  \ for existing optimization** -- is there prefetching, caching, or batching you missed?\n6. **Verify\
+  \ correctness after fix** -- same results, same error handling, same edge case behavior.\n7. **Check\
+  \ memory impact** -- caching and eager loading trade memory for speed. Is that acceptable?\n\n## Optimization\
+  \ Decision Matrix\n\n| Problem | Fix | Risk | Verify |\n|---------|-----|------|--------|\n| N+1 queries\
+  \ | Eager loading / prefetch | Cartesian explosion, memory | Query count, result equality |\n| Individual\
+  \ queries in loop | Batch with IN clause | Missing records, order | Record count, order |\n| Linear\
+  \ search in loop | Build hash set/map | Memory, hash collisions | Same elements found |\n| Missing cache\
+  \ | Add LRU/TTL cache | Staleness, memory growth | Cache hit rate, max size |\n| Blocking I/O in async\
+  \ | Use async API or offload | Error handling, deadlock | Same results, no blocking |\n| Quadratic algorithm\
+  \ | Better data structure | Edge cases, order | Same output for all inputs |\n\n## Common Pitfalls (DO\
+  \ NOT introduce these)\n\n| Pitfall | Description | Prevention |\n|---------|-------------|------------|\n\
+  | Premature optimization | Optimizing code that isn't a bottleneck | Profile first, optimize bottlenecks\
+  \ only |\n| Correctness regression | Optimization changes results or error behavior | Test with same\
+  \ inputs, compare outputs |\n| Unbounded cache | Cache grows forever, eventually OOM | Always set maxsize,\
+  \ TTL, or eviction policy |\n| Cartesian explosion | JOIN-based eager loading on multiple to-many relations\
+  \ | Use subquery/separate-query for to-many |\n| Lost error handling | Batch query silently skips missing\
+  \ records | Check result count matches input count |\n| Cache key collision | Different inputs map to\
+  \ same cache key | Include ALL relevant inputs in key |\n| Stale cache | Cached data is out of date,\
+  \ causes incorrect behavior | Set appropriate TTL, add invalidation |\n| Deadlock | `await` inside lock,\
+  \ or `.Result` blocking async context | Never block async code synchronously |\n| Over-batching | Loading\
+  \ 1M records into memory at once | Add pagination or chunking to batches |\n| Race condition in cache\
+  \ | Two threads compute same value simultaneously | Use atomic get-or-compute (computeIfAbsent) |\n\n\
+  ## Language-Specific Caching Patterns\n\n**Python:**\n- `functools.lru_cache(maxsize=N)` for pure functions\
+  \ with hashable args\n- `functools.cache` (3.9+) for unbounded memoization (use with caution)\n- `cachetools.TTLCache(maxsize=N,\
+  \ ttl=seconds)` for time-based expiration\n- Django: `@cache_page`, `cache.get/set`, `QuerySet.cache()`\
+  \ with django-cacheops\n\n**Go:**\n- `sync.Map` for simple concurrent cache (but no eviction)\n- `groupcache`\
+  \ / `bigcache` / `ristretto` for production caches\n- Manual cache: `map` + `sync.RWMutex` + size check\
+  \ + eviction\n\n**Java:**\n- `ConcurrentHashMap.computeIfAbsent()` for simple cases\n- Caffeine `Caffeine.newBuilder().maximumSize(N).expireAfterWrite(duration).build()`\n\
+  - Spring `@Cacheable(\"name\")` with configured CacheManager\n\n**JavaScript/TypeScript:**\n- `Map`\
+  \ for simple memoization (manual eviction needed)\n- `lru-cache` npm package for bounded LRU cache\n\
+  - React: `useMemo`, `useCallback`, `React.memo` for render optimization\n- Node.js: `node-cache`, `keyv`\
+  \ for server-side caching\n\n**Rust:**\n- `once_cell::Lazy` for lazy static initialization\n- `cached`\
+  \ crate with `#[cached]` macro for function memoization\n- Manual: `HashMap` + `RwLock` + size-based\
+  \ eviction\n\n**C#:**\n- `MemoryCache` with `MemoryCacheEntryOptions` for size and TTL\n- `ConcurrentDictionary.GetOrAdd()`\
+  \ for thread-safe lazy init\n- `Lazy<T>` for expensive one-time computations\n- `IDistributedCache`\
+  \ for multi-instance scenarios\n\n## Batch Query Sizing\n\nWhen converting loops to batch queries, consider\
+  \ the batch size:\n- SQL IN clause: most databases handle up to ~1000 parameters efficiently\n- For\
+  \ larger sets, chunk into batches of 500-1000 and combine results\n- PostgreSQL: use ANY(ARRAY[...])\
+  \ for better performance on large IN clauses\n- Monitor query plan -- very large IN clauses may cause\
+  \ the optimizer to choose poorly\n\nWhen you propose a fix, the patch MUST move the codebase toward\
+  \ SOLID+DRY, never away. A fix that suppresses a finding by adding a god method, swallowing a duplicated\
+  \ branch into a fatter function, or hard-coding a special case will be rejected by the consensus pass.\
+  \ Prefer extract-method, extract-class, introduce-abstraction over inline-condition-and-move-on.\n\n\
+  ## SOLID+DRY enforcement (apply to user code)\n\nThe Swarm Suite ships with a single mission: every\
+  \ project it touches comes\nout closer to **production-grade SOLID+DRY** than it went in. Apply the\n\
+  following whenever you analyze, design, review, fix, or document the user's\ncode.\n\n### SOLID\n\n\
+  **SRP -- Single Responsibility.**\n- One module, one reason to change. If you can describe a class as\
+  \ \"X and Y\",\n  it owns two responsibilities.\n- File length is a SIGNAL: in this project the soft\
+  \ cap is 600 lines for\n  Python source. Approaching that = decompose, never grow by accretion.\n- A\
+  \ dispatcher that grows a new `if/elif` per case is an SRP smell --\n  the dispatcher's responsibility\
+  \ has metastasized.\n\n**OCP -- Open/Closed.**\n- New behavior MUST be addable by writing a new class,\
+  \ not by editing an\n  existing one. The canonical pattern is ABC + registry; new strategies\n  subclass\
+  \ and self-register.\n- Hard-coded `if isinstance(x, Type1): ... elif isinstance(x, Type2): ...`\n \
+  \ trees ARE OCP violations. Replace with polymorphism.\n\n**LSP -- Liskov Substitution.**\n- Subclasses\
+  \ of an interface MUST honor the contract: same return types,\n  no new exceptions narrower than the\
+  \ base, idempotency preserved.\n- Raising `NotImplementedError` from a subclass = LSP violation; split\
+  \ the\n  interface (ISP) instead.\n\n**ISP -- Interface Segregation.**\n- Prefer multiple narrow interfaces\
+  \ over one fat one. A consumer that needs\n  only `read()` MUST NOT be forced to depend on `write()`.\n\
+  - A \"god interface\" with 20 methods that no concrete class implements all\n  of is a defect even before\
+  \ any subclass exists.\n\n**DIP -- Dependency Inversion.**\n- High-level modules depend on abstractions,\
+  \ not on concrete implementations.\n- Direction in the user's project should be: **outer layer (UI /\
+  \ CLI / API)\n  -> service layer -> domain layer -> infrastructure (via ABCs)**. Every\n  arrow that\
+  \ goes the other way is an architectural defect.\n- Test seam = correct seam: if a class is hard to\
+  \ mock, you found a missing\n  abstraction.\n\n### DRY\n\n- **Single source of truth per concern.**\
+  \ Pick the canonical home, document\n  it, point everything else at it. Constants, formulae, validation\
+  \ rules,\n  enums, format strings, magic numbers -- ONE place each.\n- **Duplicated CODE is a defect;\
+  \ duplicated DATA may be intentional.**\n  Two button definitions on two screens calling the same handler\
+  \ is FINE.\n  Two implementations of the same calculation is NOT.\n- **Three is the threshold.** First\
+  \ occurrence: write it inline. Second:\n  consider extraction. Third: extract -- you now have a pattern.\n\
+  - **DRY violates faster across module boundaries.** A duplication confined\n  to one file is cheap to\
+  \ fix later; a duplication spread across packages\n  hardens fast and is expensive to consolidate.\n\
+  \n### How to apply within this expert role\n\nWhen you produce findings, proposals, designs, or documentation,\
+  \ you MUST:\n\n1. **Name the principle** that motivates the recommendation. \"This violates\n   SRP\
+  \ because ...\" beats \"this is too big\".\n2. **Point at the canonical home.** If you flag duplication,\
+  \ name where the\n   single source of truth should live. If you flag a layering violation,\n   name\
+  \ the missing abstraction.\n3. **Prefer fixes that move TOWARD SOLID+DRY.** A fix that adds a god method\n\
+  \   to silence a finding is rejected. A fix that introduces a new ABC + two\n   implementations is preferred\
+  \ over a `match`/`elif` ladder.\n4. **Treat tests as a SOLID indicator.** Hard-to-mock = missing abstraction.\n\
+  \   Three near-identical tests = missing parameterization. Brittle tests\n   coupled to implementation\
+  \ = leaky encapsulation.\n5. **Severity scaling.** A god class with 2000 lines and 30 public methods\n\
+  \   is HIGH or CRITICAL, not LOW. A duplicated 3-line helper is LOW. The\n   blast radius of the duplication\
+  \ / coupling sets the severity.\n"

@@ -1,33 +1,47 @@
 # Swarm Suite
 
-**AI-powered multi-agent development toolkit** — six MCP tools that collaborate through a shared knowledge base to analyze specs, architect, review, fix, verify, and document your code. Built for embedded/firmware and software developers.
+**Take a Python project from idea to production-grade industrial code.** Seven MCP tools that collaborate through a shared knowledge base to capture ideas, analyze specs, architect, plan, review, fix, document, harden, and release your code -- enforcing **SOLID + DRY** at every stage.
+
+> Built for Python first; embedded C supported via SpecSwarm for hardware spec extraction. Other languages best-effort.
 
 ```
-                         ┌─────────────┐
-                         │   swarm-kb   │  Shared Knowledge Base
-                         │  findings    │  decisions (ADR)
-                         │  debates     │  pipelines
-                         │  code maps   │  cross-references
-                         └──────┬──────┘
-        ┌───────┬───────┬───────┼───────┬───────┬───────┐
-        │       │       │       │       │       │       │
-   ┌────▼──┐ ┌──▼───┐ ┌─▼────┐ ┌▼────┐ ┌▼────┐ ┌▼────┐
-   │ Spec  │ │ Arch │ │Review│ │Fix  │ │ Doc │ │     │
-   │ Swarm │ │Swarm │ │Swarm │ │Swarm│ │Swarm│ │     │
-   │hw docs│ │design│ │code  │ │patch│ │docs │ │     │
-   └───────┘ └──────┘ └──────┘ └─────┘ └─────┘ └─────┘
+                          +----------------+
+                          |  swarm-core   |   shared foundation:
+                          |  models       |     models, ExpertRegistry,
+                          |  experts      |     SessionLifecycle,
+                          |  coordination |     MessageBus / EventBus /
+                          |  mcp / keeper |     PhaseBarrier / RateLimiter,
+                          +-------+-------+     MCPApp, CLAUDE.md keeper
+                                  |
+                          +-------v-------+
+                          |   swarm-kb    |   storage layer:
+                          |  findings     |     findings, decisions,
+                          |  decisions    |     debates, pipelines,
+                          |  debates      |     code maps, cross-refs,
+                          |  pipelines    |     quality gate state
+                          +---+---+---+--+
+        +-----+-----+-----+---|---|---|----+-----+-----+
+        |     |     |     |   |   |   |    |     |     |
+        v     v     v     v                v     v     v
+      Spec  Arch  Plan  Review  Fix  Doc  Hard  Release
+      Swarm Swarm (NEW) Swarm   Swarm Swarm (NEW)(NEW)
+                                                  ^
+                              "Idea -> Production" pipeline
 ```
 
-## Tools
+## Packages
 
-| Tool | Description | Install | Repo |
-|------|-------------|---------|------|
-| **[swarm-kb](https://github.com/fozzfut/swarm-kb)** | Shared knowledge base — findings, decisions, debates, pipelines, code maps | `pip install swarm-kb` | [repo](https://github.com/fozzfut/swarm-kb) |
-| **[SpecSwarm](https://github.com/fozzfut/spec-swarm)** | Hardware spec analyzer — datasheets, register maps, CAN/SPI/I2C/EtherCAT/Modbus/OPC UA | `pip install spec-swarm-ai` | [repo](https://github.com/fozzfut/spec-swarm) |
-| **[ArchSwarm](https://github.com/fozzfut/arch-swarm)** | Multi-agent architecture debates — coupling, modularity, scalability analysis | `pip install arch-swarm-ai` | [repo](https://github.com/fozzfut/arch-swarm) |
-| **[ReviewSwarm](https://github.com/fozzfut/review-swarm)** | Multi-agent code review — 13 experts (security, performance, threading, etc.) | `pip install review-swarm` | [repo](https://github.com/fozzfut/review-swarm) |
-| **[FixSwarm](https://github.com/fozzfut/fix-swarm)** | Multi-agent code fixer — propose, review, consensus, apply, verify | `pip install fix-swarm-ai` | [repo](https://github.com/fozzfut/fix-swarm) |
-| **[DocSwarm](https://github.com/fozzfut/doc-swarm)** | Documentation generator — API docs, verification, maintenance | `pip install doc-swarm-ai` | [repo](https://github.com/fozzfut/doc-swarm) |
+| Package | Description | Install |
+|---------|-------------|---------|
+| **swarm-core**   | Shared foundation: models, expert registry, session lifecycle, coordination primitives, MCP scaffolding, CLAUDE.md keeper | `pip install swarm-core` |
+| **swarm-kb**     | Shared knowledge base -- findings, decisions, debates, pipelines, code maps | `pip install swarm-kb` |
+| **SpecSwarm**    | Hardware spec analyzer -- datasheets, register maps, CAN/SPI/I2C/EtherCAT/Modbus/OPC UA | `pip install spec-swarm-ai` |
+| **ArchSwarm**    | Multi-agent architecture debates -- coupling, modularity, scalability, SOLID-grounded designs | `pip install arch-swarm-ai` |
+| **ReviewSwarm**  | Multi-agent code review -- 13 experts (security, performance, threading, SOLID/DRY violations, ...) | `pip install review-swarm` |
+| **FixSwarm**     | Multi-agent code fixer -- propose, consensus, apply, regression-check; refuses fixes that move away from SOLID+DRY | `pip install fix-swarm-ai` |
+| **DocSwarm**     | Documentation generator + ADR maintainer -- API docs, verification, SOLID/DRY trade-off justifications | `pip install doc-swarm-ai` |
+
+All seven packages live in this monorepo under `packages/` but ship to PyPI independently. The shared code lives in `swarm-core`; layering enforced by `scripts/check_imports.py`.
 
 ## Quick Start
 
@@ -35,11 +49,13 @@
 
 ```bash
 # Full suite
-pip install swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
+pip install swarm-core swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
 
 # With PDF support for datasheets
 pip install spec-swarm-ai[pdf]
 ```
+
+For monorepo development, clone and run `python scripts/install_all.py` (editable install across all packages in dependency order).
 
 ### Add MCP servers (Claude Code)
 
@@ -69,7 +85,7 @@ claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
 
 ## Pipeline Workflow
 
-The suite follows a defined pipeline with **user gates** between stages. You control the pace — no automatic progression.
+The suite follows a 9-stage pipeline (idea -> production) with **user gates** between stages. You control the pace -- no automatic progression. See `docs/architecture/pipeline-stages.md` for the full stage spec.
 
 ### For embedded/hardware projects
 
@@ -170,6 +186,25 @@ kb_resolve_debate(debate_id) → ADR saved automatically
 - An MCP-compatible AI client (Claude Code, Cursor, Windsurf, Cline, etc.)
 - For PDF datasheets: `pip install spec-swarm-ai[pdf]`
 
+## SOLID + DRY -- the non-negotiable
+
+Every expert profile in every tool ends with the same SOLID+DRY block (canonical home: `packages/swarm-core/src/swarm_core/experts/SOLID_DRY_BLOCK.md`). When AI agents drive the suite, they:
+
+- **arch-swarm experts** propose designs that satisfy SRP, OCP, LSP, ISP, DIP and identify a single source of truth for every concern.
+- **review-swarm experts** flag SOLID violations (god classes, layer-direction violations, fat interfaces) and DRY violations (logic duplicated across files) as `category: design` findings.
+- **fix-swarm experts** propose fixes that move *toward* SOLID+DRY, never away. A fix that adds a god method is rejected.
+- **doc-swarm experts** document decisions in terms of which SOLID/DRY trade-off was made.
+- **spec-swarm experts** map hardware constraints to module boundaries that respect DIP.
+
+This is the user-visible promise. Editing an expert YAML to weaken or remove the SOLID+DRY block is enforced by tests in `swarm-core` and by the `claude_md_keeper` audit at every `kb_advance_pipeline` call.
+
+## Contributing
+
+- Read `CLAUDE.md` first -- it's the rules, not a reference.
+- Run `python scripts/check_imports.py` and `pytest` before opening a PR.
+- Bugs / fixes / decisions go into `docs/decisions/<date>-<slug>.md`, NOT into CLAUDE.md.
+- See `docs/INDEX.md` for the master keyword map.
+
 ## License
 
-MIT — [Ilya Sidorov](https://github.com/fozzfut)
+MIT -- [Ilya Sidorov](https://github.com/fozzfut)

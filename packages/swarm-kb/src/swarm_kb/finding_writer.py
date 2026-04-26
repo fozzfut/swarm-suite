@@ -2,10 +2,11 @@
 
 import json
 import logging
-import secrets
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
+
+from swarm_core.ids import generate_id
+from swarm_core.timeutil import now_iso
 
 from .config import SuiteConfig
 
@@ -37,10 +38,10 @@ class FindingWriter:
         finding = dict(finding)  # defensive copy
 
         if not finding.get("id"):
-            finding["id"] = "f-" + secrets.token_hex(4)
+            finding["id"] = generate_id("f", length=4)
 
         if not finding.get("created_at"):
-            finding["created_at"] = datetime.now(timezone.utc).isoformat()
+            finding["created_at"] = now_iso()
 
         finding.setdefault("source_tool", self._tool)
         finding.setdefault("source_session", self._session_id)
@@ -59,13 +60,13 @@ class FindingWriter:
     def post_batch(self, findings: list[dict]) -> list[str]:
         """Post multiple findings at once. Returns list of finding IDs."""
         ids: list[str] = []
-        now = datetime.now(timezone.utc).isoformat()
+        now = now_iso()
         entries: list[dict] = []
 
         for f in findings:
             f = dict(f)  # defensive copy
             if not f.get("id"):
-                f["id"] = "f-" + secrets.token_hex(4)
+                f["id"] = generate_id("f", length=4)
             if not f.get("created_at"):
                 f["created_at"] = now
             f.setdefault("source_tool", self._tool)

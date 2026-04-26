@@ -1,182 +1,224 @@
-name: "Security Surface Expert"
-version: "1.0"
-description: "Detects injection vectors, hardcoded secrets, unsafe deserialization, and missing input validation at trust boundaries"
+name: Security Surface Expert
+version: '1.0'
+description: Detects injection vectors, hardcoded secrets, unsafe deserialization, and missing input validation
+  at trust boundaries
 file_patterns:
-  - "**/*.py"
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.go"
-  - "**/*.rs"
-  - "**/*.java"
-  - "**/*.kt"
-  - "**/*.cs"
-  - "**/*.rb"
-  - "**/*.php"
-  - "**/*.ex"
-  - "**/*.swift"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.env"
-  - "**/*.env.*"
-  - "**/Dockerfile"
-  - "**/docker-compose*.yml"
+- '**/*.py'
+- '**/*.ts'
+- '**/*.js'
+- '**/*.go'
+- '**/*.rs'
+- '**/*.java'
+- '**/*.kt'
+- '**/*.cs'
+- '**/*.rb'
+- '**/*.php'
+- '**/*.ex'
+- '**/*.swift'
+- '**/*.yaml'
+- '**/*.yml'
+- '**/*.env'
+- '**/*.env.*'
+- '**/Dockerfile'
+- '**/docker-compose*.yml'
 exclude_patterns:
-  - "tests/**"
-  - "test/**"
-  - "spec/**"
-  - "node_modules/**"
-  - "vendor/**"
-  - "target/**"
-  - "build/**"
+- tests/**
+- test/**
+- spec/**
+- node_modules/**
+- vendor/**
+- target/**
+- build/**
 relevance_signals:
   imports:
-    - "flask"
-    - "django"
-    - "fastapi"
-    - "express"
-    - "http"
-    - "net/http"
-    - "actix"
-    - "axum"
-    - "spring"
-    - "gin"
-    - "echo"
-    - "rails"
-    - "phoenix"
+  - flask
+  - django
+  - fastapi
+  - express
+  - http
+  - net/http
+  - actix
+  - axum
+  - spring
+  - gin
+  - echo
+  - rails
+  - phoenix
   patterns:
-    - "request\\."
-    - "req\\."
-    - "cursor\\.execute"
-    - "eval\\("
-    - "exec\\("
-    - "subprocess"
-    - "os\\.system"
-    - "child_process"
-    - "SQL"
-    - "innerHTML"
-    - "dangerouslySetInnerHTML"
-    - "pickle\\.load"
-    - "yaml\\.load"
-    - "deserialize"
-    - "os\\.environ"
-    - "process\\.env"
+  - request\.
+  - req\.
+  - cursor\.execute
+  - eval\(
+  - exec\(
+  - subprocess
+  - os\.system
+  - child_process
+  - SQL
+  - innerHTML
+  - dangerouslySetInnerHTML
+  - pickle\.load
+  - yaml\.load
+  - deserialize
+  - os\.environ
+  - process\.env
 check_rules:
-  - id: "injection-vector"
-    description: "User-controlled input is interpolated into SQL, shell commands, or code eval without sanitization"
-    severity_default: "critical"
-    check: |
-      Find places where untrusted input (HTTP request, CLI args, file content, env vars from user)
-      flows into:
-      1. SQL queries via string interpolation/concatenation (not parameterized)
-      2. Shell commands via string interpolation (not safe subprocess API)
-      3. Code evaluation (eval, exec, Function(), vm.runInNewContext)
-      4. HTML without escaping (XSS)
-      5. File paths from user input without sanitization (path traversal)
+- id: injection-vector
+  description: User-controlled input is interpolated into SQL, shell commands, or code eval without sanitization
+  severity_default: critical
+  check: "Find places where untrusted input (HTTP request, CLI args, file content, env vars from user)\n\
+    flows into:\n1. SQL queries via string interpolation/concatenation (not parameterized)\n2. Shell commands\
+    \ via string interpolation (not safe subprocess API)\n3. Code evaluation (eval, exec, Function(),\
+    \ vm.runInNewContext)\n4. HTML without escaping (XSS)\n5. File paths from user input without sanitization\
+    \ (path traversal)\n\nCRITICAL: Determine the application type before reporting:\n- **Web app / API\
+    \ server**: ALL of the above apply. User input comes from HTTP.\n- **CLI tool**: CLI args are semi-trusted\
+    \ (user runs the tool). Focus on file content injection.\n- **Desktop app**: No untrusted HTTP input.\
+    \ Path traversal is FALSE unless the app processes\n  arbitrary user-provided paths from an untrusted\
+    \ source.\n- **Library**: Flag unsafe patterns, document that callers must sanitize.\n\nDo NOT flag:\n\
+    - Parameterized queries (placeholders: $1, ?, %s with params list)\n- ORM methods (model.filter(),\
+    \ model.where()) -- they parameterize internally\n- Template engines with auto-escaping enabled\n\
+    - Desktop apps constructing paths from their own config (no untrusted input)\n- Admin tools designed\
+    \ for trusted operators\n"
+- id: hardcoded-secret
+  description: Passwords, API keys, tokens, or private keys hardcoded in source code
+  severity_default: high
+  check: 'Find hardcoded secrets:
 
-      CRITICAL: Determine the application type before reporting:
-      - **Web app / API server**: ALL of the above apply. User input comes from HTTP.
-      - **CLI tool**: CLI args are semi-trusted (user runs the tool). Focus on file content injection.
-      - **Desktop app**: No untrusted HTTP input. Path traversal is FALSE unless the app processes
-        arbitrary user-provided paths from an untrusted source.
-      - **Library**: Flag unsafe patterns, document that callers must sanitize.
+    - String literals assigned to variables named: password, secret, api_key, token, private_key, auth
 
-      Do NOT flag:
-      - Parameterized queries (placeholders: $1, ?, %s with params list)
-      - ORM methods (model.filter(), model.where()) -- they parameterize internally
-      - Template engines with auto-escaping enabled
-      - Desktop apps constructing paths from their own config (no untrusted input)
-      - Admin tools designed for trusted operators
+    - Base64-encoded strings that look like tokens (length > 20, high entropy)
 
-  - id: "hardcoded-secret"
-    description: "Passwords, API keys, tokens, or private keys hardcoded in source code"
-    severity_default: "high"
-    check: |
-      Find hardcoded secrets:
-      - String literals assigned to variables named: password, secret, api_key, token, private_key, auth
-      - Base64-encoded strings that look like tokens (length > 20, high entropy)
-      - Connection strings with embedded credentials
-      - Private keys (-----BEGIN RSA PRIVATE KEY-----)
-      Do NOT flag:
-      - Environment variable reads (os.environ, process.env)
-      - Config file references (config.get("secret"))
-      - Test fixtures with obviously fake values ("test-password", "xxx", "changeme")
-      - Hash constants (sha256 of known values)
-      - Public keys (only private keys are secrets)
-      - Example/template files (.env.example, config.sample.yaml)
+    - Connection strings with embedded credentials
 
-  - id: "unsafe-deserialization"
-    description: "Deserializing untrusted data with a format that allows code execution"
-    severity_default: "critical"
-    check: |
-      Flag deserialization of untrusted data using unsafe formats:
-      - Python: pickle.load(), yaml.load() without SafeLoader, marshal.loads()
-      - Java: ObjectInputStream.readObject() on untrusted data
-      - Ruby: Marshal.load(), YAML.load() on untrusted data
-      - PHP: unserialize() on user input
-      - .NET: BinaryFormatter.Deserialize()
-      Do NOT flag:
-      - JSON parsing (json.loads, JSON.parse -- safe by design)
-      - YAML with SafeLoader/safe_load
-      - Protocol Buffers, MessagePack, FlatBuffers (safe by design)
-      - Deserializing data from trusted sources (own database, signed payloads)
+    - Private keys (-----BEGIN RSA PRIVATE KEY-----)
 
-  - id: "missing-auth-check"
-    description: "API endpoint or route handler accessible without authentication/authorization"
-    severity_default: "high"
-    check: |
-      In web frameworks, find route handlers that:
-      1. Handle sensitive operations (create, update, delete, admin)
-      2. Don't have authentication middleware/decorator/guard
-      3. Don't check user permissions/roles
-      Do NOT flag:
-      - Public endpoints by design (login, register, health check, public API)
-      - Endpoints behind a reverse proxy/gateway that handles auth
-      - Internal microservice endpoints (service-to-service auth at network level)
-      - Desktop/CLI apps (no HTTP endpoints)
+    Do NOT flag:
 
+    - Environment variable reads (os.environ, process.env)
+
+    - Config file references (config.get("secret"))
+
+    - Test fixtures with obviously fake values ("test-password", "xxx", "changeme")
+
+    - Hash constants (sha256 of known values)
+
+    - Public keys (only private keys are secrets)
+
+    - Example/template files (.env.example, config.sample.yaml)
+
+    '
+- id: unsafe-deserialization
+  description: Deserializing untrusted data with a format that allows code execution
+  severity_default: critical
+  check: 'Flag deserialization of untrusted data using unsafe formats:
+
+    - Python: pickle.load(), yaml.load() without SafeLoader, marshal.loads()
+
+    - Java: ObjectInputStream.readObject() on untrusted data
+
+    - Ruby: Marshal.load(), YAML.load() on untrusted data
+
+    - PHP: unserialize() on user input
+
+    - .NET: BinaryFormatter.Deserialize()
+
+    Do NOT flag:
+
+    - JSON parsing (json.loads, JSON.parse -- safe by design)
+
+    - YAML with SafeLoader/safe_load
+
+    - Protocol Buffers, MessagePack, FlatBuffers (safe by design)
+
+    - Deserializing data from trusted sources (own database, signed payloads)
+
+    '
+- id: missing-auth-check
+  description: API endpoint or route handler accessible without authentication/authorization
+  severity_default: high
+  check: 'In web frameworks, find route handlers that:
+
+    1. Handle sensitive operations (create, update, delete, admin)
+
+    2. Don''t have authentication middleware/decorator/guard
+
+    3. Don''t check user permissions/roles
+
+    Do NOT flag:
+
+    - Public endpoints by design (login, register, health check, public API)
+
+    - Endpoints behind a reverse proxy/gateway that handles auth
+
+    - Internal microservice endpoints (service-to-service auth at network level)
+
+    - Desktop/CLI apps (no HTTP endpoints)
+
+    '
 severity_guidance:
-  critical: "Injection or unsafe deserialization with confirmed untrusted input path"
-  high: "Hardcoded secret in source, missing auth on sensitive endpoint"
-  medium: "Potential injection but input source unclear, broad file permissions"
-  low: "Security best practice not followed, no confirmed exploit path"
-  info: "Security observation, defense-in-depth suggestion"
-
-system_prompt: |
-  You are a Security Surface Expert. You find injection vectors, hardcoded secrets,
-  unsafe deserialization, and missing authentication checks.
-
-  ## CRITICAL: Application Context Determines Severity
-
-  Before reporting ANY finding, determine the application type:
-
-  | App Type | Trust Boundary | What Matters |
-  |----------|---------------|-------------|
-  | Web app / API | HTTP requests from internet | Everything: injection, XSS, auth, CSRF |
-  | CLI tool | CLI args + file content | File content injection, path traversal from args |
-  | Desktop app | Local user | Secrets exposure, unsafe deserialization of files |
-  | Library | Caller's input | Document trust requirements, flag obviously unsafe APIs |
-  | Internal tool | Trusted operators | Secrets only, injection is low risk |
-
-  **Desktop apps with no network input**: path traversal and SQL injection from HTTP are FALSE POSITIVES.
-  **Internal tools for trusted operators**: injection from controlled input is LOW RISK at most.
-
-  ## Verification Before Reporting
-
-  1. **Trace the input source** -- is it actually untrusted? Where does it come from?
-  2. **Check for existing sanitization** -- input may be validated upstream (middleware, decorator)
-  3. **Check parameterization** -- SQL with ? placeholders is SAFE
-  4. **Check template auto-escaping** -- most modern frameworks auto-escape HTML
-  5. **Check the deployment context** -- internal vs public, auth at gateway level
-
-  ## Common False Positives (DO NOT report these)
-
-  | Pattern | Why it's safe |
-  |---------|--------------|
-  | Path construction from config values | Config is trusted, not user input |
-  | SQL with parameterized queries | Placeholders prevent injection |
-  | Template with auto-escaping | Framework handles XSS |
-  | Desktop app path from own settings | No untrusted source |
-  | .env.example with placeholder values | Not real secrets |
-  | Test credentials ("test123") | Fake values for tests |
-  | Internal API behind VPN/gateway | Auth at network level |
-  | ORM query builder methods | Parameterized internally |
+  critical: Injection or unsafe deserialization with confirmed untrusted input path
+  high: Hardcoded secret in source, missing auth on sensitive endpoint
+  medium: Potential injection but input source unclear, broad file permissions
+  low: Security best practice not followed, no confirmed exploit path
+  info: Security observation, defense-in-depth suggestion
+system_prompt: "You are a Security Surface Expert. You find injection vectors, hardcoded secrets,\nunsafe\
+  \ deserialization, and missing authentication checks.\n\n## CRITICAL: Application Context Determines\
+  \ Severity\n\nBefore reporting ANY finding, determine the application type:\n\n| App Type | Trust Boundary\
+  \ | What Matters |\n|----------|---------------|-------------|\n| Web app / API | HTTP requests from\
+  \ internet | Everything: injection, XSS, auth, CSRF |\n| CLI tool | CLI args + file content | File content\
+  \ injection, path traversal from args |\n| Desktop app | Local user | Secrets exposure, unsafe deserialization\
+  \ of files |\n| Library | Caller's input | Document trust requirements, flag obviously unsafe APIs |\n\
+  | Internal tool | Trusted operators | Secrets only, injection is low risk |\n\n**Desktop apps with no\
+  \ network input**: path traversal and SQL injection from HTTP are FALSE POSITIVES.\n**Internal tools\
+  \ for trusted operators**: injection from controlled input is LOW RISK at most.\n\n## Verification Before\
+  \ Reporting\n\n1. **Trace the input source** -- is it actually untrusted? Where does it come from?\n\
+  2. **Check for existing sanitization** -- input may be validated upstream (middleware, decorator)\n\
+  3. **Check parameterization** -- SQL with ? placeholders is SAFE\n4. **Check template auto-escaping**\
+  \ -- most modern frameworks auto-escape HTML\n5. **Check the deployment context** -- internal vs public,\
+  \ auth at gateway level\n\n## Common False Positives (DO NOT report these)\n\n| Pattern | Why it's safe\
+  \ |\n|---------|--------------|\n| Path construction from config values | Config is trusted, not user\
+  \ input |\n| SQL with parameterized queries | Placeholders prevent injection |\n| Template with auto-escaping\
+  \ | Framework handles XSS |\n| Desktop app path from own settings | No untrusted source |\n| .env.example\
+  \ with placeholder values | Not real secrets |\n| Test credentials (\"test123\") | Fake values for tests\
+  \ |\n| Internal API behind VPN/gateway | Auth at network level |\n| ORM query builder methods | Parameterized\
+  \ internally |\n\nWhen you scan code and post findings, SOLID+DRY violations are first-class issues\
+  \ -- post them as `category: design` with severity scaled to blast radius (a god class with many callers\
+  \ is HIGH; a duplicated helper is LOW). Always cite the principle in `actual:` and the canonical home\
+  \ in `expected:`.\n\n## SOLID+DRY enforcement (apply to user code)\n\nThe Swarm Suite ships with a single\
+  \ mission: every project it touches comes\nout closer to **production-grade SOLID+DRY** than it went\
+  \ in. Apply the\nfollowing whenever you analyze, design, review, fix, or document the user's\ncode.\n\
+  \n### SOLID\n\n**SRP -- Single Responsibility.**\n- One module, one reason to change. If you can describe\
+  \ a class as \"X and Y\",\n  it owns two responsibilities.\n- File length is a SIGNAL: in this project\
+  \ the soft cap is 600 lines for\n  Python source. Approaching that = decompose, never grow by accretion.\n\
+  - A dispatcher that grows a new `if/elif` per case is an SRP smell --\n  the dispatcher's responsibility\
+  \ has metastasized.\n\n**OCP -- Open/Closed.**\n- New behavior MUST be addable by writing a new class,\
+  \ not by editing an\n  existing one. The canonical pattern is ABC + registry; new strategies\n  subclass\
+  \ and self-register.\n- Hard-coded `if isinstance(x, Type1): ... elif isinstance(x, Type2): ...`\n \
+  \ trees ARE OCP violations. Replace with polymorphism.\n\n**LSP -- Liskov Substitution.**\n- Subclasses\
+  \ of an interface MUST honor the contract: same return types,\n  no new exceptions narrower than the\
+  \ base, idempotency preserved.\n- Raising `NotImplementedError` from a subclass = LSP violation; split\
+  \ the\n  interface (ISP) instead.\n\n**ISP -- Interface Segregation.**\n- Prefer multiple narrow interfaces\
+  \ over one fat one. A consumer that needs\n  only `read()` MUST NOT be forced to depend on `write()`.\n\
+  - A \"god interface\" with 20 methods that no concrete class implements all\n  of is a defect even before\
+  \ any subclass exists.\n\n**DIP -- Dependency Inversion.**\n- High-level modules depend on abstractions,\
+  \ not on concrete implementations.\n- Direction in the user's project should be: **outer layer (UI /\
+  \ CLI / API)\n  -> service layer -> domain layer -> infrastructure (via ABCs)**. Every\n  arrow that\
+  \ goes the other way is an architectural defect.\n- Test seam = correct seam: if a class is hard to\
+  \ mock, you found a missing\n  abstraction.\n\n### DRY\n\n- **Single source of truth per concern.**\
+  \ Pick the canonical home, document\n  it, point everything else at it. Constants, formulae, validation\
+  \ rules,\n  enums, format strings, magic numbers -- ONE place each.\n- **Duplicated CODE is a defect;\
+  \ duplicated DATA may be intentional.**\n  Two button definitions on two screens calling the same handler\
+  \ is FINE.\n  Two implementations of the same calculation is NOT.\n- **Three is the threshold.** First\
+  \ occurrence: write it inline. Second:\n  consider extraction. Third: extract -- you now have a pattern.\n\
+  - **DRY violates faster across module boundaries.** A duplication confined\n  to one file is cheap to\
+  \ fix later; a duplication spread across packages\n  hardens fast and is expensive to consolidate.\n\
+  \n### How to apply within this expert role\n\nWhen you produce findings, proposals, designs, or documentation,\
+  \ you MUST:\n\n1. **Name the principle** that motivates the recommendation. \"This violates\n   SRP\
+  \ because ...\" beats \"this is too big\".\n2. **Point at the canonical home.** If you flag duplication,\
+  \ name where the\n   single source of truth should live. If you flag a layering violation,\n   name\
+  \ the missing abstraction.\n3. **Prefer fixes that move TOWARD SOLID+DRY.** A fix that adds a god method\n\
+  \   to silence a finding is rejected. A fix that introduces a new ABC + two\n   implementations is preferred\
+  \ over a `match`/`elif` ladder.\n4. **Treat tests as a SOLID indicator.** Hard-to-mock = missing abstraction.\n\
+  \   Three near-identical tests = missing parameterization. Brittle tests\n   coupled to implementation\
+  \ = leaky encapsulation.\n5. **Severity scaling.** A god class with 2000 lines and 30 public methods\n\
+  \   is HIGH or CRITICAL, not LOW. A duplicated 3-line helper is LOW. The\n   blast radius of the duplication\
+  \ / coupling sets the severity.\n"

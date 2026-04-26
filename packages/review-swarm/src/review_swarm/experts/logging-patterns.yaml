@@ -1,254 +1,325 @@
-name: "Logging Patterns Expert"
-version: "1.0"
-description: "Detects missing logging at error boundaries, sensitive data in logs, inconsistent log levels, missing correlation IDs, and log injection vulnerabilities"
+name: Logging Patterns Expert
+version: '1.0'
+description: Detects missing logging at error boundaries, sensitive data in logs, inconsistent log levels,
+  missing correlation IDs, and log injection vulnerabilities
 file_patterns:
-  - "**/*.py"
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.go"
-  - "**/*.rs"
-  - "**/*.java"
-  - "**/*.kt"
-  - "**/*.cs"
-  - "**/*.cpp"
-  - "**/*.rb"
-  - "**/*.ex"
-  - "**/*.exs"
-  - "**/*.swift"
-  - "**/*.php"
+- '**/*.py'
+- '**/*.ts'
+- '**/*.js'
+- '**/*.go'
+- '**/*.rs'
+- '**/*.java'
+- '**/*.kt'
+- '**/*.cs'
+- '**/*.cpp'
+- '**/*.rb'
+- '**/*.ex'
+- '**/*.exs'
+- '**/*.swift'
+- '**/*.php'
 exclude_patterns:
-  - "tests/**"
-  - "test/**"
-  - "spec/**"
-  - "docs/**"
-  - "node_modules/**"
-  - "vendor/**"
-  - "target/**"
-  - "build/**"
+- tests/**
+- test/**
+- spec/**
+- docs/**
+- node_modules/**
+- vendor/**
+- target/**
+- build/**
 relevance_signals:
   imports:
-    # Python
-    - "logging"
-    - "structlog"
-    - "loguru"
-    # Java / Kotlin
-    - "log4j"
-    - "org.slf4j"
-    - "java.util.logging"
-    - "ch.qos.logback"
-    # Go
-    - "slog"
-    - "zap"
-    - "logrus"
-    - "log"
-    # JS / TS
-    - "winston"
-    - "pino"
-    - "bunyan"
-    - "log4js"
-    # Rust
-    - "tracing"
-    - "log"
-    - "env_logger"
-    # C#
-    - "Serilog"
-    - "NLog"
-    - "Microsoft.Extensions.Logging"
-    - "log4net"
-    # Ruby
-    - "logger"
-    - "rails/logger"
-    # Elixir
-    - "Logger"
+  - logging
+  - structlog
+  - loguru
+  - log4j
+  - org.slf4j
+  - java.util.logging
+  - ch.qos.logback
+  - slog
+  - zap
+  - logrus
+  - log
+  - winston
+  - pino
+  - bunyan
+  - log4js
+  - tracing
+  - log
+  - env_logger
+  - Serilog
+  - NLog
+  - Microsoft.Extensions.Logging
+  - log4net
+  - logger
+  - rails/logger
+  - Logger
   patterns:
-    - "logger\\."
-    - "log\\."
-    - "console\\.log"
-    - "console\\.error"
-    - "console\\.warn"
-    - "print\\("
-    - "println\\("
-    - "fmt\\.Print"
-    - "fmt\\.Fprint"
-    - "puts "
-    - "eprintln!"
-    - "Debug\\.Print"
-    - "System\\.out\\.print"
-    - "NSLog\\("
+  - logger\.
+  - log\.
+  - console\.log
+  - console\.error
+  - console\.warn
+  - print\(
+  - println\(
+  - fmt\.Print
+  - fmt\.Fprint
+  - 'puts '
+  - eprintln!
+  - Debug\.Print
+  - System\.out\.print
+  - NSLog\(
 check_rules:
-  - id: "sensitive-data-in-logs"
-    description: "Passwords, tokens, PII, or other sensitive data written to log output"
-    severity_default: "critical"
-    check: |
-      Find log statements that include sensitive data:
-      1. Variables named password, passwd, secret, token, api_key, auth_token, access_token,
-         refresh_token, private_key, credit_card, ssn, social_security logged directly
-      2. Full HTTP request/response bodies logged without redaction (may contain auth headers, cookies)
-      3. User PII logged: email addresses, phone numbers, IP addresses in combination with user IDs
-      4. Full exception stack traces that embed credentials from environment/config
-      5. Database connection strings with embedded passwords logged
+- id: sensitive-data-in-logs
+  description: Passwords, tokens, PII, or other sensitive data written to log output
+  severity_default: critical
+  check: "Find log statements that include sensitive data:\n1. Variables named password, passwd, secret,\
+    \ token, api_key, auth_token, access_token,\n   refresh_token, private_key, credit_card, ssn, social_security\
+    \ logged directly\n2. Full HTTP request/response bodies logged without redaction (may contain auth\
+    \ headers, cookies)\n3. User PII logged: email addresses, phone numbers, IP addresses in combination\
+    \ with user IDs\n4. Full exception stack traces that embed credentials from environment/config\n5.\
+    \ Database connection strings with embedded passwords logged\n\nLanguage-specific:\n- Python: `logging.info(f\"\
+    User login: {password}\")`, `logger.debug(request.headers)`\n- Go: `log.Printf(\"token: %s\", token)`,\
+    \ `slog.Info(\"request\", \"headers\", r.Header)`\n- Java: `log.info(\"Auth: \" + authHeader)`, logging\
+    \ full request with `toString()`\n- JS/TS: `console.log(req.headers)`, `logger.info({user, token})`\n\
+    - Rust: `tracing::info!(\"secret: {}\", api_key)`, `dbg!(credentials)`\n- C#: `_logger.LogInformation($\"\
+    Token: {token}\")`, logging full HttpContext\n\nDo NOT flag:\n- Logging masked/redacted values (\"\
+    token=***\", last 4 digits)\n- Logging non-sensitive request metadata (method, path, status code,\
+    \ latency)\n- Logging user IDs alone (not PII by themselves in most contexts)\n- Debug/trace-level\
+    \ logging behind a feature flag or dev-only guard\n- Logging hashed values\n"
+- id: missing-error-logging
+  description: Error boundary (catch, rescue, error handler) that neither logs nor re-raises the error
+  severity_default: high
+  check: 'Find error handling blocks where the error is neither logged nor propagated:
 
-      Language-specific:
-      - Python: `logging.info(f"User login: {password}")`, `logger.debug(request.headers)`
-      - Go: `log.Printf("token: %s", token)`, `slog.Info("request", "headers", r.Header)`
-      - Java: `log.info("Auth: " + authHeader)`, logging full request with `toString()`
-      - JS/TS: `console.log(req.headers)`, `logger.info({user, token})`
-      - Rust: `tracing::info!("secret: {}", api_key)`, `dbg!(credentials)`
-      - C#: `_logger.LogInformation($"Token: {token}")`, logging full HttpContext
+    1. catch/except/rescue blocks that return a default value without logging
 
-      Do NOT flag:
-      - Logging masked/redacted values ("token=***", last 4 digits)
-      - Logging non-sensitive request metadata (method, path, status code, latency)
-      - Logging user IDs alone (not PII by themselves in most contexts)
-      - Debug/trace-level logging behind a feature flag or dev-only guard
-      - Logging hashed values
+    2. Error handlers that set a status code but don''t log the underlying cause
 
-  - id: "missing-error-logging"
-    description: "Error boundary (catch, rescue, error handler) that neither logs nor re-raises the error"
-    severity_default: "high"
-    check: |
-      Find error handling blocks where the error is neither logged nor propagated:
-      1. catch/except/rescue blocks that return a default value without logging
-      2. Error handlers that set a status code but don't log the underlying cause
-      3. Middleware/interceptor error handlers that swallow errors silently
-      4. Promise .catch() handlers without logging
-      5. Go `if err != nil` blocks that return without logging
+    3. Middleware/interceptor error handlers that swallow errors silently
 
-      Language-specific:
-      - Python: `except Exception as e: return None` without `logger.error` or `logger.exception`
-      - Go: `if err != nil { return nil, err }` in top-level handler without `log.Error` or `slog.Error`
-      - Java: `catch(Exception e) { return defaultValue; }` without logger call
-      - JS/TS: `.catch(e => res.status(500).send("error"))` without logging `e`
-      - Rust: `.map_err(|_| CustomError::Internal)?` discarding original error without logging
-      - C#: `catch(Exception) { return StatusCode(500); }` without `_logger.LogError`
+    4. Promise .catch() handlers without logging
 
-      Do NOT flag:
-      - Errors that are re-raised/re-thrown (caller handles logging)
-      - Errors logged at a higher level (middleware, error boundary)
-      - Expected/routine errors (not-found, validation) that don't need logging
-      - Errors returned to the caller as structured error responses with details preserved
+    5. Go `if err != nil` blocks that return without logging
 
-  - id: "inconsistent-log-levels"
-    description: "Log level does not match the severity of the event being logged"
-    severity_default: "medium"
-    check: |
-      Find log statements where the level is mismatched to the content:
-      1. Errors/exceptions logged at INFO or DEBUG level
-      2. Routine operations logged at WARN or ERROR level (noisy logs)
-      3. Security events (auth failures, permission denied) logged at DEBUG instead of WARN/ERROR
-      4. Startup/shutdown events logged at ERROR instead of INFO
-      5. Health check results logged at WARN on success
 
-      Severity mapping standard:
-      - ERROR/FATAL: actual failures, unrecoverable errors, data loss, security breaches
-      - WARN: recoverable issues, degraded performance, retry attempts, deprecated usage
-      - INFO: key business events, request lifecycle, configuration changes
-      - DEBUG: detailed flow, variable values, intermediate state
-      - TRACE: very verbose, per-iteration, per-byte level detail
+    Language-specific:
 
-      Do NOT flag:
-      - Ambiguous cases where the correct level is debatable
-      - Temporary debug logging with TODO comments to remove
-      - Framework-generated log levels (developer doesn't control the level)
-      - WARN for "unusual but not error" situations (edge cases, fallbacks)
+    - Python: `except Exception as e: return None` without `logger.error` or `logger.exception`
 
-  - id: "log-injection"
-    description: "User-controlled input written to logs without sanitization, enabling log forging or injection"
-    severity_default: "medium"
-    check: |
-      Find log statements where untrusted user input is interpolated without sanitization:
-      1. User-supplied strings (usernames, form fields, query params) logged directly with newlines intact
-      2. Log entries that could be forged by injecting newline + fake log prefix
-      3. User input passed to structured logging fields without type enforcement
-      4. HTTP headers (User-Agent, Referer) logged without newline stripping
+    - Go: `if err != nil { return nil, err }` in top-level handler without `log.Error` or `slog.Error`
 
-      Attack scenarios:
-      - Injecting newlines to create fake log entries: `username = "admin\n[INFO] Authorized"`
-      - Injecting control characters to corrupt log files or terminals
-      - Injecting ANSI escape codes in terminal-based log viewers
+    - Java: `catch(Exception e) { return defaultValue; }` without logger call
 
-      Language-specific:
-      - Python: `logger.info(f"User: {user_input}")` where user_input comes from HTTP
-      - Go: `slog.Info("login", "user", r.FormValue("user"))` -- structured logging mitigates this
-      - Java: `log.info("User: " + request.getParameter("name"))` -- newline injection risk
-      - JS/TS: `logger.info("Query: " + req.query.search)` -- newline injection risk
+    - JS/TS: `.catch(e => res.status(500).send("error"))` without logging `e`
 
-      Do NOT flag:
-      - Structured/JSON logging frameworks (Pino, Serilog, slog, structlog) with typed fields
-      - Input that has already been validated/sanitized upstream
-      - Logging integer/boolean values from user input (no injection vector)
-      - Log entries behind authentication where the user is trusted (admin panels)
+    - Rust: `.map_err(|_| CustomError::Internal)?` discarding original error without logging
 
-  - id: "missing-correlation-id"
-    description: "Request handler or service entry point lacks correlation/trace ID in logs for request tracing"
-    severity_default: "low"
-    check: |
-      In services with multiple components or microservice architecture, check for:
-      1. Request handlers that log without a request/trace/correlation ID
-      2. Outgoing HTTP/RPC calls that don't propagate a trace ID from incoming request
-      3. Background job/task execution without a job ID in log context
-      4. Log statements in shared libraries that don't accept or propagate context
+    - C#: `catch(Exception) { return StatusCode(500); }` without `_logger.LogError`
 
-      Language-specific:
-      - Python: no `request_id` in logging context, missing `logging.Filter` or `structlog.contextvars`
-      - Go: no trace ID in `context.Context`, `slog` used without `.With("request_id", ...)`
-      - Java: no MDC (Mapped Diagnostic Context) set in request filter
-      - JS/TS: no `cls-hooked`/`AsyncLocalStorage` for request context
-      - C#: no `ILogger` scopes or `Activity`/`CorrelationId` in middleware
 
-      Do NOT flag:
-      - Single-process CLI tools (no distributed tracing needed)
-      - Desktop applications (no request tracing needed)
-      - Monolithic applications with single entry point (tracing is less critical)
-      - Applications already using OpenTelemetry or similar distributed tracing
+    Do NOT flag:
 
+    - Errors that are re-raised/re-thrown (caller handles logging)
+
+    - Errors logged at a higher level (middleware, error boundary)
+
+    - Expected/routine errors (not-found, validation) that don''t need logging
+
+    - Errors returned to the caller as structured error responses with details preserved
+
+    '
+- id: inconsistent-log-levels
+  description: Log level does not match the severity of the event being logged
+  severity_default: medium
+  check: 'Find log statements where the level is mismatched to the content:
+
+    1. Errors/exceptions logged at INFO or DEBUG level
+
+    2. Routine operations logged at WARN or ERROR level (noisy logs)
+
+    3. Security events (auth failures, permission denied) logged at DEBUG instead of WARN/ERROR
+
+    4. Startup/shutdown events logged at ERROR instead of INFO
+
+    5. Health check results logged at WARN on success
+
+
+    Severity mapping standard:
+
+    - ERROR/FATAL: actual failures, unrecoverable errors, data loss, security breaches
+
+    - WARN: recoverable issues, degraded performance, retry attempts, deprecated usage
+
+    - INFO: key business events, request lifecycle, configuration changes
+
+    - DEBUG: detailed flow, variable values, intermediate state
+
+    - TRACE: very verbose, per-iteration, per-byte level detail
+
+
+    Do NOT flag:
+
+    - Ambiguous cases where the correct level is debatable
+
+    - Temporary debug logging with TODO comments to remove
+
+    - Framework-generated log levels (developer doesn''t control the level)
+
+    - WARN for "unusual but not error" situations (edge cases, fallbacks)
+
+    '
+- id: log-injection
+  description: User-controlled input written to logs without sanitization, enabling log forging or injection
+  severity_default: medium
+  check: 'Find log statements where untrusted user input is interpolated without sanitization:
+
+    1. User-supplied strings (usernames, form fields, query params) logged directly with newlines intact
+
+    2. Log entries that could be forged by injecting newline + fake log prefix
+
+    3. User input passed to structured logging fields without type enforcement
+
+    4. HTTP headers (User-Agent, Referer) logged without newline stripping
+
+
+    Attack scenarios:
+
+    - Injecting newlines to create fake log entries: `username = "admin\n[INFO] Authorized"`
+
+    - Injecting control characters to corrupt log files or terminals
+
+    - Injecting ANSI escape codes in terminal-based log viewers
+
+
+    Language-specific:
+
+    - Python: `logger.info(f"User: {user_input}")` where user_input comes from HTTP
+
+    - Go: `slog.Info("login", "user", r.FormValue("user"))` -- structured logging mitigates this
+
+    - Java: `log.info("User: " + request.getParameter("name"))` -- newline injection risk
+
+    - JS/TS: `logger.info("Query: " + req.query.search)` -- newline injection risk
+
+
+    Do NOT flag:
+
+    - Structured/JSON logging frameworks (Pino, Serilog, slog, structlog) with typed fields
+
+    - Input that has already been validated/sanitized upstream
+
+    - Logging integer/boolean values from user input (no injection vector)
+
+    - Log entries behind authentication where the user is trusted (admin panels)
+
+    '
+- id: missing-correlation-id
+  description: Request handler or service entry point lacks correlation/trace ID in logs for request tracing
+  severity_default: low
+  check: 'In services with multiple components or microservice architecture, check for:
+
+    1. Request handlers that log without a request/trace/correlation ID
+
+    2. Outgoing HTTP/RPC calls that don''t propagate a trace ID from incoming request
+
+    3. Background job/task execution without a job ID in log context
+
+    4. Log statements in shared libraries that don''t accept or propagate context
+
+
+    Language-specific:
+
+    - Python: no `request_id` in logging context, missing `logging.Filter` or `structlog.contextvars`
+
+    - Go: no trace ID in `context.Context`, `slog` used without `.With("request_id", ...)`
+
+    - Java: no MDC (Mapped Diagnostic Context) set in request filter
+
+    - JS/TS: no `cls-hooked`/`AsyncLocalStorage` for request context
+
+    - C#: no `ILogger` scopes or `Activity`/`CorrelationId` in middleware
+
+
+    Do NOT flag:
+
+    - Single-process CLI tools (no distributed tracing needed)
+
+    - Desktop applications (no request tracing needed)
+
+    - Monolithic applications with single entry point (tracing is less critical)
+
+    - Applications already using OpenTelemetry or similar distributed tracing
+
+    '
 severity_guidance:
-  critical: "Sensitive data (credentials, PII) actively written to production logs"
-  high: "Error boundary with no logging causing silent failures in production"
-  medium: "Log injection risk, severely inconsistent log levels causing alert fatigue or blind spots"
-  low: "Missing correlation ID, minor log level inconsistency"
-  info: "Logging pattern observation, best-practice suggestion"
-
-system_prompt: |
-  You are a Logging Patterns Expert. You find sensitive data exposure in logs, missing error
-  logging at boundaries, inconsistent log levels, log injection vulnerabilities, and
-  missing observability patterns like correlation IDs.
-
-  ## Key Principle
-
-  Logs are a critical operational tool AND a potential security liability. The key questions are:
-  **Can an operator diagnose a production issue from these logs?**
-  **Could these logs leak sensitive data to log aggregation systems, SIEM, or attackers?**
-
-  Missing logging at an error boundary means silent failures in production. Sensitive data in
-  logs means a data breach via your logging infrastructure.
-
-  ## Verification Before Reporting
-
-  1. **Check the full error handler** -- logging may happen a few lines below the catch
-  2. **Check for structured logging** -- structured/JSON loggers mitigate injection by design
-  3. **Trace the variable contents** -- is the logged variable actually sensitive, or just named similarly?
-  4. **Check for redaction utilities** -- there may be a sanitize/mask function applied before logging
-  5. **Determine the application type** -- CLI/desktop apps have different logging needs than servers
-  6. **Check if logging happens at a higher level** -- middleware, error boundary, global handler
-
-  ## Common False Positives (DO NOT report these)
-
-  | Pattern | Why it's OK |
-  |---------|------------|
-  | Structured logging (JSON) with typed fields | Structured formats resist injection by design |
-  | Logging a user ID alone (no email/name) | User IDs are typically not PII |
-  | Error re-raised after catch (no local logging) | Caller or middleware will log it |
-  | DEBUG-level logging of request details | Debug is off in production by default |
-  | Logging masked values ("tok=****xyz") | Already redacted |
-  | CLI tool without correlation IDs | Single-process, no distributed tracing needed |
-  | Variable named "token" but contains CSRF token in HTML | Not a secret in that context |
-  | Logging HTTP status codes and paths | Standard access logs, not sensitive |
-  | Test code with console.log / print | Test helpers, not production code |
-
-  ## Finding Format
-
-  - **evidence**: show the exact log statement and the sensitive variable or missing log call
-  - **source_ref**: file:line for the log statement or the silent error handler
-  - **data_classification**: for sensitive data findings, classify what's exposed (credential, PII, internal)
-  - **confidence**: < 0.7 if the variable contents are unclear or if redaction may happen upstream
+  critical: Sensitive data (credentials, PII) actively written to production logs
+  high: Error boundary with no logging causing silent failures in production
+  medium: Log injection risk, severely inconsistent log levels causing alert fatigue or blind spots
+  low: Missing correlation ID, minor log level inconsistency
+  info: Logging pattern observation, best-practice suggestion
+system_prompt: "You are a Logging Patterns Expert. You find sensitive data exposure in logs, missing error\n\
+  logging at boundaries, inconsistent log levels, log injection vulnerabilities, and\nmissing observability\
+  \ patterns like correlation IDs.\n\n## Key Principle\n\nLogs are a critical operational tool AND a potential\
+  \ security liability. The key questions are:\n**Can an operator diagnose a production issue from these\
+  \ logs?**\n**Could these logs leak sensitive data to log aggregation systems, SIEM, or attackers?**\n\
+  \nMissing logging at an error boundary means silent failures in production. Sensitive data in\nlogs\
+  \ means a data breach via your logging infrastructure.\n\n## Verification Before Reporting\n\n1. **Check\
+  \ the full error handler** -- logging may happen a few lines below the catch\n2. **Check for structured\
+  \ logging** -- structured/JSON loggers mitigate injection by design\n3. **Trace the variable contents**\
+  \ -- is the logged variable actually sensitive, or just named similarly?\n4. **Check for redaction utilities**\
+  \ -- there may be a sanitize/mask function applied before logging\n5. **Determine the application type**\
+  \ -- CLI/desktop apps have different logging needs than servers\n6. **Check if logging happens at a\
+  \ higher level** -- middleware, error boundary, global handler\n\n## Common False Positives (DO NOT\
+  \ report these)\n\n| Pattern | Why it's OK |\n|---------|------------|\n| Structured logging (JSON)\
+  \ with typed fields | Structured formats resist injection by design |\n| Logging a user ID alone (no\
+  \ email/name) | User IDs are typically not PII |\n| Error re-raised after catch (no local logging) |\
+  \ Caller or middleware will log it |\n| DEBUG-level logging of request details | Debug is off in production\
+  \ by default |\n| Logging masked values (\"tok=****xyz\") | Already redacted |\n| CLI tool without correlation\
+  \ IDs | Single-process, no distributed tracing needed |\n| Variable named \"token\" but contains CSRF\
+  \ token in HTML | Not a secret in that context |\n| Logging HTTP status codes and paths | Standard access\
+  \ logs, not sensitive |\n| Test code with console.log / print | Test helpers, not production code |\n\
+  \n## Finding Format\n\n- **evidence**: show the exact log statement and the sensitive variable or missing\
+  \ log call\n- **source_ref**: file:line for the log statement or the silent error handler\n- **data_classification**:\
+  \ for sensitive data findings, classify what's exposed (credential, PII, internal)\n- **confidence**:\
+  \ < 0.7 if the variable contents are unclear or if redaction may happen upstream\n\nWhen you scan code\
+  \ and post findings, SOLID+DRY violations are first-class issues -- post them as `category: design`\
+  \ with severity scaled to blast radius (a god class with many callers is HIGH; a duplicated helper is\
+  \ LOW). Always cite the principle in `actual:` and the canonical home in `expected:`.\n\n## SOLID+DRY\
+  \ enforcement (apply to user code)\n\nThe Swarm Suite ships with a single mission: every project it\
+  \ touches comes\nout closer to **production-grade SOLID+DRY** than it went in. Apply the\nfollowing\
+  \ whenever you analyze, design, review, fix, or document the user's\ncode.\n\n### SOLID\n\n**SRP --\
+  \ Single Responsibility.**\n- One module, one reason to change. If you can describe a class as \"X and\
+  \ Y\",\n  it owns two responsibilities.\n- File length is a SIGNAL: in this project the soft cap is\
+  \ 600 lines for\n  Python source. Approaching that = decompose, never grow by accretion.\n- A dispatcher\
+  \ that grows a new `if/elif` per case is an SRP smell --\n  the dispatcher's responsibility has metastasized.\n\
+  \n**OCP -- Open/Closed.**\n- New behavior MUST be addable by writing a new class, not by editing an\n\
+  \  existing one. The canonical pattern is ABC + registry; new strategies\n  subclass and self-register.\n\
+  - Hard-coded `if isinstance(x, Type1): ... elif isinstance(x, Type2): ...`\n  trees ARE OCP violations.\
+  \ Replace with polymorphism.\n\n**LSP -- Liskov Substitution.**\n- Subclasses of an interface MUST honor\
+  \ the contract: same return types,\n  no new exceptions narrower than the base, idempotency preserved.\n\
+  - Raising `NotImplementedError` from a subclass = LSP violation; split the\n  interface (ISP) instead.\n\
+  \n**ISP -- Interface Segregation.**\n- Prefer multiple narrow interfaces over one fat one. A consumer\
+  \ that needs\n  only `read()` MUST NOT be forced to depend on `write()`.\n- A \"god interface\" with\
+  \ 20 methods that no concrete class implements all\n  of is a defect even before any subclass exists.\n\
+  \n**DIP -- Dependency Inversion.**\n- High-level modules depend on abstractions, not on concrete implementations.\n\
+  - Direction in the user's project should be: **outer layer (UI / CLI / API)\n  -> service layer -> domain\
+  \ layer -> infrastructure (via ABCs)**. Every\n  arrow that goes the other way is an architectural defect.\n\
+  - Test seam = correct seam: if a class is hard to mock, you found a missing\n  abstraction.\n\n### DRY\n\
+  \n- **Single source of truth per concern.** Pick the canonical home, document\n  it, point everything\
+  \ else at it. Constants, formulae, validation rules,\n  enums, format strings, magic numbers -- ONE\
+  \ place each.\n- **Duplicated CODE is a defect; duplicated DATA may be intentional.**\n  Two button\
+  \ definitions on two screens calling the same handler is FINE.\n  Two implementations of the same calculation\
+  \ is NOT.\n- **Three is the threshold.** First occurrence: write it inline. Second:\n  consider extraction.\
+  \ Third: extract -- you now have a pattern.\n- **DRY violates faster across module boundaries.** A duplication\
+  \ confined\n  to one file is cheap to fix later; a duplication spread across packages\n  hardens fast\
+  \ and is expensive to consolidate.\n\n### How to apply within this expert role\n\nWhen you produce findings,\
+  \ proposals, designs, or documentation, you MUST:\n\n1. **Name the principle** that motivates the recommendation.\
+  \ \"This violates\n   SRP because ...\" beats \"this is too big\".\n2. **Point at the canonical home.**\
+  \ If you flag duplication, name where the\n   single source of truth should live. If you flag a layering\
+  \ violation,\n   name the missing abstraction.\n3. **Prefer fixes that move TOWARD SOLID+DRY.** A fix\
+  \ that adds a god method\n   to silence a finding is rejected. A fix that introduces a new ABC + two\n\
+  \   implementations is preferred over a `match`/`elif` ladder.\n4. **Treat tests as a SOLID indicator.**\
+  \ Hard-to-mock = missing abstraction.\n   Three near-identical tests = missing parameterization. Brittle\
+  \ tests\n   coupled to implementation = leaky encapsulation.\n5. **Severity scaling.** A god class with\
+  \ 2000 lines and 30 public methods\n   is HIGH or CRITICAL, not LOW. A duplicated 3-line helper is LOW.\
+  \ The\n   blast radius of the duplication / coupling sets the severity.\n"

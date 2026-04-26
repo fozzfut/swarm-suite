@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swarm-kb"
-version = "0.2.10"
+version = "0.3.0"
 description = "Shared knowledge base for the Swarm suite (ReviewSwarm, FixSwarm, DocSwarm, ArchSwarm, SpecSwarm)"
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,7 @@ dependencies = [
     "mcp>=1.6,<2",
     "pyyaml>=6.0,<8",
     "click>=8.0,<9",
+    "swarm-core>=0.1.0",
 ]
 
 [project.urls]
