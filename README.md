@@ -638,7 +638,25 @@ The order **Verify -> Doc(optional) -> Hardening -> Release** is deliberate: Ver
 4. **Some checks are stable across iterations.** `ci-presence`, `observability`, `dep-hygiene` change only when you restructure the project; re-running them every fix is pure waste.
 5. **Per-iteration concerns are already covered.** Review-swarm has a `type-fix` expert that catches type issues during review; `check_regression` runs syntax checks; the quality gate tracks test-pass counts per iteration. The fast/cheap parts of "is this ready" are in the loop already; the slow/expensive parts are pulled out.
 
-**If you disagree with the default split**, the Flow DSL lets you put any check anywhere: `arch -> review -> (fix, hardening_typecheck) -> verify -> hardening -> release`. The default is just a recommendation tuned for typical AI-token budgets, not a hard architectural constraint.
+**You CAN pull individual Hardening checks into the fix loop** -- the default split is just a recommendation tuned for typical AI-token budgets, not a hard architectural constraint. Cheap, fast-feedback checks make sense early; slow / whole-project checks are best left for the end.
+
+| Check | Move to fix loop? | Reasoning |
+|---|---|---|
+| **type-check** (mypy) | yes -- but on **changed files only** (`mypy <files>` not `--strict` whole project) | catches type breakage before review wastes effort on it; per-file mode runs in <1s |
+| **secrets-scan** (gitleaks) | yes -- but on the **diff only** (`gitleaks protect --staged`) | leaked secrets in WIP commits are still leaked; diff scope is fast |
+| **dep-hygiene** | maybe -- only if a fix touches `pyproject.toml` / lockfile | trigger only on dep-changing fixes; idle otherwise |
+| **coverage** | no | needs the full test suite; cripples iteration speed |
+| **pip-audit** (CVE scan) | no | hits PyPI per call; slow + about *what you ship*, not *what you change* |
+| **ci-presence** | no | static project property; runs once is enough |
+| **observability** | no | static project property; runs once is enough |
+
+Concrete Flow DSL example moving the fast checks into the fix iteration while keeping the heavy ones at release time:
+
+```
+arch -> review -> (fix, type_check_changed, secrets_scan_diff) -> verify -> H -> hardening -> release
+```
+
+Where `type_check_changed` and `secrets_scan_diff` are agent-side scripts you wire to your editor/CI; the DSL just routes them in parallel with `fix`. The full `hardening` stage (with the slow checks) still runs at the end.
 
 ### Stage 8: Release Prep
 
