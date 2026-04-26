@@ -1,6 +1,6 @@
 [project]
 name = "doc-swarm-ai"
-version = "0.2.0"
+version = "0.2.1"
 description = "Multi-agent documentation generator via MCP -- generates, verifies, and maintains project documentation"
 requires-python = ">=3.10"
 license = { text = "MIT" }

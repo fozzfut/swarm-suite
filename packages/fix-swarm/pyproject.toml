@@ -1,6 +1,6 @@
 [project]
 name = "fix-swarm-ai"
-version = "0.3.0"
+version = "0.3.1"
 description = "Multi-agent code fixer -- reads ReviewSwarm reports and generates fixes"
 requires-python = ">=3.10"
 license = { text = "MIT" }
