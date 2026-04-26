@@ -189,6 +189,17 @@ class Pipeline:
             self.stages[first].status = StageStatus.ACTIVE
             self.stages[first].started_at = self.created_at
             self.current_stage = first
+        else:
+            # Compat backfill: a pipeline persisted at an older STAGE_ORDER
+            # may have a `stages` dict missing newer stage keys. `advance()`
+            # would later raise KeyError when trying to activate the next
+            # stage. Backfill with PENDING entries for any new stages.
+            for stage in STAGE_ORDER:
+                if stage not in self.stages:
+                    self.stages[stage] = StageState(stage=stage)
+            # If current_stage is empty (default), pick the first stage.
+            if not self.current_stage:
+                self.current_stage = STAGE_ORDER[0]
 
     def get_current(self) -> StageState:
         return self.stages[self.current_stage]

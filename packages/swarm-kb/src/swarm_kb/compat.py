@@ -83,14 +83,11 @@ def migrate_arch_swarm(config: SuiteConfig, project_dirs: list[Path] | None = No
                 "status": old_meta.get("status", "completed"),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            (new_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+            from swarm_core.io import atomic_write_text
+            atomic_write_text(new_dir / "meta.json", json.dumps(meta, indent=2))
 
             # Copy debate data
-            (new_dir / "debate.json").write_text(
-                json.dumps(old_meta, indent=2), encoding="utf-8"
-            )
+            atomic_write_text(new_dir / "debate.json", json.dumps(old_meta, indent=2))
 
             if md_file.exists():
                 shutil.copy2(md_file, new_dir / "transcript.md")

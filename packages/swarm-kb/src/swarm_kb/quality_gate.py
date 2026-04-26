@@ -367,6 +367,6 @@ def load_thresholds(path: Path) -> GateThresholds:
 
 
 def save_thresholds(thresholds: GateThresholds, path: Path) -> None:
-    """Save thresholds to a JSON file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(thresholds.to_dict(), indent=2), encoding="utf-8")
+    """Save thresholds to a JSON file (atomic)."""
+    from swarm_core.io import atomic_write_text
+    atomic_write_text(path, json.dumps(thresholds.to_dict(), indent=2))

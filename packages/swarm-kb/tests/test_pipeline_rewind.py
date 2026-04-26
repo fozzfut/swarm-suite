@@ -73,3 +73,33 @@ def test_pipeline_manager_rewind_invalid(tmp_path: Path):
     # current is idea (first stage); cannot rewind anywhere
     result = mgr.rewind(pipe.id, "spec")
     assert "error" in result
+
+
+def test_pipeline_loads_old_state_with_backfill(tmp_path: Path):
+    """A pipeline persisted under the OLD 6-stage layout must load and
+    advance without KeyError after STAGE_ORDER expanded."""
+    old_state = {
+        "id": "pipe-old",
+        "project_path": "/proj",
+        "created_at": "2026-04-25T00:00:00+00:00",
+        "current_stage": "arch",
+        "stages": {
+            s: {"stage": s, "status": "pending", "started_at": "",
+                "completed_at": "", "session_ids": [],
+                "approved_findings": 0, "dismissed_findings": 0, "notes": ""}
+            for s in ("spec", "arch", "review", "fix", "verify", "doc")
+        },
+    }
+    old_state["stages"]["arch"]["status"] = "active"
+
+    p = Pipeline.from_dict(old_state)
+    # Backfilled with new stages
+    assert "idea" in p.stages
+    assert "plan" in p.stages
+    assert "harden" in p.stages
+    assert "release" in p.stages
+    # current_stage preserved
+    assert p.current_stage == "arch"
+    # advance() doesn't crash on missing stage entries
+    next_stage = p.advance()
+    assert next_stage == "plan"  # arch -> plan in new STAGE_ORDER

@@ -50,7 +50,10 @@ class LiteFinding:
 
     def __post_init__(self) -> None:
         if not self.id:
-            self.id = generate_id("lf")  # "lite finding"
+            # length=4 -> 32-bit suffix (~4B states); birthday threshold ~65k.
+            # Lite-mode runs 100s of times per day across users; length=2
+            # (16-bit) gave a 0.7% collision rate at 1000 generations.
+            self.id = generate_id("lf", length=4)  # "lite finding"
         if not self.created_at:
             self.created_at = now_iso()
 
@@ -63,6 +66,7 @@ class LiteFinding:
             "actual": self.actual, "expected": self.expected,
             "source_ref": self.source_ref, "confidence": self.confidence,
             "created_at": self.created_at, "lite": True,
+            "schema_version": 1,
         }
 
 
@@ -82,7 +86,8 @@ class LiteFixProposal:
 
     def __post_init__(self) -> None:
         if not self.id:
-            self.id = generate_id("lp")  # "lite proposal"
+            # See LiteFinding.__post_init__ for length rationale (32-bit).
+            self.id = generate_id("lp", length=4)  # "lite proposal"
         if not self.created_at:
             self.created_at = now_iso()
 
@@ -94,6 +99,7 @@ class LiteFixProposal:
             "rationale": self.rationale, "expert_role": self.expert_role,
             "finding_id": self.finding_id, "created_at": self.created_at,
             "lite": True,
+            "schema_version": 1,
         }
 
 

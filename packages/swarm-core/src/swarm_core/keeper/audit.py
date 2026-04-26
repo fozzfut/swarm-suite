@@ -50,6 +50,12 @@ _RECOMMENDED_POINTERS = (
 
 SOFT_SIZE_LIMIT = 800
 HARD_SIZE_LIMIT = 1200
+# Reject CLAUDE.md files larger than this -- the keeper is a lint tool,
+# not a viewer for arbitrary files. 1 MB covers any plausible rules
+# document; anything larger is suspicious (or a typo for a different
+# file passed by mistake). Caps memory usage when an MCP caller passes
+# an arbitrary path.
+MAX_FILE_BYTES = 1_048_576  # 1 MiB
 
 
 @dataclass
@@ -107,6 +113,25 @@ def audit_claude_md(path: Path | str) -> KeeperReport:
             line=0,
             title=f"CLAUDE.md not found at {p}",
             detail="Create CLAUDE.md at the repo root with Mission, Critical Rules, Architecture Principles sections.",
+        ))
+        return report
+
+    # Bound file size before reading -- prevents OOM if an MCP caller
+    # passes a large arbitrary path. 1 MiB is well above any plausible
+    # CLAUDE.md.
+    try:
+        size = p.stat().st_size
+    except OSError as exc:
+        report.findings.append(KeeperFinding(
+            severity=Severity.CRITICAL, category="structure", line=0,
+            title=f"cannot stat {p}", detail=str(exc),
+        ))
+        return report
+    if size > MAX_FILE_BYTES:
+        report.findings.append(KeeperFinding(
+            severity=Severity.CRITICAL, category="size", line=0,
+            title=f"file rejected: {size} bytes exceeds {MAX_FILE_BYTES} byte cap",
+            detail="Keeper audits rules docs; large files are out of scope. Pass a smaller CLAUDE.md or split.",
         ))
         return report
 
