@@ -47,15 +47,20 @@ All seven packages live in this monorepo under `packages/` but ship to PyPI inde
 
 ### Install
 
-```bash
-# Full suite
-pip install swarm-core swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
+> **PyPI publish status (as of this commit):** the new `swarm-core` package and the bumped versions (`swarm-kb 0.3.0`, `review-swarm 0.4.0`, `fix-swarm-ai 0.3.0`, `doc-swarm-ai 0.2.0`, `spec-swarm-ai 0.2.0`) are **not yet on PyPI**. The new functionality (Stage 0a/2/6/7, lite-mode, keeper, skill composition) lives in this monorepo only. For now, install from source:
 
-# With PDF support for datasheets
-pip install spec-swarm-ai[pdf]
+```bash
+# Recommended: monorepo dev install (gets the new tools)
+git clone https://github.com/fozzfut/swarm-suite
+cd swarm-suite
+python scripts/install_all.py             # editable, dependency-ordered
+
+# Or pip-install old PyPI versions (no new tools, but still functional)
+pip install swarm-kb review-swarm doc-swarm-ai fix-swarm-ai arch-swarm-ai spec-swarm-ai
+pip install spec-swarm-ai[pdf]              # for datasheet ingestion
 ```
 
-For monorepo development, clone and run `python scripts/install_all.py` (editable install across all packages in dependency order).
+To verify the install: `python scripts/verify_e2e.py --quick` -- runs 47 end-to-end checks across CLIs, MCP server wiring, every new pipeline stage, prompt composition, and migration-script idempotency.
 
 ### Add MCP servers (Claude Code)
 

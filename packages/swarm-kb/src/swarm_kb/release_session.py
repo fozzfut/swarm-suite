@@ -173,8 +173,10 @@ def validate_pyproject(sessions_root: Path, *, session_id: str, path: str = "pyp
     for label, pat in _REQUIRED_PYPROJECT.items():
         if not pat.search(text):
             errors.append(f"missing or unrecognized: {label}")
-    if not (project / "LICENSE").exists() and not (project / "LICENSE.txt").exists():
-        errors.append("LICENSE file not found at project root")
+    # Walk up to find LICENSE -- a package inside a monorepo may share
+    # the LICENSE at the repo root. Stop at .git boundary or fs root.
+    if not _has_license_in_ancestors(project):
+        errors.append("LICENSE file not found at project root or any ancestor up to the .git boundary")
 
     out = {"valid": len(errors) == 0, "errors": errors, "path": str(pp)}
     atomic_write_text(sess_dir / "pyproject_validation.json", json.dumps(out, indent=2))
@@ -263,6 +265,19 @@ def _python_exe() -> str:
     """Return the python executable to use for `python -m build`."""
     import sys
     return sys.executable
+
+
+def _has_license_in_ancestors(project: Path) -> bool:
+    """True if LICENSE / LICENSE.txt / LICENSE.md is at `project` or any
+    ancestor up to the filesystem root or a `.git` boundary."""
+    current = project.resolve()
+    while True:
+        for name in ("LICENSE", "LICENSE.txt", "LICENSE.md"):
+            if (current / name).exists():
+                return True
+        if (current / ".git").exists() or current.parent == current:
+            return False
+        current = current.parent
 
 
 _VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)

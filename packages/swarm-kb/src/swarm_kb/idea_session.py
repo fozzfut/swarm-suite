@@ -59,7 +59,18 @@ def start_idea_session(
 
     The AI client should now drive the `brainstorming` skill: ask one
     question per turn, record answers via `capture_idea_answer`.
+
+    `prompt` MUST be non-empty -- the brainstorming skill needs an
+    anchor idea to refine. An empty prompt would produce a session
+    that has no starting point.
     """
+    if not prompt or not prompt.strip():
+        raise ValueError(
+            "prompt must be non-empty -- the brainstorming skill needs "
+            "an anchor idea to refine. Pass a one-paragraph problem "
+            "statement or feature description."
+        )
+
     lc = IdeaSessionLifecycle(sessions_root)
     sid = lc.create(project_path=project_path, name=name)
     sess_dir = lc.session_dir(sid)

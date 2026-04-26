@@ -860,15 +860,32 @@ def create_mcp_server():
         name="kb_advance_pipeline",
         description=(
             "User gate: advance pipeline to the next stage. "
-            "Call after reviewing current stage results."
+            "Call after reviewing current stage results. "
+            "Stage gates: idea/plan/harden require their session content "
+            "to be finalized; pass force=True to override."
         ),
     )
     def _kb_advance_pipeline(
         pipeline_id: str,
         notes: str = "",
+        force: bool = False,
         ctx: Optional[Context] = None,
     ) -> str:
+        from .stage_gates import check_stage_gate
         pipe_mgr = _get_pipeline_manager(ctx)
+        config = _get_config(ctx)
+        pipe = pipe_mgr.get(pipeline_id)
+        if pipe is None:
+            return json.dumps({"error": f"Pipeline {pipeline_id} not found"})
+        if not force:
+            ok, msg = check_stage_gate(pipe.current_stage, config)
+            if not ok:
+                return json.dumps({
+                    "error": "stage gate not satisfied",
+                    "stage": pipe.current_stage,
+                    "hint": msg,
+                    "override": "Re-run with force=True to advance anyway.",
+                })
         result = pipe_mgr.advance(pipeline_id, notes=notes)
         return json.dumps(result, indent=2)
 

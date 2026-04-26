@@ -362,27 +362,53 @@ def _check_dep_hygiene(project: Path, meta: dict) -> CheckResult:
 
 
 def _check_ci_presence(project: Path, meta: dict) -> CheckResult:
-    """Look for CI workflow files."""
-    candidates = [
-        project / ".github" / "workflows",
-        project / ".gitlab-ci.yml",
-        project / ".circleci" / "config.yml",
-        project / "azure-pipelines.yml",
-    ]
+    """Look for CI workflow files. Walks up to monorepo root.
+
+    A package inside a monorepo may not have its own .github/workflows --
+    the CI lives at the repo root. This walks up until either CI is
+    found or we hit the filesystem root / a `.git` boundary.
+    """
     found: list[str] = []
-    for c in candidates:
-        if c.exists():
+    walked: list[str] = []
+    current = project.resolve()
+    while True:
+        for c in (
+            current / ".github" / "workflows",
+            current / ".gitlab-ci.yml",
+            current / ".circleci" / "config.yml",
+            current / "azure-pipelines.yml",
+        ):
+            if not c.exists():
+                continue
             if c.is_dir():
                 yml = list(c.glob("*.yml")) + list(c.glob("*.yaml"))
                 if yml:
-                    found.append(f"{c.relative_to(project)} ({len(yml)} workflow file(s))")
+                    found.append(f"{_safe_rel(c, project)} ({len(yml)} workflow file(s))")
             else:
-                found.append(str(c.relative_to(project)))
+                found.append(_safe_rel(c, project))
+        if found:
+            break
+        # Stop at .git boundary (monorepo root) or filesystem root
+        if (current / ".git").exists() or current.parent == current:
+            break
+        walked.append(str(current))
+        current = current.parent
+
+    summary = ("ok: " + "; ".join(found)) if found else \
+              "no CI configuration found (searched project + ancestor dirs to repo root)"
     return CheckResult(
         name="ci_presence", passed=(len(found) > 0), installed=True,
-        summary="ok: " + "; ".join(found) if found else "no CI configuration found",
-        details={"found": found},
+        summary=summary,
+        details={"found": found, "ancestor_dirs_searched": walked},
     )
+
+
+def _safe_rel(target: Path, base: Path) -> str:
+    """Path of `target` relative to `base` if possible, else absolute string."""
+    try:
+        return str(target.relative_to(base))
+    except ValueError:
+        return str(target)
 
 
 def _check_observability(project: Path, meta: dict) -> CheckResult:
