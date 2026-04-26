@@ -31,3 +31,8 @@ Thumbs.db
 # Local notes / scratch
 *.local.md
 scratch/
+
+# Project rules / AI agent instructions -- intentionally local-only
+# (CLAUDE.md was previously tracked; removed via `git rm --cached
+# CLAUDE.md` so the file stays on disk but doesn't get pushed).
+CLAUDE.md
