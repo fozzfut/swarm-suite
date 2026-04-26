@@ -14,20 +14,23 @@ between "tests pass" and "ready for real users".
 
 ## Findings + fixes
 
-### F-1 (CRITICAL) -- README pip-install path is broken
+### F-1 (CRITICAL) -- README pip-install path is broken -- RESOLVED
 
 **Symptom:** README.md said `pip install swarm-core swarm-kb ...`. But
-`swarm-core 0.1.0` is brand-new (never published). Bumped versions
-(swarm-kb 0.3.0, review-swarm 0.4.0, fix-swarm-ai 0.3.0, doc-swarm-ai
-0.2.0, spec-swarm-ai 0.2.0) are also unpublished. A new user following
-README would get OLD versions from PyPI without any of the new tools
-(Stage 0a/2/6/7, lite-mode, keeper, skill composition) -- silent
-half-broken state.
+`swarm-core 0.1.0` was brand-new (never published). Bumped versions
+were also unpublished. A new user following README would get OLD
+versions from PyPI without any of the new tools.
 
-**Fix:** README now says publishing is pending and recommends the
-monorepo dev-install path (`scripts/install_all.py`) for the new
-functionality. Old PyPI versions are listed as a still-functional
-fallback.
+**Fix (2026-04-26 publish run):** all seven packages now on PyPI:
+* `swarmsuite-core 0.1.0` (foundation; renamed from `swarm-core`
+  because PyPI rejected the shorter name as too similar to the
+  existing `swarms` project). The Python import name remains
+  `swarm_core` -- only the PyPI distribution name changed.
+* `swarm-kb 0.3.0`, `review-swarm 0.4.0`, `fix-swarm-ai 0.3.0`,
+  `doc-swarm-ai 0.2.0`, `arch-swarm-ai 0.3.0`, `spec-swarm-ai 0.2.0`.
+
+README now lists the install command directly with a one-line note
+about the foundation rename.
 
 ### F-2 (MEDIUM) -- Pipeline gates were not enforced
 
@@ -83,18 +86,28 @@ boundary. Accepts `LICENSE`, `LICENSE.txt`, `LICENSE.md`.
 - Subprocess use: bounded -- only `release_session.py` (`python -m build`, `git`) and `hardening_session.py` (mypy / pytest-cov / pip-audit / gitleaks if installed). All have timeouts.
 - Error paths: `ValueError` on bad inputs (rewind unknown pipeline, unknown check name, bad session id) -- all with informative messages, no raw stack traces.
 
-## Pre-publish checklist (for when versions ship to PyPI)
+## Publish history (2026-04-26)
 
-When ready to publish the new versions:
+All seven packages are now on PyPI. Used `python scripts/publish_all.py`
+which chains build -> twine check -> twine upload in dep order with
+30 s sleeps after foundation packages so PyPI's index propagates.
 
-1. `python -m build` for each of the 7 packages.
-2. `twine check dist/*`
-3. `twine upload` -- order matters because of inter-deps:
-   - `swarm-core 0.1.0` first (foundation)
-   - `swarm-kb 0.3.0` next (depends on swarm-core)
-   - `review-swarm 0.4.0`, `fix-swarm-ai 0.3.0`, `doc-swarm-ai 0.2.0`, `spec-swarm-ai 0.2.0` -- all depend on swarm-core + swarm-kb
-   - `arch-swarm-ai` -- bump from 0.2.4 to 0.3.0 first (it now depends on swarm_core.code_scan via the shim, even though pyproject didn't change). Add `swarm-core>=0.1.0` to its dependencies before publishing.
-4. After publish, update README to drop the "publish pending" note.
+**One incident worth recording:** the first attempt to upload
+`swarm-core 0.1.0` failed with HTTP 400 "name 'swarm-core' is too
+similar to an existing project." PyPI's anti-typosquatting check
+flags any name within a small Levenshtein distance of an existing
+package; `swarms` (a popular AI-agent framework) was the conflict.
+
+Resolution: renamed the PyPI distribution to `swarmsuite-core`. The
+Python import name `swarm_core` stayed -- only the `[project] name`
+in `swarm-core/pyproject.toml` and `swarm-core>=0.1.0` deps in the
+six other pyprojects changed. Code, tests, README's broader narrative
+all unchanged.
+
+Lesson for the next new package name: pre-flight via `pip install
+--dry-run <candidate>` before writing the pyproject. If `pip` reports
+"could not find a version" the name is FREE; if it lists versions it's
+TAKEN. Saves a build/check/upload cycle.
 
 ## Lessons applied
 
