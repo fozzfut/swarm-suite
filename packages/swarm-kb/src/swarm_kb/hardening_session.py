@@ -41,7 +41,7 @@ from swarm_core.timeutil import now_iso
 
 _log = get_logger("kb.hardening_session")
 
-DEFAULT_TIMEOUT_S = 300
+DEFAULT_TIMEOUT_S = 600
 DEFAULT_MIN_COVERAGE = 85
 
 
@@ -305,7 +305,12 @@ _SECRET_PATTERNS = [
 ]
 _SCAN_EXCLUDE = {".git", "node_modules", ".venv", "venv", "__pycache__",
                  "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
-                 ".worktrees", ".eggs", "site-packages"}
+                 ".worktrees", ".eggs", "site-packages",
+                 # Project-internal: expert YAML docstrings describe what to
+                 # detect (literal "BEGIN PRIVATE KEY" examples), and test
+                 # fixtures intentionally include fake creds to verify the
+                 # scanner. Excluding avoids self-reporting false positives.
+                 "experts", "tests"}
 
 
 def _check_secrets(project: Path, meta: dict[str, Any]) -> CheckResult:
