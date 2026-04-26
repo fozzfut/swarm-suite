@@ -1,14 +1,20 @@
 """Generate structured Specification Reports from SpecSwarm sessions."""
 
+from __future__ import annotations
+
 import re
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from .models import HardwareSpec
 
 
 def generate_report(
     specs: list,
     session_id: str,
     project_name: str = "",
-    verification_summary: dict = None,
+    verification_summary: Optional[dict] = None,
 ) -> str:
     """Build a markdown spec report from a list of HardwareSpec objects.
 
@@ -277,7 +283,7 @@ def generate_report(
     return "\n".join(lines)
 
 
-def extract_arch_constraints(specs: list) -> list[str]:
+def extract_arch_constraints(specs: list[HardwareSpec]) -> list[str]:
     """Analyze specs and derive architectural constraints.
 
     Rules:
@@ -400,7 +406,7 @@ def extract_arch_constraints(specs: list) -> list[str]:
     return constraints
 
 
-def _detect_warnings(specs: list) -> list[str]:
+def _detect_warnings(specs: list[HardwareSpec]) -> list[str]:
     """Detect conflicts and warnings from spec data."""
     warnings: list[str] = []
 

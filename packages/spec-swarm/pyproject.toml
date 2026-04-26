@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.0,<9",
-    "mcp>=1.0",
+    "mcp>=1.6,<2",
     "swarmsuite-core>=0.1.0",
     "swarm-kb>=0.3.0",
     "pyyaml>=6.0,<8",
@@ -34,7 +34,11 @@ spec-swarm = "spec_swarm.cli:main"
 
 [project.optional-dependencies]
 pdf = ["pymupdf>=1.20"]
-dev = ["pytest>=7.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.8",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

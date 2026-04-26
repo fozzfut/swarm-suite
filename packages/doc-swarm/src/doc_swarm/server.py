@@ -174,7 +174,11 @@ def create_mcp_server():
                         try:
                             meta = json.loads(meta_path.read_text(encoding="utf-8"))
                             result.append(meta)
-                        except Exception:
+                        except (json.JSONDecodeError, OSError) as exc:
+                            _log.error(
+                                "Failed to read session meta %s: %s",
+                                meta_path, exc, exc_info=True,
+                            )
                             result.append({"session_id": entry.name})
         return json.dumps(result)
 

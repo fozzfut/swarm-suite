@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import Any
 
 from swarm_core.ids import generate_id
 from swarm_core.timeutil import now_iso
@@ -33,7 +34,7 @@ class FindingWriter:
         self._findings_path = self._session_dir / "findings.jsonl"
         self._lock = threading.Lock()
 
-    def post(self, finding: dict) -> str:
+    def post(self, finding: dict[str, Any]) -> str:
         """Append a finding. Assigns ID if missing. Returns finding ID."""
         finding = dict(finding)  # defensive copy
 
@@ -57,11 +58,11 @@ class FindingWriter:
         )
         return finding["id"]
 
-    def post_batch(self, findings: list[dict]) -> list[str]:
+    def post_batch(self, findings: list[dict[str, Any]]) -> list[str]:
         """Post multiple findings at once. Returns list of finding IDs."""
         ids: list[str] = []
         now = now_iso()
-        entries: list[dict] = []
+        entries: list[dict[str, Any]] = []
 
         for f in findings:
             f = dict(f)  # defensive copy

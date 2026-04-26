@@ -163,8 +163,10 @@ def validate_pyproject(sessions_root: Path, *, session_id: str, path: str = "pyp
     """Check pyproject.toml for PyPI-required fields."""
     lc = ReleaseSessionLifecycle(sessions_root)
     sess_dir = lc.session_dir(session_id)
-    project = Path(_meta(sess_dir)["project_path"])
-    pp = project / path
+    project = Path(_meta(sess_dir)["project_path"]).resolve()
+    pp = (project / path).resolve()
+    if not pp.is_relative_to(project):
+        return {"valid": False, "errors": [f"path {path!r} escapes project root"], "path": str(pp)}
     if not pp.is_file():
         return {"valid": False, "errors": [f"pyproject.toml not found at {pp}"], "path": str(pp)}
 

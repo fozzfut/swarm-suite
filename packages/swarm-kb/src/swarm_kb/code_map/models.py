@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -18,7 +19,7 @@ class FunctionInfo:
     is_public: bool = True
     decorators: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "file": self.file,
@@ -31,7 +32,7 @@ class FunctionInfo:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> FunctionInfo:
+    def from_dict(cls, d: dict[str, Any]) ->FunctionInfo:
         return cls(
             name=d.get("name", ""),
             file=d.get("file", ""),
@@ -57,7 +58,7 @@ class ClassInfo:
     bases: list[str] = field(default_factory=list)
     is_public: bool = True
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "file": self.file,
@@ -70,7 +71,7 @@ class ClassInfo:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> ClassInfo:
+    def from_dict(cls, d: dict[str, Any]) ->ClassInfo:
         return cls(
             name=d.get("name", ""),
             file=d.get("file", ""),
@@ -95,7 +96,7 @@ class UnifiedModuleInfo:
     imports: list[str] = field(default_factory=list)
     lines_of_code: int = 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "file": self.file,
             "name": self.name,
@@ -107,7 +108,7 @@ class UnifiedModuleInfo:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> UnifiedModuleInfo:
+    def from_dict(cls, d: dict[str, Any]) ->UnifiedModuleInfo:
         return cls(
             file=d.get("file", ""),
             name=d.get("name", ""),
@@ -133,7 +134,7 @@ class CouplingMetrics:
         total = self.afferent + self.efferent
         return self.efferent / total if total > 0 else 0.0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "module": self.module,
             "afferent": self.afferent,
@@ -142,7 +143,7 @@ class CouplingMetrics:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> CouplingMetrics:
+    def from_dict(cls, d: dict[str, Any]) ->CouplingMetrics:
         return cls(
             module=d.get("module", ""),
             afferent=d.get("afferent", 0),
@@ -170,7 +171,7 @@ class ProjectCodeMap:
     def total_lines(self) -> int:
         return sum(m.lines_of_code for m in self.modules)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "root": self.root,
             "scanned_at": self.scanned_at,

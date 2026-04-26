@@ -133,7 +133,8 @@ class XRefLog:
                 try:
                     d = json.loads(line)
                     xref = XRef.from_dict(d)
-                except Exception:
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                    _log.warning("Skipping corrupt xref line in %s: %s", self._path, exc)
                     continue
 
                 if source_tool and xref.source_tool != source_tool:

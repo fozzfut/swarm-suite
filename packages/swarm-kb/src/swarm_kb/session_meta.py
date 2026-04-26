@@ -12,15 +12,19 @@ _log = logging.getLogger("swarm_kb.session_meta")
 
 
 def read_meta(session_dir: Path) -> dict | None:
-    """Read meta.json from a session directory."""
+    """Read meta.json from a session directory. Returns None on missing/corrupt/non-dict JSON."""
     meta_path = session_dir / "meta.json"
     if not meta_path.exists():
         return None
     try:
-        return json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
         _log.warning("Failed to read %s: %s", meta_path, exc)
         return None
+    if not isinstance(raw, dict):
+        _log.warning("%s is not a JSON object (got %s); ignoring", meta_path, type(raw).__name__)
+        return None
+    return raw
 
 
 def list_sessions(

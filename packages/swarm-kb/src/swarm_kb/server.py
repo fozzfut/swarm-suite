@@ -101,19 +101,19 @@ def create_mcp_server():
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.debate_store
 
-    def _get_judging_engine(ctx: Optional[Context]):
+    def _get_judging_engine(ctx: Optional[Context]) -> JudgingEngine:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.judging_engine
 
-    def _get_verification_store(ctx: Optional[Context]):
+    def _get_verification_store(ctx: Optional[Context]) -> VerificationStore:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.verification_store
 
-    def _get_pgve_store(ctx: Optional[Context]):
+    def _get_pgve_store(ctx: Optional[Context]) -> PgveStore:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.pgve_store
 
-    def _get_flow_store(ctx: Optional[Context]):
+    def _get_flow_store(ctx: Optional[Context]) -> FlowStore:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.flow_store
 
@@ -1395,6 +1395,16 @@ No automatic progression. You control the pace.
 
     # ── kb_read_document ──────────────────────────────────────────────
 
+    def _validate_document_path(document_path: str, ctx: Optional[Context]) -> str:
+        """Reject paths inside KB storage root -- prevents exfil of session data."""
+        resolved = Path(document_path).expanduser().resolve()
+        kb_root = _get_config(ctx).kb_root.resolve()
+        if resolved == kb_root or kb_root in resolved.parents:
+            raise ValueError(
+                f"document_path must not point inside the KB storage root ({kb_root})"
+            )
+        return str(resolved)
+
     @mcp.tool(
         name="kb_read_document",
         description=(
@@ -1409,7 +1419,8 @@ No automatic progression. You control the pace.
         ctx: Optional[Context] = None,
     ) -> str:
         from .doc_reader import parse_document
-        doc = parse_document(document_path, max_pages=max_pages)
+        safe_path = _validate_document_path(document_path, ctx)
+        doc = parse_document(safe_path, max_pages=max_pages)
         if output == "ai_readable":
             return doc.to_ai_readable()
         elif output == "text_only":
@@ -1433,12 +1444,13 @@ No automatic progression. You control the pace.
         ctx: Optional[Context] = None,
     ) -> str:
         from .doc_reader import parse_document
-        doc = parse_document(document_path, max_pages=end_page)
+        safe_path = _validate_document_path(document_path, ctx)
+        doc = parse_document(safe_path, max_pages=end_page)
         # Filter to requested page range
         filtered_pages = [p for p in doc.pages if start_page <= p.page_number <= end_page]
 
         parts = []
-        parts.append(f"# {doc.title or Path(document_path).name}")
+        parts.append(f"# {doc.title or Path(safe_path).name}")
         parts.append(f"- Format: {doc.format}")
         parts.append(f"- Total pages: {doc.total_pages}")
         parts.append(f"- Showing pages: {start_page}-{min(end_page, doc.total_pages)}")

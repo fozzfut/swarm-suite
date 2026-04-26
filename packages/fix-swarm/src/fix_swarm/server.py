@@ -98,10 +98,6 @@ def _err(message: str) -> str:
     return json.dumps({"error": message})
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def create_mcp_server():
     """Create and configure the FixSwarm MCP server with multi-agent collaboration tools."""
     from mcp.server.fastmcp import FastMCP, Context

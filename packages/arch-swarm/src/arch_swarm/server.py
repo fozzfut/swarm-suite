@@ -2,9 +2,10 @@
 
 import json
 import logging
-import secrets
 from typing import Optional
 from pathlib import Path
+
+from swarm_core.ids import generate_id
 
 _log = logging.getLogger("arch_swarm.server")
 
@@ -42,7 +43,7 @@ def _post_findings_to_kb(analysis, session_id: str) -> int:
             mod = next((m for m in analysis.modules if m.name == c.module), None)
             file_path = mod.path if mod else c.module.replace(".", "/") + ".py"
             findings.append({
-                "id": "af-" + secrets.token_hex(3),
+                "id": generate_id("af", 3),
                 "file": file_path,
                 "line_start": 1,
                 "line_end": 1,
@@ -66,7 +67,7 @@ def _post_findings_to_kb(analysis, session_id: str) -> int:
         mod = next((m for m in analysis.modules if m.name == mod_a), None)
         file_path = mod.path if mod else mod_a.replace(".", "/") + ".py"
         findings.append({
-            "id": "af-" + secrets.token_hex(3),
+            "id": generate_id("af", 3),
             "file": file_path,
             "line_start": 1,
             "line_end": 1,
@@ -94,7 +95,7 @@ def _post_findings_to_kb(analysis, session_id: str) -> int:
             mod = next((m for m in analysis.modules if m.name == mod_name), None)
             file_path = mod.path if mod else mod_name.replace(".", "/") + ".py"
             findings.append({
-                "id": "af-" + secrets.token_hex(3),
+                "id": generate_id("af", 3),
                 "file": file_path,
                 "line_start": 1,
                 "line_end": 1,
@@ -120,7 +121,7 @@ def _post_findings_to_kb(analysis, session_id: str) -> int:
         total_defs = len(mod.classes) + len(mod.functions)
         if total_defs >= 15:
             findings.append({
-                "id": "af-" + secrets.token_hex(3),
+                "id": generate_id("af", 3),
                 "file": mod.path,
                 "line_start": 1,
                 "line_end": 1,
@@ -780,13 +781,12 @@ def create_mcp_server():
         ctx: Optional[Context] = None,
     ) -> str:
         from .code_scanner import scan_project, format_analysis
-        import uuid
 
         analysis = scan_project(project_path, scope=scope or None)
         report = format_analysis(analysis)
 
         # Post findings to swarm-kb
-        session_id = "analyze-" + uuid.uuid4().hex[:12]
+        session_id = generate_id("analyze", 6)
         findings_count = _post_findings_to_kb(analysis, session_id)
 
         # Check for spec findings in swarm-kb
@@ -1032,8 +1032,7 @@ def create_mcp_server():
         resolved_path = str(Path(project_path).resolve())
 
         # 2. Post findings to swarm-kb
-        import uuid
-        temp_session = "orch-" + uuid.uuid4().hex[:12]
+        temp_session = generate_id("orch", 6)
         _post_findings_to_kb(analysis, temp_session)
 
         # 3. Start a debate via swarm-kb's DebateEngine

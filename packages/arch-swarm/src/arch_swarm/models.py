@@ -7,13 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-
-class Verdict(Enum):
-    """Critic's verdict on a design proposal."""
-
-    SUPPORT = "support"
-    OPPOSE = "oppose"
-    MODIFY = "modify"
+# Re-export from swarm_kb to keep a single source of truth for verdict values.
+from swarm_kb.debate_engine import Verdict  # noqa: F401
 
 
 class DecisionStatus(Enum):

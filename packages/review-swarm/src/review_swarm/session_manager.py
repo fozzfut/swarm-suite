@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from swarm_core.io import atomic_write_text
+
 from .config import Config
 from .event_bus import SessionEventBus
 from .finding_store import FindingStore
@@ -55,9 +57,7 @@ class SessionManager:
                 "created_at": now_iso(),
                 "status": "active",
             }
-            (sess_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+            self._save_meta(sess_dir, meta)
             (sess_dir / "findings.jsonl").write_text("", encoding="utf-8")
             (sess_dir / "claims.json").write_text("[]", encoding="utf-8")
             (sess_dir / "reactions.jsonl").write_text("", encoding="utf-8")
@@ -76,11 +76,9 @@ class SessionManager:
                 suggestions = self._expert_profiler.suggest_experts(project_path)
                 sess_dir = self._config.sessions_path / session_id
                 meta_path = sess_dir / "meta.json"
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                meta = self._load_meta(sess_dir)
                 meta["suggested_experts"] = suggestions
-                meta_path.write_text(
-                    json.dumps(meta, indent=2), encoding="utf-8"
-                )
+                self._save_meta(sess_dir, meta)
             except Exception as exc:
                 _log.warning(
                     "Expert suggestion failed for %s: %s", project_path, exc
@@ -133,9 +131,7 @@ class SessionManager:
             meta["ended_at"] = now_iso()
             if "reports" in result:
                 meta["reports"] = result["reports"]
-            (sess_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+            self._save_meta(sess_dir, meta)
 
             _log.info("Session %s ended: %d findings", session_id, result["finding_count"])
 
@@ -202,9 +198,7 @@ class SessionManager:
             _log.info("Session %s expired (timeout)", meta.get("session_id", sess_dir.name))
             meta["status"] = "expired"
             meta["expired_at"] = now_iso()
-            (sess_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2), encoding="utf-8"
-            )
+            self._save_meta(sess_dir, meta)
 
     def get_finding_store(self, session_id: str) -> FindingStore:
         with self._lock:
@@ -285,6 +279,9 @@ class SessionManager:
             return json.loads((sess_dir / "meta.json").read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             return {"session_id": sess_dir.name, "status": "corrupt", "error": str(exc)}
+
+    def _save_meta(self, sess_dir: Path, meta: dict) -> None:
+        atomic_write_text(sess_dir / "meta.json", json.dumps(meta, indent=2))
 
     def _prune_old_sessions(self) -> None:
         """Delete oldest completed sessions if count exceeds max_sessions."""

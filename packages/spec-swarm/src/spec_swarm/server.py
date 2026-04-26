@@ -916,8 +916,9 @@ def create_mcp_server():
             try:
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text(report_md, encoding="utf-8")
-            except OSError:
-                pass
+            except OSError as exc:
+                _log.error("Failed to write report to %s: %s", out, exc, exc_info=True)
+                return json.dumps({"error": f"failed to write output_path: {exc}"})
 
         # Post to swarm-kb as a finding with category="spec-report"
         kb_posted = app.store.post_to_swarm_kb(
@@ -1365,7 +1366,7 @@ def create_mcp_server():
             _log.warning("swarm-kb debate engine not available; generating local debate id")
             debate_id = "dbt-" + secrets.token_hex(4)
         except Exception as exc:
-            _log.warning("Failed to start swarm-kb debate: %s", exc)
+            _log.warning("Failed to start swarm-kb debate: %s", exc, exc_info=True)
             debate_id = "dbt-" + secrets.token_hex(4)
 
         # Broadcast the debate to all experts

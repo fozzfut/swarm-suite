@@ -8,6 +8,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from .models import CouplingMetrics, ProjectCodeMap, UnifiedModuleInfo
 
@@ -112,7 +113,8 @@ class CodeMapStore:
             scanned_at = datetime.fromisoformat(meta["scanned_at"])
             age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
             return age_hours < ttl_hours
-        except Exception:
+        except (json.JSONDecodeError, OSError, KeyError, ValueError) as exc:
+            _log.warning("Could not check freshness of %s: %s", meta_path, exc)
             return False
 
     def _atomic_write(self, path: Path, content: str) -> None:
@@ -136,11 +138,11 @@ class CodeMapStore:
                 pass
             raise
 
-    def _load_json(self, path: Path, default):
+    def _load_json(self, path: Path, default: Any) -> Any:
         if not path.exists():
             return default
         try:
             return json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (json.JSONDecodeError, OSError) as exc:
             _log.warning("Failed to load %s: %s", path, exc)
             return default

@@ -8,6 +8,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 _log = logging.getLogger("fix_swarm.regression")
 
@@ -203,7 +204,7 @@ def check_regression(
     modified_files: list[str],
     base_dir: str = ".",
     test_command: str = "",
-    tests_before: dict = None,
+    tests_before: Optional[dict] = None,
 ) -> RegressionReport:
     """Full regression check: syntax + tests + re-scan."""
     report = RegressionReport()

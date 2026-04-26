@@ -32,7 +32,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from swarm_core.io import atomic_write_text, append_jsonl_line
 from swarm_core.logging_setup import get_logger
@@ -43,6 +43,16 @@ _log = get_logger("kb.hardening_session")
 
 DEFAULT_TIMEOUT_S = 300
 DEFAULT_MIN_COVERAGE = 85
+
+
+def _load_meta(sess_dir: Path) -> dict:
+    """Load and validate meta.json -- raises ValueError if not a JSON object."""
+    raw = json.loads((sess_dir / "meta.json").read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"corrupt meta.json in {sess_dir}: expected JSON object, got {type(raw).__name__}"
+        )
+    return raw
 
 
 class HardeningSessionLifecycle(SessionLifecycle):
@@ -95,10 +105,9 @@ def start_hardening(
     sid = lc.create(project_path=project_path, name=name)
     sess_dir = lc.session_dir(sid)
 
-    meta_path = sess_dir / "meta.json"
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta = _load_meta(sess_dir)
     meta["min_coverage"] = min_coverage
-    atomic_write_text(meta_path, json.dumps(meta, indent=2))
+    atomic_write_text(sess_dir / "meta.json", json.dumps(meta, indent=2))
 
     _append_event(sess_dir, "harden_started", {"min_coverage": min_coverage})
     return {
@@ -121,7 +130,7 @@ def run_check(
     if check not in CHECK_REGISTRY:
         raise ValueError(f"unknown check: {check!r}; valid: {sorted(CHECK_REGISTRY)}")
 
-    meta = json.loads((sess_dir / "meta.json").read_text(encoding="utf-8"))
+    meta = _load_meta(sess_dir)
     project_path = Path(meta.get("project_path", "."))
 
     runner = CHECK_REGISTRY[check]
@@ -156,7 +165,7 @@ def get_hardening_report(
     lc = HardeningSessionLifecycle(sessions_root)
     sess_dir = lc.session_dir(session_id)
 
-    meta = json.loads((sess_dir / "meta.json").read_text(encoding="utf-8"))
+    meta = _load_meta(sess_dir)
     results = meta.get("check_results", {})
 
     lines = ["# Hardening Report", ""]
@@ -218,7 +227,7 @@ def _run(cmd: list[str], *, cwd: Path, timeout: int = DEFAULT_TIMEOUT_S) -> tupl
         return 124, "", f"timeout after {timeout}s"
 
 
-def _check_typecheck(project: Path, meta: dict) -> CheckResult:
+def _check_typecheck(project: Path, meta: dict[str, Any]) -> CheckResult:
     """mypy --strict on the project. 0 errors -> pass."""
     if shutil.which("mypy") is None:
         return CheckResult(
@@ -238,7 +247,7 @@ def _check_typecheck(project: Path, meta: dict) -> CheckResult:
     )
 
 
-def _check_coverage(project: Path, meta: dict) -> CheckResult:
+def _check_coverage(project: Path, meta: dict[str, Any]) -> CheckResult:
     """pytest --cov; require coverage >= meta.min_coverage."""
     if shutil.which("pytest") is None:
         return CheckResult(
@@ -263,7 +272,7 @@ def _check_coverage(project: Path, meta: dict) -> CheckResult:
     )
 
 
-def _check_dep_audit(project: Path, meta: dict) -> CheckResult:
+def _check_dep_audit(project: Path, meta: dict[str, Any]) -> CheckResult:
     """pip-audit -- security audit on dependencies."""
     if shutil.which("pip-audit") is None:
         return CheckResult(
@@ -299,7 +308,7 @@ _SCAN_EXCLUDE = {".git", "node_modules", ".venv", "venv", "__pycache__",
                  ".worktrees", ".eggs", "site-packages"}
 
 
-def _check_secrets(project: Path, meta: dict) -> CheckResult:
+def _check_secrets(project: Path, meta: dict[str, Any]) -> CheckResult:
     """Naive regex secrets scan. Falls back to gitleaks if available."""
     if shutil.which("gitleaks") is not None:
         rc, out, err = _run(["gitleaks", "detect", "--no-git", "--report-format", "json", "-r", "-"], cwd=project)
@@ -341,7 +350,7 @@ def _check_secrets(project: Path, meta: dict) -> CheckResult:
     )
 
 
-def _check_dep_hygiene(project: Path, meta: dict) -> CheckResult:
+def _check_dep_hygiene(project: Path, meta: dict[str, Any]) -> CheckResult:
     """Look for pyproject.toml / requirements.txt presence and obvious issues.
 
     Lightweight check -- doesn't actually solve the dep graph. Flags:
@@ -361,7 +370,7 @@ def _check_dep_hygiene(project: Path, meta: dict) -> CheckResult:
     )
 
 
-def _check_ci_presence(project: Path, meta: dict) -> CheckResult:
+def _check_ci_presence(project: Path, meta: dict[str, Any]) -> CheckResult:
     """Look for CI workflow files. Walks up to monorepo root.
 
     A package inside a monorepo may not have its own .github/workflows --
@@ -411,7 +420,7 @@ def _safe_rel(target: Path, base: Path) -> str:
         return str(target)
 
 
-def _check_observability(project: Path, meta: dict) -> CheckResult:
+def _check_observability(project: Path, meta: dict[str, Any]) -> CheckResult:
     """Look for evidence of structured logging configuration."""
     py_files = list(project.rglob("*.py"))
     if not py_files:
@@ -440,7 +449,7 @@ def _check_observability(project: Path, meta: dict) -> CheckResult:
     )
 
 
-CHECK_REGISTRY: dict[str, Callable[[Path, dict], CheckResult]] = {
+CHECK_REGISTRY: dict[str, Callable[[Path, dict[str, Any]], CheckResult]] = {
     "typecheck": _check_typecheck,
     "coverage": _check_coverage,
     "dep_audit": _check_dep_audit,

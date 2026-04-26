@@ -189,8 +189,8 @@ def _parse_pdf_pymupdf(path: Path, max_pages: int = 0) -> ParsedDocument:
                 extracted = table.extract()
                 if extracted:
                     tables.append(extracted)
-        except Exception:
-            pass  # table extraction not available in all pymupdf versions
+        except (AttributeError, ValueError, RuntimeError) as exc:
+            _log.debug("Table extraction skipped on page %d: %s", page_num + 1, exc)
 
         # Detect headings (larger font text)
         headings = []
@@ -204,8 +204,8 @@ def _parse_pdf_pymupdf(path: Path, max_pages: int = 0) -> ParsedDocument:
                                 heading_text = span["text"].strip()
                                 if heading_text and len(heading_text) > 2:
                                     headings.append(heading_text)
-        except Exception:
-            pass
+        except (KeyError, TypeError, ValueError) as exc:
+            _log.debug("Heading detection skipped on page %d: %s", page_num + 1, exc)
 
         dp = DocumentPage(
             page_number=page_num + 1,
@@ -258,8 +258,8 @@ def _parse_pdf_pdfplumber(path: Path, max_pages: int = 0) -> ParsedDocument:
                 for table in page.extract_tables():
                     if table:
                         tables.append(table)
-            except Exception:
-                pass
+            except (AttributeError, ValueError, RuntimeError) as exc:
+                _log.debug("pdfplumber table extraction skipped on page %d: %s", page_num + 1, exc)
 
             dp = DocumentPage(
                 page_number=page_num + 1,

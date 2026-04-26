@@ -4,7 +4,6 @@ import copy
 import json
 import logging
 import os
-import secrets
 import tempfile
 import threading
 from dataclasses import dataclass, field
@@ -12,6 +11,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+from swarm_core.ids import generate_id
 
 _log = logging.getLogger("swarm_kb.debate_engine")
 
@@ -45,7 +46,7 @@ class Proposal:
 
     def __post_init__(self) -> None:
         if not self.id:
-            self.id = "prop-" + secrets.token_hex(4)
+            self.id = generate_id("prop", 4)
 
     def to_dict(self) -> dict:
         return {
@@ -82,7 +83,7 @@ class Critique:
 
     def __post_init__(self) -> None:
         if not self.id:
-            self.id = "crit-" + secrets.token_hex(4)
+            self.id = generate_id("crit", 4)
 
     def to_dict(self) -> dict:
         return {
@@ -191,7 +192,7 @@ class Debate:
 
     def __post_init__(self) -> None:
         if not self.id:
-            self.id = "dbt-" + secrets.token_hex(4)
+            self.id = generate_id("dbt", 4)
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).isoformat()
 
