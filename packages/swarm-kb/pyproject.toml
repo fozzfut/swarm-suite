@@ -24,6 +24,7 @@ dependencies = [
     "pyyaml>=6.0,<8",
     "click>=8.0,<9",
     "swarmsuite-core>=0.1.0",
+    "portalocker>=2.7,<4",
 ]
 
 [project.urls]

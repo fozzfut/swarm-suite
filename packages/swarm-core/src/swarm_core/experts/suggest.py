@@ -4,9 +4,10 @@ OCP in practice: adding a new "given X, suggest experts" path means
 adding a new SuggestStrategy subclass, never editing the registry.
 
 Built-in strategies:
-    NullSuggestStrategy      empty list (default for tools that don't suggest)
-    ProjectScanStrategy      scans a filesystem path for imports/patterns
-    FindingMatchStrategy     scores against a list of finding dicts
+    NullSuggestStrategy        empty list (default for tools that don't suggest)
+    ProjectScanStrategy        scans a filesystem path for imports/patterns
+    FindingMatchStrategy       scores against a list of finding dicts
+    TaskSimilarityStrategy     ranks profiles by keyword overlap with a task string
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..logging_setup import get_logger
+from ..textmatch import jaccard_similarity, tokenise_keywords
 
 if TYPE_CHECKING:
     from .registry import ExpertProfile
@@ -220,6 +222,70 @@ _DEFAULT_FINDING_MAP: dict[str, str] = {
     "srp": "refactoring",
     "dry": "refactoring",
 }
+
+
+class TaskSimilarityStrategy(SuggestStrategy):
+    """Rank profiles by keyword overlap with a task description string.
+
+    Context: a `str` describing the task ("review the asyncio shutdown
+    path for race conditions" / "refactor the SQL query builder for
+    SRP"). Matches against each profile's name + description +
+    system_prompt + relevance_signals tags. Jaccard similarity, no
+    external embeddings.
+
+    `min_score` filters out profiles below the threshold; default 0.05
+    is "at least one shared meaningful keyword" for short tasks.
+
+    Use case: AgentRouter -- pick the most relevant expert(s) per file
+    or per finding instead of running every expert on everything. Cheap,
+    explainable, no model dependency.
+    """
+
+    def __init__(self, *, min_score: float = 0.05) -> None:
+        self._min_score = min_score
+
+    def suggest(self, profiles: list["ExpertProfile"], context: object) -> list[dict]:
+        if not isinstance(context, str):
+            raise TypeError(
+                f"TaskSimilarityStrategy expects str context, "
+                f"got {type(context).__name__}"
+            )
+        task_tokens = tokenise_keywords(context)
+        if not task_tokens:
+            return []
+        out: list[dict] = []
+        for profile in profiles:
+            text = " ".join(filter(None, [
+                profile.name,
+                profile.description,
+                profile.data.get("system_prompt", "") or "",
+                _signals_text(profile.data.get("relevance_signals", {})),
+            ]))
+            profile_tokens = tokenise_keywords(text)
+            if not profile_tokens:
+                continue
+            score = jaccard_similarity(task_tokens, profile_tokens)
+            if score >= self._min_score:
+                out.append({
+                    "slug": profile.slug,
+                    "name": profile.name,
+                    "description": profile.description,
+                    "confidence": score,
+                })
+        out.sort(key=lambda s: (-s["confidence"], s["slug"]))
+        return out
+
+
+def _signals_text(signals: dict | None) -> str:
+    """Flatten a relevance_signals block into searchable text."""
+    if not isinstance(signals, dict):
+        return ""
+    parts: list[str] = []
+    for key in ("imports", "patterns", "tags", "keywords"):
+        items = signals.get(key) or []
+        if isinstance(items, list):
+            parts.extend(str(x) for x in items)
+    return " ".join(parts)
 
 
 class FindingMatchStrategy(SuggestStrategy):

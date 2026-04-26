@@ -9,8 +9,18 @@ in `fix-swarm`'s storage.
 from .severity import Severity, SEVERITY_ORDER, severity_at_least
 from .reaction import ReactionType, Reaction
 from .event import EventType, Event
-from .message import MessageType, Message
+from .message import MessageType, Message, MESSAGE_SCHEMA_VERSION
 from .claim import ClaimStatus, Claim
+from .completion import (
+    COMPLETION_SCHEMA_VERSION,
+    CompletionRecord,
+    CompletionState,
+    EVENT_CAP_EXCEEDED,
+    EVENT_SUBTASK_DONE,
+    EVENT_TASK_COMPLETED,
+    EVENT_THINK_RECORDED,
+    SubtaskRecord,
+)
 
 __all__ = [
     "Severity",
@@ -22,6 +32,15 @@ __all__ = [
     "Event",
     "MessageType",
     "Message",
+    "MESSAGE_SCHEMA_VERSION",
     "ClaimStatus",
     "Claim",
+    "SubtaskRecord",
+    "CompletionRecord",
+    "CompletionState",
+    "COMPLETION_SCHEMA_VERSION",
+    "EVENT_SUBTASK_DONE",
+    "EVENT_TASK_COMPLETED",
+    "EVENT_THINK_RECORDED",
+    "EVENT_CAP_EXCEEDED",
 ]

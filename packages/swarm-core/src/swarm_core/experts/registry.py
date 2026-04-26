@@ -136,6 +136,49 @@ class ExpertProfile:
         copy is suppressed -- so legacy and migrated YAMLs both produce a
         sane prompt.
         """
+        return self._compose(universal_filter=lambda _s: True)
+
+    def composed_system_prompt_for_task(
+        self,
+        task: str,
+        *,
+        threshold: float = 0.05,
+    ) -> str:
+        """Same as composed_system_prompt, but universal skills are filtered.
+
+        Universals attach only when their `name + when_to_use` text shares
+        enough tokens with `task` (Jaccard similarity >= `threshold`).
+        Skills declared in `uses_skills:` are always attached -- the
+        expert's author opted in explicitly. Empty `task` falls back to
+        the unfiltered prompt.
+
+        `threshold` defaults to 0.05 (~one shared keyword in a small
+        task). Tools that want stricter filtering can raise it; setting
+        it to 0 makes the call equivalent to `composed_system_prompt`.
+        """
+        if not task or threshold <= 0.0:
+            return self.composed_system_prompt
+
+        # Skill is a (mutable) dataclass and not hashable; index by slug.
+        scored: dict[str, float] = {
+            s.slug: score
+            for s, score in self.skill_registry.recommend_for_task(task)
+        }
+
+        def _accepts_universal(skill: Skill) -> bool:
+            score = scored.get(skill.slug, 0.0)
+            keep = score >= threshold
+            if not keep:
+                _log.debug(
+                    "Profile %s task-filter dropped universal %r (score=%.3f < %.3f)",
+                    self.source_file, skill.slug, score, threshold,
+                )
+            return keep
+
+        return self._compose(universal_filter=_accepts_universal)
+
+    def _compose(self, *, universal_filter) -> str:
+        """Shared assembly path for the two composed_system_prompt variants."""
         sections: list[str] = []
         sp = self.system_prompt.rstrip()
         if sp:
@@ -155,13 +198,16 @@ class ExpertProfile:
             seen.add(slug)
             sections.append(skill.compose_body())
 
-        # Universal skills, suppressed where their content is already inline.
+        # Universal skills, suppressed where the filter rejects them or
+        # where content is already inline.
         for skill in self.skill_registry.universal_skills():
             if skill.slug in seen:
                 continue
             if skill.slug == "solid_dry" and self.has_solid_dry_block():
                 # Legacy YAML still has the block inlined; don't duplicate.
                 seen.add(skill.slug)
+                continue
+            if not universal_filter(skill):
                 continue
             seen.add(skill.slug)
             sections.append(skill.compose_body())

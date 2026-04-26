@@ -41,6 +41,11 @@ def create_mcp_server():
     from contextlib import asynccontextmanager
     from collections.abc import AsyncIterator
 
+    from .judging import JudgingEngine
+    from .verification import VerificationStore
+    from .pgve import PgveStore
+    from .dsl import FlowStore
+
     @_dataclass
     class _LifespanState:
         config: SuiteConfig
@@ -48,6 +53,10 @@ def create_mcp_server():
         pipeline_manager: PipelineManager
         decision_store: DecisionStore
         debate_store: DebateStore
+        judging_engine: JudgingEngine
+        verification_store: VerificationStore
+        pgve_store: PgveStore
+        flow_store: FlowStore
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
@@ -56,12 +65,20 @@ def create_mcp_server():
         pipe_mgr = PipelineManager(config.pipelines_path)
         dec_store = DecisionStore(config.decisions_path / "decisions.jsonl")
         dbt_store = DebateStore(config.debates_path / "debates.jsonl")
+        judge_eng = JudgingEngine(config.kb_root / "judgings" / "active")
+        verify_store = VerificationStore(config.kb_root / "verifications" / "active")
+        pgve_store = PgveStore(config.kb_root / "pgve" / "active")
+        flow_store = FlowStore(config.kb_root / "flows" / "active")
         yield _LifespanState(
             config=config,
             debate_engine=engine,
             pipeline_manager=pipe_mgr,
             decision_store=dec_store,
             debate_store=dbt_store,
+            judging_engine=judge_eng,
+            verification_store=verify_store,
+            pgve_store=pgve_store,
+            flow_store=flow_store,
         )
 
     def _get_config(ctx: Optional[Context]) -> SuiteConfig:
@@ -83,6 +100,22 @@ def create_mcp_server():
     def _get_debate_store(ctx: Optional[Context]) -> DebateStore:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.debate_store
+
+    def _get_judging_engine(ctx: Optional[Context]):
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.judging_engine
+
+    def _get_verification_store(ctx: Optional[Context]):
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.verification_store
+
+    def _get_pgve_store(ctx: Optional[Context]):
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.pgve_store
+
+    def _get_flow_store(ctx: Optional[Context]):
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.flow_store
 
     mcp = FastMCP("SwarmKB", lifespan=lifespan)
 
@@ -1734,5 +1767,742 @@ No automatic progression. You control the pace.
                         ctx: Optional[Context] = None) -> str:
         from swarm_core.keeper.server import kb_check_claude_md
         return json.dumps(kb_check_claude_md(path), indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Self-direction / completion tools
+    # ════════════════════════════════════════════════════════════════════
+
+    from .completion_store import CompletionStore as _CompletionStore
+
+    def _resolve_session_dir(cfg: SuiteConfig, tool: str, session_id: str) -> Path:
+        if tool not in TOOL_NAMES:
+            raise ValueError(
+                f"unknown tool {tool!r}; expected one of {list(TOOL_NAMES)}"
+            )
+        if not session_id:
+            raise ValueError("session_id must be non-empty")
+        sess_dir = cfg.tool_sessions_path(tool) / session_id
+        if not sess_dir.is_dir():
+            raise ValueError(
+                f"session {tool}/{session_id} not found at {sess_dir}; "
+                "create the session first."
+            )
+        return sess_dir
+
+    @mcp.tool(
+        name="kb_subtask_done",
+        description=(
+            "Agent self-signal: subtask `subtask_id` is finished. "
+            "Idempotent on subtask_id; re-marking the same id bumps a "
+            "loop counter and eventually trips the cap. Resets the "
+            "consecutive-thinks counter. Use this every time the agent "
+            "completes a discrete unit of work so the host can stop the "
+            "loop without parsing free-text."
+        ),
+    )
+    def _kb_subtask_done(
+        tool: str,
+        session_id: str,
+        subtask_id: str,
+        summary: str = "",
+        outputs: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        cfg = _get_config(ctx)
+        sess_dir = _resolve_session_dir(cfg, tool, session_id)
+        outputs_dict = json.loads(outputs) if outputs else {}
+        store = _CompletionStore(sess_dir, session_id)
+        record = store.mark_subtask_done(
+            subtask_id, summary=summary, outputs=outputs_dict,
+        )
+        return json.dumps({
+            "subtask": record.to_dict(),
+            "state": store.state().to_dict(),
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_complete_task",
+        description=(
+            "Agent self-signal: the whole task for this session is done. "
+            "Idempotent -- re-calling returns the existing completion "
+            "record without overwriting summary or outputs. After this "
+            "call, kb_subtask_done and kb_record_think raise."
+        ),
+    )
+    def _kb_complete_task(
+        tool: str,
+        session_id: str,
+        summary: str,
+        outputs: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        cfg = _get_config(ctx)
+        sess_dir = _resolve_session_dir(cfg, tool, session_id)
+        outputs_dict = json.loads(outputs) if outputs else {}
+        store = _CompletionStore(sess_dir, session_id)
+        record = store.complete_task(summary, outputs=outputs_dict)
+        return json.dumps({
+            "completion": record.to_dict(),
+            "state": store.state().to_dict(),
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_record_think",
+        description=(
+            "Agent self-signal: a thought step occurred without an "
+            "action. Bumps the consecutive-thinks counter; trips the "
+            "cap when the agent is spinning without progress."
+        ),
+    )
+    def _kb_record_think(
+        tool: str,
+        session_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        cfg = _get_config(ctx)
+        sess_dir = _resolve_session_dir(cfg, tool, session_id)
+        store = _CompletionStore(sess_dir, session_id)
+        counter = store.record_think()
+        return json.dumps({
+            "consecutive_thinks": counter,
+            "caps": store.caps,
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_get_completion",
+        description=(
+            "Read the completion state for a session: subtasks done, "
+            "loop counts, completion record (or null), think counter, "
+            "caps. Safe to call any time."
+        ),
+    )
+    def _kb_get_completion(
+        tool: str,
+        session_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        cfg = _get_config(ctx)
+        sess_dir = _resolve_session_dir(cfg, tool, session_id)
+        store = _CompletionStore(sess_dir, session_id)
+        should_stop, reason = store.should_stop()
+        return json.dumps({
+            "state": store.state().to_dict(),
+            "caps": store.caps,
+            "should_stop": should_stop,
+            "stop_reason": reason,
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_record_action",
+        description=(
+            "Agent self-signal: a side-effectful action (file write, "
+            "shell command) happened that isn't itself a tracked "
+            "subtask. Resets the consecutive-thinks counter so the "
+            "agent doesn't trip max_consecutive_thinks while making "
+            "real progress. Idempotent."
+        ),
+    )
+    def _kb_record_action(
+        tool: str,
+        session_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        cfg = _get_config(ctx)
+        sess_dir = _resolve_session_dir(cfg, tool, session_id)
+        store = _CompletionStore(sess_dir, session_id)
+        store.record_action()
+        return json.dumps({
+            "consecutive_thinks": store.state().consecutive_thinks,
+            "caps": store.caps,
+        }, indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Debate format registry (4 protocols over the same DebateEngine)
+    # ════════════════════════════════════════════════════════════════════
+
+    from . import debate_formats as _fmts
+
+    @mcp.tool(
+        name="kb_list_debate_formats",
+        description=(
+            "List all registered debate formats with one-line summaries. "
+            "Pick one to pass as `format=` to start_debate."
+        ),
+    )
+    def _kb_list_debate_formats(ctx: Optional[Context] = None) -> str:
+        return json.dumps(
+            [
+                {"name": _fmts.get_format(n).name,
+                 "summary": _fmts.get_format(n).summary,
+                 "actors": _fmts.get_format(n).actors}
+                for n in _fmts.list_formats()
+            ],
+            indent=2,
+        )
+
+    @mcp.tool(
+        name="kb_get_debate_format",
+        description=(
+            "Get the full phase spec for a debate format (open, "
+            "with_judge, trial, mediation): actors, phases, expected "
+            "tool calls per phase, stop condition, notes. Agents read "
+            "this to know what to do next in their format."
+        ),
+    )
+    def _kb_get_debate_format(
+        format: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        return json.dumps(_fmts.get_format(format).to_dict(), indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # CouncilAsAJudge -- multi-dimensional judging with rationales
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_judging",
+        description=(
+            "Open a CouncilAsAJudge session over a subject. N judges "
+            "will each judge ONE dimension and submit a verdict + "
+            "rationale. Default dimensions: accuracy, helpfulness, "
+            "harmlessness, coherence, conciseness, instruction_adherence."
+        ),
+    )
+    def _kb_start_judging(
+        subject: str,
+        dimensions: str = "",
+        subject_kind: str = "text",
+        subject_ref: str = "",
+        project_path: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        engine = _get_judging_engine(ctx)
+        dims = [d.strip() for d in dimensions.split(",") if d.strip()] or None
+        j = engine.start(
+            subject=subject,
+            dimensions=dims,
+            subject_kind=subject_kind,
+            subject_ref=subject_ref,
+            project_path=project_path,
+            source_tool=source_tool,
+            source_session=source_session,
+        )
+        return json.dumps(j.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_judge_dimension",
+        description=(
+            "One judge submits a verdict + rationale for ONE dimension "
+            "of an open judging. Verdict in {pass, fail, mixed, "
+            "abstain}. Re-judging the same dimension by the same judge "
+            "overwrites the prior submission."
+        ),
+    )
+    def _kb_judge_dimension(
+        judging_id: str,
+        judge: str,
+        dimension: str,
+        verdict: str,
+        rationale: str,
+        suggested_changes: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        engine = _get_judging_engine(ctx)
+        changes = [c.strip() for c in suggested_changes.split("\n") if c.strip()]
+        jid = engine.judge(
+            judging_id,
+            judge=judge,
+            dimension=dimension,
+            verdict=verdict,
+            rationale=rationale,
+            suggested_changes=changes,
+        )
+        j = engine.get(judging_id)
+        return json.dumps({
+            "judgment_id": jid,
+            "covered_dimensions": sorted(j.covered_dimensions()) if j else [],
+            "is_complete": j.is_complete() if j else False,
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_resolve_judging",
+        description=(
+            "Synthesise per-dimension judgments into a single verdict "
+            "(pass/fail/mixed) with a summary rationale. The aggregator "
+            "is the agent calling this tool -- the verdict and summary "
+            "are its synthesis, not auto-derived."
+        ),
+    )
+    def _kb_resolve_judging(
+        judging_id: str,
+        overall: str,
+        summary: str,
+        synthesised_by: str = "",
+        follow_ups: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        engine = _get_judging_engine(ctx)
+        ups = [u.strip() for u in follow_ups.split("\n") if u.strip()]
+        synth = engine.synthesise(
+            judging_id,
+            overall=overall,
+            summary=summary,
+            synthesised_by=synthesised_by,
+            follow_ups=ups,
+        )
+        return json.dumps(synth.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_get_judging",
+        description=(
+            "Read a judging by ID: subject, dimensions, all judgments "
+            "so far, synthesis (or null), status."
+        ),
+    )
+    def _kb_get_judging(
+        judging_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        engine = _get_judging_engine(ctx)
+        j = engine.get(judging_id)
+        if j is None:
+            raise ValueError(f"Judging {judging_id!r} not found")
+        return json.dumps(j.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_list_judgings",
+        description=(
+            "List judgings across the suite. Filter by status "
+            "(open/resolved/cancelled) and source_tool."
+        ),
+    )
+    def _kb_list_judgings(
+        status: str = "",
+        source_tool: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        engine = _get_judging_engine(ctx)
+        items = engine.list_all(status=status, source_tool=source_tool)
+        return json.dumps([j.to_dict() for j in items], indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Verification stage -- aggregated artifact between fix and doc
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_verification",
+        description=(
+            "Open a VerificationReport for a fix-session. The orchestrator "
+            "feeds evidence (test diff, regression scan, quality-gate "
+            "result, optional judgings) via kb_add_verification_evidence, "
+            "then synthesises a verdict via kb_finalise_verification. The "
+            "verdict gates advancement into the doc stage."
+        ),
+    )
+    def _kb_start_verification(
+        fix_session: str,
+        review_session: str = "",
+        project_path: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_verification_store(ctx)
+        report = store.start(
+            fix_session=fix_session,
+            review_session=review_session,
+            project_path=project_path,
+        )
+        return json.dumps(report.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_add_verification_evidence",
+        description=(
+            "Attach one piece of evidence (test_diff, regression_scan, "
+            "quality_gate, judging, manual_note) to an open verification. "
+            "`data` is a JSON-encoded dict whose shape depends on `kind`."
+        ),
+    )
+    def _kb_add_verification_evidence(
+        report_id: str,
+        kind: str,
+        summary: str,
+        data: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_verification_store(ctx)
+        data_dict = json.loads(data) if data else {}
+        ev_id = store.add_evidence(
+            report_id,
+            kind=kind,
+            summary=summary,
+            data=data_dict,
+            source_tool=source_tool,
+            source_session=source_session,
+        )
+        return json.dumps({"evidence_id": ev_id}, indent=2)
+
+    @mcp.tool(
+        name="kb_finalise_verification",
+        description=(
+            "Synthesise the evidence into a verdict (pass/fail/partial). "
+            "blocking_issues and follow_ups are newline-separated. After "
+            "this call, the report is read-only."
+        ),
+    )
+    def _kb_finalise_verification(
+        report_id: str,
+        overall: str,
+        summary: str,
+        blocking_issues: str = "",
+        follow_ups: str = "",
+        synthesised_by: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_verification_store(ctx)
+        block = [b.strip() for b in blocking_issues.split("\n") if b.strip()]
+        ups = [u.strip() for u in follow_ups.split("\n") if u.strip()]
+        verdict = store.finalise(
+            report_id,
+            overall=overall,
+            summary=summary,
+            blocking_issues=block,
+            follow_ups=ups,
+            synthesised_by=synthesised_by,
+        )
+        return json.dumps(verdict.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_get_verification",
+        description="Read a verification report by ID: evidence list + verdict + status.",
+    )
+    def _kb_get_verification(
+        report_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_verification_store(ctx)
+        r = store.get(report_id)
+        if r is None:
+            raise ValueError(f"Verification {report_id!r} not found")
+        return json.dumps(r.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_list_verifications",
+        description=(
+            "List verifications. Filter by status (open/finalised/cancelled) "
+            "or fix_session."
+        ),
+    )
+    def _kb_list_verifications(
+        status: str = "",
+        fix_session: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_verification_store(ctx)
+        items = store.list_all(status=status, fix_session=fix_session)
+        return json.dumps([r.to_dict() for r in items], indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Planner-Generator-Evaluator (generate-verify-retry loop)
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_start_pgve",
+        description=(
+            "Open a generate-verify-retry session for one task. The "
+            "generator submits a candidate via kb_submit_candidate; the "
+            "evaluator scores it via kb_evaluate_candidate. While the "
+            "verdict is 'revise', generator submits another candidate "
+            "carrying the previous feedback. Stops on 'accepted' or "
+            "when the candidate budget is exhausted."
+        ),
+    )
+    def _kb_start_pgve(
+        task_spec: str,
+        max_candidates: int = 5,
+        project_path: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_pgve_store(ctx)
+        s = store.start(
+            task_spec=task_spec,
+            max_candidates=max_candidates,
+            project_path=project_path,
+            source_tool=source_tool,
+            source_session=source_session,
+        )
+        return json.dumps(s.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_submit_candidate",
+        description=(
+            "Generator submits a candidate for the latest open pgve "
+            "session. The candidate auto-carries the previous "
+            "evaluation's feedback in its `previous_feedback` field so "
+            "downstream agents can read it without re-querying JSONL."
+        ),
+    )
+    def _kb_submit_candidate(
+        session_id: str,
+        generator: str,
+        content: str,
+        payload: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_pgve_store(ctx)
+        payload_dict = json.loads(payload) if payload else {}
+        cand = store.submit_candidate(
+            session_id,
+            generator=generator,
+            content=content,
+            payload=payload_dict,
+        )
+        return json.dumps(cand.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_evaluate_candidate",
+        description=(
+            "Evaluator scores the LATEST candidate of a pgve session. "
+            "Verdict in {accepted, revise, rejected}. accepted -> "
+            "session finalises with this candidate as winner; revise -> "
+            "generator is expected to retry with the feedback; "
+            "rejected -> the planner should produce a fresh task spec."
+        ),
+    )
+    def _kb_evaluate_candidate(
+        session_id: str,
+        evaluator: str,
+        verdict: str,
+        feedback: str,
+        score: float = -1.0,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_pgve_store(ctx)
+        ev = store.evaluate(
+            session_id,
+            evaluator=evaluator,
+            verdict=verdict,
+            feedback=feedback,
+            score=None if score < 0 else score,
+        )
+        # Return both the evaluation AND the session so the caller sees
+        # whether to retry (status=open) or stop (accepted/exhausted/rejected).
+        s = store.get(session_id)
+        return json.dumps({
+            "evaluation": ev.to_dict(),
+            "session_status": s.status if s else "unknown",
+            "remaining_budget": s.remaining_budget() if s else 0,
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_get_pgve",
+        description="Read a pgve session by ID: candidates + evaluations + status.",
+    )
+    def _kb_get_pgve(
+        session_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_pgve_store(ctx)
+        s = store.get(session_id)
+        if s is None:
+            raise ValueError(f"PgveSession {session_id!r} not found")
+        return json.dumps(s.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_list_pgve",
+        description=(
+            "List pgve sessions. Filter by status "
+            "(open/accepted/exhausted/rejected/cancelled) or source_tool."
+        ),
+    )
+    def _kb_list_pgve(
+        status: str = "",
+        source_tool: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_pgve_store(ctx)
+        items = store.list_all(status=status, source_tool=source_tool)
+        return json.dumps([s.to_dict() for s in items], indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # Flow DSL -- declarative pipeline routing (a -> b, c -> d, H, e)
+    # ════════════════════════════════════════════════════════════════════
+
+    from . import dsl as _dsl
+
+    @mcp.tool(
+        name="kb_parse_flow",
+        description=(
+            "Parse a flow DSL string and return its AST + validation "
+            "problems. Use to dry-run a routing expression before "
+            "starting it. Grammar: `->` sequence, `,` parallel, `H` "
+            "human gate, parens grouping. `known_names` (newline list) "
+            "validates that every step name is registered."
+        ),
+    )
+    def _kb_parse_flow(
+        source: str,
+        known_names: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        ast = _dsl.parse_flow(source)
+        names = {n.strip() for n in known_names.split("\n") if n.strip()}
+        problems = _dsl.validate_flow(ast, known_names=names or None)
+        return json.dumps({
+            "ast": ast.to_dict(),
+            "atoms": [a.name for a in ast.iter_atoms()],
+            "problems": problems,
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_start_flow",
+        description=(
+            "Open a flow execution from a DSL string. Returns the flow "
+            "id and the first set of pending steps. The AI client "
+            "dispatches each pending atom (and surfaces gates as human "
+            "prompts), then reports completion via kb_mark_step_done."
+        ),
+    )
+    def _kb_start_flow(
+        source: str,
+        known_names: str = "",
+        project_path: str = "",
+        source_tool: str = "",
+        source_session: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_flow_store(ctx)
+        names = {n.strip() for n in known_names.split("\n") if n.strip()}
+        flow = store.start(
+            source=source,
+            known_names=names or None,
+            project_path=project_path,
+            source_tool=source_tool,
+            source_session=source_session,
+        )
+        return json.dumps({
+            "flow": flow.to_dict(),
+            "next_steps": [n.to_dict() for n in flow.next_steps()],
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_get_next_steps",
+        description=(
+            "Read the pending steps of a flow. Each pending step is "
+            "either an atom (the client should invoke the tool of that "
+            "name) or a gate (the client should surface a human prompt). "
+            "Empty list = flow finished."
+        ),
+    )
+    def _kb_get_next_steps(
+        flow_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_flow_store(ctx)
+        flow = store.get(flow_id)
+        if flow is None:
+            raise ValueError(f"Flow {flow_id!r} not found")
+        return json.dumps({
+            "status": flow.status,
+            "next_steps": [n.to_dict() for n in flow.next_steps()],
+            "completed_count": len(flow.completed),
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_mark_step_done",
+        description=(
+            "Mark one step of a flow as completed and advance the "
+            "cursor. Idempotent on (flow_id, step_id). When the last "
+            "step completes, status flips to 'completed' automatically."
+        ),
+    )
+    def _kb_mark_step_done(
+        flow_id: str,
+        step_id: str,
+        outputs: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_flow_store(ctx)
+        outputs_dict = json.loads(outputs) if outputs else {}
+        rec = store.mark_done(flow_id, step_id, outputs_dict)
+        flow = store.get(flow_id)
+        return json.dumps({
+            "step": rec.to_dict(),
+            "next_steps": [n.to_dict() for n in flow.next_steps()] if flow else [],
+            "status": flow.status if flow else "unknown",
+        }, indent=2)
+
+    @mcp.tool(
+        name="kb_get_flow",
+        description="Read a flow execution by ID: AST, completed steps, status.",
+    )
+    def _kb_get_flow(
+        flow_id: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_flow_store(ctx)
+        flow = store.get(flow_id)
+        if flow is None:
+            raise ValueError(f"Flow {flow_id!r} not found")
+        return json.dumps(flow.to_dict(), indent=2)
+
+    @mcp.tool(
+        name="kb_list_flows",
+        description="List flow executions. Filter by status (open/completed/cancelled) or source_tool.",
+    )
+    def _kb_list_flows(
+        status: str = "",
+        source_tool: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        store = _get_flow_store(ctx)
+        items = store.list_all(status=status, source_tool=source_tool)
+        return json.dumps([f.to_dict() for f in items], indent=2)
+
+    # ════════════════════════════════════════════════════════════════════
+    # AgentRouter -- rank experts for a task by keyword overlap
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool(
+        name="kb_route_experts",
+        description=(
+            "Rank expert YAML profiles by keyword overlap with a task "
+            "description. Loads .yaml files from `experts_dir` and "
+            "scores each by Jaccard similarity over name + description "
+            "+ system_prompt + relevance_signals. No embedding model "
+            "required. Returns at most `top_k` results above `min_score`."
+        ),
+    )
+    def _kb_route_experts(
+        task: str,
+        experts_dir: str,
+        top_k: int = 5,
+        min_score: float = 0.05,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        from swarm_core.experts.registry import ExpertRegistry
+        from swarm_core.experts.suggest import TaskSimilarityStrategy
+        if not task:
+            raise ValueError("task must be non-empty")
+        ed = Path(experts_dir).expanduser()
+        if not ed.is_dir():
+            raise ValueError(f"experts_dir {experts_dir!r} is not a directory")
+        registry = ExpertRegistry(
+            builtin_dir=ed,
+            suggest_strategy=TaskSimilarityStrategy(min_score=min_score),
+        )
+        ranked = registry.suggest(task)
+        if top_k > 0:
+            ranked = ranked[:top_k]
+        return json.dumps({
+            "task": task,
+            "experts_dir": str(ed),
+            "ranked": ranked,
+            "total_loaded": len(registry.list_profiles()),
+        }, indent=2)
 
     return mcp

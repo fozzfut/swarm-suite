@@ -168,7 +168,12 @@ class DebateDecision:
 
 @dataclass
 class Debate:
-    """Full debate state."""
+    """Full debate state.
+
+    `format` names the protocol the participants follow (see
+    `swarm_kb.debate_formats`); the underlying state model is the
+    same for every format. Defaults to "open" for backward compat.
+    """
 
     id: str = ""
     topic: str = ""
@@ -181,6 +186,7 @@ class Debate:
     critiques: list[Critique] = field(default_factory=list)
     votes: list[Vote] = field(default_factory=list)
     decision: Optional[DebateDecision] = None
+    format: str = "open"
     created_at: str = ""
 
     def __post_init__(self) -> None:
@@ -361,6 +367,7 @@ class Debate:
             "critiques": [c.to_dict() for c in self.critiques],
             "votes": [v.to_dict() for v in self.votes],
             "decision": self.decision.to_dict() if self.decision else None,
+            "format": self.format,
             "created_at": self.created_at,
         }
 
@@ -375,6 +382,21 @@ class Debate:
         decision_raw = d.get("decision")
         decision = DebateDecision.from_dict(decision_raw) if decision_raw else None
 
+        # Tolerate unknown format strings on read (per CLAUDE.md schema-
+        # versioning rule: log a warning and read what we understand).
+        # Fall back to "open" so downstream consumers always see a
+        # registered format name.
+        raw_fmt = d.get("format", "open")
+        from .debate_formats import is_known_format
+        if not is_known_format(raw_fmt):
+            _log.warning(
+                "Debate %s: unknown format %r on load; falling back to 'open'",
+                d.get("id", "?"), raw_fmt,
+            )
+            fmt = "open"
+        else:
+            fmt = raw_fmt
+
         return cls(
             id=d.get("id", ""),
             topic=d.get("topic", ""),
@@ -387,6 +409,7 @@ class Debate:
             critiques=[Critique.from_dict(c) for c in d.get("critiques", [])],
             votes=[Vote.from_dict(v) for v in d.get("votes", [])],
             decision=decision,
+            format=fmt,
             created_at=d.get("created_at", ""),
         )
 
@@ -417,19 +440,30 @@ class DebateEngine:
         project_path: str = "",
         source_tool: str = "",
         source_session: str = "",
+        format: str = "open",
     ) -> Debate:
         """Start a new debate. Returns the Debate with its ID."""
+        # Validate format name against the registry; unknown formats are
+        # rejected here rather than at use time so misconfiguration fails
+        # at the start, not mid-debate.
+        from .debate_formats import is_known_format
+        if not is_known_format(format):
+            from .debate_formats import list_formats
+            raise ValueError(
+                f"unknown debate format {format!r}; choose from {list_formats()}"
+            )
         debate = Debate(
             topic=topic,
             context=context,
             project_path=project_path,
             source_tool=source_tool,
             source_session=source_session,
+            format=format,
         )
         with self._lock:
             self._debates[debate.id] = debate
             self._save(debate.id)
-        _log.info("Started debate %s: %s", debate.id, topic)
+        _log.info("Started debate %s: %s (format=%s)", debate.id, topic, format)
         return debate
 
     def get_debate(self, debate_id: str) -> Optional[Debate]:
