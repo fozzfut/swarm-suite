@@ -1,204 +1,56 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/ReviewSwarm-v0.3.5-blueviolet?style=for-the-badge" alt="Version" />
-</p>
+# review-swarm
 
-<h1 align="center">ReviewSwarm</h1>
+> **Part of [Swarm Suite](https://github.com/fozzfut/swarm-suite).** Most users install the whole suite and drive it through the [main README](../../README.md) and `/swarm-*` slash commands — they never read this file. This README documents the package itself for contributors and standalone users.
 
-<p align="center">
-  <strong>Collaborative AI Code Review via MCP</strong><br>
-  Multiple specialized AI agents review your code simultaneously,<br>
-  coordinate through a shared whiteboard, and reach consensus on findings.
-</p>
+Multi-agent **collaborative code review via MCP**. Thirteen specialised expert agents claim files in parallel, post findings with structured evidence, and reach consensus through a cross-check phase. Produces a recommendation report — **never modifies your code**.
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
-  <a href="https://python.org"><img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python 3.10+" /></a>
-  <img src="https://img.shields.io/badge/tests-227%20passing-brightgreen.svg" alt="Tests" />
-  <img src="https://img.shields.io/badge/experts-13-orange.svg" alt="Experts" />
-  <img src="https://img.shields.io/badge/MCP_tools-26-blue.svg" alt="MCP Tools" />
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg" alt="Platform" />
-</p>
+This is **Stage 3** of the Swarm Suite pipeline: 13 experts claim files → post findings → cross-check phase reconciles → triaged report.
+
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
+[![Experts](https://img.shields.io/badge/experts-13-orange.svg)]()
+[![MCP tools](https://img.shields.io/badge/MCP_tools-28-blue.svg)]()
 
 ---
 
-## How It Works
-
-ReviewSwarm is a **review-only** tool. It finds bugs, it does not fix them.
+## How it works
 
 ```
- You: "Review src/"
- ─────────────────►  ReviewSwarm Server
-                     ┌────────────────────────┐
-                     │  Phase 1: REVIEW        │
-                     │  claim files             │
-                     │  post findings           │
-                     │  mark_phase_done         │
-                     ├──────────────────────────┤
-                     │  ═══════ BARRIER ═══════ │
-                     ├──────────────────────────┤
-                     │  Phase 2: CROSS-CHECK    │
-                     │  get_findings             │
-                     │  react (confirm/dispute)  │
-                     │  mark_phase_done         │
-                     ├──────────────────────────┤
-                     │  ═══════ BARRIER ═══════ │
-                     ├──────────────────────────┤
-                     │  Phase 3: REPORT          │
-                     │  end_session              │
-                     │  auto-save reports        │
-                     └────────────┬─────────────┘
-                                  │
-                                  ▼
-                     report.md / report.json / report.sarif
-                     (recommendation report — no code changes)
+Phase 1: REVIEW                Phase 2: CROSS-CHECK            Phase 3: REPORT
+  claim_file()                   get_findings()                  end_session()
+  post_finding() x N             react(confirm/dispute/extend)   auto-saves:
+  release_file()                 mark_phase_done(2)                report.md
+  mark_phase_done(1)             ════ BARRIER ════                 report.json
+  ════ BARRIER ════                                                report.sarif
 ```
 
-### Step by step
-
-```bash
-# 1. REVIEW: one command launches everything
-review-swarm review . --scope src/ --task "security audit"
-
-# Orchestrator: creates session, picks experts, assigns files, returns plan.
-# Agents execute the plan:
-#   Phase 1 — each expert reviews files, posts findings
-#   ═══ BARRIER ═══ (all agents must finish before Phase 2)
-#   Phase 2 — each expert reads others' findings, confirms/disputes
-#   ═══ BARRIER ═══
-#   Phase 3 — end_session auto-saves reports
-
-# 2. REPORTS: auto-saved to session directory
-ls ~/.review-swarm/sessions/sess-2026-03-22-001/
-#   report.md      ← Markdown (executive summary, per-file, per-expert)
-#   report.json    ← JSON (machine-readable)
-#   report.sarif   ← SARIF 2.1.0 (GitHub Code Scanning)
-
-# That's it. ReviewSwarm's job is done.
-# The report is a spec — each finding has file, lines, evidence, and suggestion.
-# What you do with it (manual fix, AI fix-agent, ignore) is up to you.
-```
-
-### Fix tracking (optional)
-
-If you use a separate tool/agent to fix bugs from the report, you can track progress via ReviewSwarm:
-
-```bash
-# After fixing a bug, mark the finding as fixed:
-mark_fixed(session_id, "f-a1b2c3", fix_ref="commit:abc1234")
-
-# Or batch-update after fixing multiple bugs:
-bulk_update_status(session_id, ["f-a1b2c3", "f-d4e5f6"], "fixed", reason="PR #42")
-```
-
-This is **status tracking**, not code modification. ReviewSwarm never changes your code.
-
-### Key principles
-
-- **Review agents are read-only** — they produce a recommendation report, never modify code
-- **Phase barriers** — Phase 2 cannot start until all agents finish Phase 1
-- **Consensus** — 2+ confirms = confirmed, 1+ dispute = disputed
-- **Reports as specs** — each finding is a self-contained bug spec with file, lines, evidence, and suggestion
-- **Fix tracking is optional** — `mark_fixed` / `bulk_update_status` track what was fixed, but fixing is external
-
----
-
-## One Command Review
-
-```bash
-review-swarm review . --scope src/ --task "security audit"
-```
-
-Or via MCP:
-
-```
-orchestrate_review(project_path=".", scope="src/", task="security audit")
-```
-
-ReviewSwarm creates a session, selects experts, assigns files, and returns a 3-phase execution plan with barrier synchronization.
-
-**Task keywords** (EN/RU): security, performance, concurrency, quality, pre-release, bug, type, log, dependency, test, doc — the orchestrator auto-selects relevant experts.
-
----
-
-## What is ReviewSwarm?
-
-ReviewSwarm is **not** an LLM and **not** a fixer — it's **review infrastructure**. It provides **26 MCP tools** that AI agents use to:
-
-- **Post findings** with structured evidence (actual + expected + source_ref)
-- **Claim files** for review (advisory locks with TTL)
-- **React** to each other's work (confirm, dispute, extend, duplicate)
-- **Message each other** — direct, broadcast, query/response (star topology)
-- **Reach consensus** automatically (2+ confirms = confirmed)
-- **Generate reports** in Markdown, JSON, or SARIF
-
-ReviewSwarm produces a **recommendation report**. It never modifies your code. What you do with the report is up to you.
-
----
+- **Review agents are read-only** — they produce a recommendation report, never modify code.
+- **Phase barriers** — Phase 2 cannot start until all agents finish Phase 1.
+- **Consensus** — 2+ confirms = `confirmed`; 1+ dispute = `disputed`; 1+ duplicate = `duplicate`.
+- **Reports as specs** — each finding is a self-contained bug spec with file, lines, evidence, suggestion.
 
 ## Install
 
 ```bash
-uv tool install review-swarm
+pip install review-swarm
 ```
 
-Upgrade:
+For the full suite (recommended):
 
 ```bash
-uv tool upgrade review-swarm
+pip install swarmsuite-core swarm-kb arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
 ```
 
-> Need uv? See [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
-> For the full swarm suite (ReviewSwarm + ArchSwarm + DocSwarm + FixSwarm + SpecSwarm + SwarmKB), see [INSTALL.md](INSTALL.md).
-
-From source (development):
+## Connect to your AI client
 
 ```bash
-git clone https://github.com/fozzfut/review-swarm.git
-cd review-swarm && pip install -e ".[dev]"
-```
-
----
-
-## IDE Setup
-
-### Claude Code (recommended)
-
-One command:
-
-```bash
+# Claude Code (built and tested)
 claude mcp add review-swarm -- review-swarm serve --transport stdio
 ```
 
-Or add manually to `~/.claude/settings.json` or project `.mcp.json`:
+For Cursor / Windsurf / Cline (untested but should work via MCP), see the main [README § Connect to your AI client](../../README.md#connect-to-your-ai-client).
 
-```json
-{
-  "mcpServers": {
-    "review-swarm": {
-      "command": "review-swarm",
-      "args": ["serve", "--transport", "stdio"]
-    }
-  }
-}
-```
-
-### Cursor / Windsurf / Cline (SSE)
-
-Start server first: `review-swarm serve --port 8787`
-
-```json
-{
-  "mcpServers": {
-    "review-swarm": {
-      "url": "http://127.0.0.1:8787/sse"
-    }
-  }
-}
-```
-
----
-
-## CLI
+## CLI (standalone usage)
 
 ```bash
 # Orchestrator (one-command review)
@@ -209,17 +61,15 @@ review-swarm review . --task "pre-release" --experts 5
 review-swarm serve --transport stdio
 review-swarm serve --port 8787
 
-# Session management
-review-swarm init
+# Sessions
 review-swarm list-sessions
 review-swarm report <session-id>
-review-swarm report <session-id> --format json
+review-swarm report <session-id> --format json|sarif
 
-# Monitoring & analysis
-review-swarm tail <session-id>                           # Live event stream
-review-swarm stats                                       # Aggregate stats
-review-swarm stats <session-id>                          # Session breakdown
-review-swarm diff <session-a> <session-b>                # Compare reviews
+# Monitoring
+review-swarm tail <session-id>             # live event stream
+review-swarm stats [<session-id>]          # aggregate / per-session
+review-swarm diff <session-a> <session-b>  # compare reviews
 review-swarm export <session-id> --format sarif -o out.sarif
 
 # Expert profiles
@@ -230,9 +80,9 @@ review-swarm prompt <expert-name>
 review-swarm purge --older-than 30
 ```
 
----
+Task keywords (EN/RU) auto-select relevant experts: security, performance, concurrency, quality, pre-release, bug, type, log, dependency, test, doc.
 
-## MCP Tools (26)
+## MCP tools (28)
 
 ### Orchestrator
 
@@ -240,160 +90,110 @@ review-swarm purge --older-than 30
 |------|-------------|
 | `orchestrate_review` | One-command review. Provide scope + task, get a complete execution plan with phase barriers. |
 
-### Session Management
+### Sessions
 
 | Tool | Description |
 |------|-------------|
 | `start_session` | Start a review session |
-| `end_session` | End session, release claims, auto-save reports (md + json + sarif) |
-| `get_session` | Get session state |
-| `list_sessions` | List all sessions |
+| `end_session` | End session, release claims, auto-save reports |
+| `get_session` / `list_sessions` | Session state / list all |
 
-### Expert Coordination
+### Expert coordination
 
 | Tool | Description |
 |------|-------------|
 | `suggest_experts` | Recommend expert profiles for project |
-| `claim_file` | Claim a file for review (30min TTL) |
-| `release_file` | Release a claimed file |
-| `get_claims` | See current claims |
+| `claim_file` / `release_file` / `get_claims` | Advisory file claims with 30-min TTL |
 
-### Findings
+### Findings + reactions
 
 | Tool | Description |
 |------|-------------|
-| `post_finding` | Post finding with evidence. Rate-limited. Input-validated. |
-| `post_findings_batch` | Post multiple findings in one call |
-| `get_findings` | Query findings with filters + pagination (limit/offset) |
-| `find_duplicates` | Check for duplicates before posting |
-| `react` | Confirm, dispute, extend, or mark duplicate |
+| `post_finding` / `post_findings_batch` | Post findings with evidence (rate-limited, validated) |
+| `get_findings` | Query with filters + pagination |
+| `find_duplicates` | Check before posting |
+| `react` | Confirm, dispute, extend, mark duplicate |
 | `post_comment` | Inline comment on a finding |
 | `get_summary` | Generate Markdown/JSON report |
+| `mark_fixed` / `bulk_update_status` | Track external fix application |
 
-### Fix Tracking
-
-| Tool | Description |
-|------|-------------|
-| `mark_fixed` | Mark a finding as FIXED with optional commit/PR reference |
-| `bulk_update_status` | Batch status update (fixed, wontfix, open, confirmed, disputed) |
-
-### Phase Barriers (Two-Pass Sync)
+### Phase barriers
 
 | Tool | Description |
 |------|-------------|
-| `mark_phase_done` | Mark that an expert completed a phase |
+| `mark_phase_done` | Mark expert done with a phase |
 | `check_phase_ready` | Check if all agents finished previous phase |
 | `get_phase_status` | Full phase status for all agents |
 
-### Real-Time Events
+### Real-time + messaging
 
 | Tool | Description |
 |------|-------------|
-| `get_events` | Get events since timestamp (polling fallback) |
-
-### Agent Messaging (Star Topology)
-
-| Tool | Description |
-|------|-------------|
-| `send_message` | Direct, broadcast, query, or response. Urgent + context. |
-| `get_inbox` | Get messages with read tracking |
-| `get_thread` | Get query + all responses |
-| `broadcast` | Send to all agents |
+| `get_events` | Events since timestamp (polling fallback) |
+| `send_message` | Direct, broadcast, query, response — star topology |
+| `get_inbox` / `get_thread` / `broadcast` | Messaging with read tracking |
 
 Every tool response includes `_pending` — unread messages piggyback on every call so agents react immediately.
 
----
+### Decision compliance
 
-## Two-Pass Review with Phase Barriers
+| Tool | Description |
+|------|-------------|
+| `get_arch_context` | Pull ADRs from arch-swarm into review context |
+| `check_decision_compliance` | Flag findings that violate Stage 1 architectural decisions |
 
-Agents can't start cross-checking until everyone finishes reviewing:
+## Expert profiles (13)
 
-```
-Phase 1: REVIEW
-  Expert A reviews → mark_phase_done(sid, "threading-safety", 1)
-  Expert B reviews → mark_phase_done(sid, "api-signatures", 1)
-  Expert C reviews → mark_phase_done(sid, "consistency", 1)
-                     ════════════ BARRIER ════════════
-                     check_phase_ready(sid, 2) → ready: true
+| Slug | Specialisation |
+|------|----------------|
+| `security-surface` | Injection vectors, hardcoded secrets, unsafe deserialization, missing input validation. |
+| `performance` | N+1 queries, quadratic algorithms, memory leaks, blocking I/O on hot paths. |
+| `threading-safety` | Race conditions, deadlocks, concurrency bugs across threads / async. |
+| `error-handling` | Swallowed errors, empty catches, missing error propagation. |
+| `type-safety` | Unchecked null / None / nil, unsafe type casts, missing type guards. |
+| `api-signatures` | Function signatures match usage; types match contracts. |
+| `consistency` | Cross-file contradictions: broken imports, naming mismatches, config/code drift. |
+| `dead-code` | Unreachable paths, unused exports, orphaned functions, dead feature flags. |
+| `dependency-drift` | Unused deps, missing deps, version conflicts, manifest/lockfile drift. |
+| `logging-patterns` | Missing logging at error boundaries, sensitive data in logs. |
+| `resource-lifecycle` | Resource leaks: unclosed files / connections / handles, missing cleanup. |
+| `test-quality` | Weakened tests, unrealistic mocks, swallowed failures, assertion anti-patterns. |
+| `project-context` | Validates `CLAUDE.md` / `AGENTS.md` accuracy vs codebase. |
 
-Phase 2: CROSS-CHECK
-  Expert A reads findings, reacts → mark_phase_done(sid, "threading-safety", 2)
-  Expert B reads findings, reacts → mark_phase_done(sid, "api-signatures", 2)
-  Expert C reads findings, reacts → mark_phase_done(sid, "consistency", 2)
-                     ════════════ BARRIER ════════════
-                     check_phase_ready(sid, 3) → ready: true
+All profiles are language-agnostic (Python, JS/TS, Go, Rust, Java, Kotlin, C#, C/C++, Ruby, Elixir, Swift, PHP). Every expert auto-loads the universal **SOLID + DRY** and **karpathy-guidelines** skills.
 
-Phase 3: REPORT
-  end_session → auto-saves report.md + report.json + report.sarif
-```
-
----
-
-## Fix Tracking (Optional)
-
-ReviewSwarm does not fix code. These tools are for **tracking** what was fixed externally:
-
-```python
-# After you (or your fix-agent) fix a bug, mark it in ReviewSwarm:
-mark_fixed(session_id, "f-a1b2c3", fix_ref="commit:abc1234")
-
-# Or batch-update:
-bulk_update_status(session_id, ["f-a1b2c3", "f-d4e5f6"], "fixed",
-                   reason="Fixed in PR #42")
-```
-
-Finding statuses: `open` → `confirmed` → `fixed` / `wontfix` / `disputed`
-
----
-
-## 13 Expert Profiles
-
-| Profile | Focus |
-|---------|-------|
-| `threading-safety` | Race conditions, deadlocks, async safety |
-| `api-signatures` | Signature mismatches, type contracts |
-| `consistency` | Broken imports, stale re-exports, config drift |
-| `error-handling` | Swallowed errors, empty catches |
-| `resource-lifecycle` | Unclosed files/connections, missing cleanup |
-| `dead-code` | Unreachable code, unused exports |
-| `security-surface` | Injection, secrets, unsafe deserialization |
-| `dependency-drift` | Unused/missing deps, version conflicts |
-| `project-context` | Documentation accuracy |
-| `test-quality` | Weakened assertions, unrealistic mocks |
-| `performance` | N+1 queries, O(n^2), memory leaks |
-| `logging-patterns` | Sensitive data in logs, missing error logging |
-| `type-safety` | Unchecked null, unsafe casts, any abuse |
-
-All **language-agnostic**: Python, JS/TS, Go, Rust, Java, Kotlin, C#, C/C++, Ruby, Elixir, Swift, PHP.
-
----
-
-## Consensus Algorithm
+## Storage layout
 
 ```
-1+ duplicate  →  DUPLICATE
-1+ dispute    →  DISPUTED
-N+ confirm    →  CONFIRMED  (N = confirm_threshold, default 2)
-otherwise     →  OPEN
+~/.swarm-kb/review/sessions/sess-YYYY-MM-DD-NNN/
+  ├── meta.json          # Session metadata + report paths
+  ├── findings.jsonl     # Findings (append-only)
+  ├── claims.json        # File claims (atomic write)
+  ├── reactions.jsonl    # Reactions log (append-only)
+  ├── events.jsonl       # Real-time events (append-only)
+  ├── messages.jsonl     # Agent-to-agent messages
+  ├── phases.json        # Phase barrier state
+  ├── report.md          # Auto-saved Markdown report
+  ├── report.json        # Auto-saved JSON report
+  └── report.sarif       # Auto-saved SARIF 2.1.0 report
 ```
 
----
+## Configuration
 
-## Agent Communication (Star Topology)
+`~/.swarm-kb/config.yaml` (suite-wide):
 
+```yaml
+review:
+  max_sessions: 50
+  default_format: markdown
+  session_timeout_hours: 24
+  consensus:
+    confirm_threshold: 2
+    auto_close_duplicates: true
+  rate_limit:
+    max_findings_per_minute: 60
+    max_messages_per_minute: 120
 ```
-     threading-safety
-            ↕
-api-signs ↔ Hub ↔ consistency
-            ↕
-     security-surface
-```
-
-**Message types:** `direct`, `broadcast`, `query` (always urgent), `response`
-
-**Piggyback `_pending`:** every tool response includes unread message count + preview. Agents react immediately — no polling loop, no race conditions.
-
----
 
 ## Safety
 
@@ -401,95 +201,28 @@ api-signs ↔ Hub ↔ consistency
 |---------|---------|
 | Rate limiting | 60 findings/min, 120 messages/min per agent |
 | Path validation | Rejects `../`, absolute paths, backslashes |
-| Input validation | Confidence 0-1, line numbers >= 0, line_end >= line_start |
+| Input validation | Confidence 0–1, line numbers ≥ 0, line_end ≥ line_start |
 | Duplicate reactions | Same agent can't confirm/dispute same finding twice |
-| Session auto-expiry | Active sessions expire after 24h |
-| Atomic writes | JSONL and JSON use temp file + `os.replace()` |
+| Atomic writes | JSONL append + JSON via temp file + `os.replace()` |
 | Corruption recovery | Bad JSONL lines skipped with warning, not crash |
 | Max findings | 10,000 per session |
 
----
+## Cost
 
-## Configuration
-
-`~/.review-swarm/config.yaml`:
-
-```yaml
-storage_dir: "~/.review-swarm"
-max_sessions: 50
-default_format: "markdown"
-session_timeout_hours: 24
-
-consensus:
-  confirm_threshold: 2
-  auto_close_duplicates: true
-
-experts:
-  custom_dir: "~/.review-swarm/custom-experts"
-  auto_suggest: true
-
-rate_limit:
-  max_findings_per_minute: 60
-  max_messages_per_minute: 120
-```
-
----
-
-## Data Storage
-
-```
-~/.review-swarm/sessions/sess-2026-03-22-001/
-  ├── meta.json          # Session metadata + report paths
-  ├── findings.jsonl     # Findings (one per line)
-  ├── claims.json        # File claims
-  ├── reactions.jsonl    # Reactions log
-  ├── events.jsonl       # Real-time events
-  ├── messages.jsonl     # Agent-to-agent messages
-  ├── phases.json        # Phase barrier state
-  ├── report.md          # Auto-saved Markdown report
-  ├── report.json        # Auto-saved JSON report
-  └── report.sarif       # Auto-saved SARIF report
-```
-
----
-
-## Architecture
-
-```
-src/review_swarm/
-├── orchestrator.py        # One-command review planning
-├── server.py              # 26 MCP tools + resources + subscriptions
-├── models.py              # Finding, Claim, Reaction, Event, Message
-├── session_manager.py     # Session lifecycle, caching, auto-expiry
-├── finding_store.py       # JSONL storage + in-memory index (atomic writes)
-├── claim_registry.py      # Advisory file claims with TTL (atomic writes)
-├── reaction_engine.py     # Consensus engine + duplicate reaction guard
-├── report_generator.py    # Markdown, JSON, SARIF reports
-├── event_bus.py           # Real-time event pub/sub (thread-safe)
-├── message_bus.py         # Agent messaging, star topology (thread-safe)
-├── phase_barrier.py       # Two-pass sync barriers
-├── rate_limiter.py        # Per-agent sliding window rate limiter
-├── expert_profiler.py     # Profile loading + auto-suggestion
-├── logging_config.py      # Structured logging
-├── config.py              # Config with validation
-├── cli.py                 # Click CLI (review, tail, stats, diff, export...)
-└── experts/               # 13 YAML expert profiles
-```
-
----
+13 experts working in parallel = up to 13× the LLM calls of a single-agent review. Pre-selecting experts (`--experts 5` or AgentRouter pre-filter) cuts this. See the main [README § A note on cost](../../README.md#a-note-on-cost) before launching on a large codebase.
 
 ## Development
 
 ```bash
+git clone https://github.com/fozzfut/swarm-suite
+cd swarm-suite/packages/review-swarm
 pip install -e ".[dev]"
 pytest                    # 227 tests, ~3s
 mypy src/review_swarm/
 ```
 
-CI: Python 3.10/3.11/3.12 on Ubuntu + Windows.
-
----
+CI: Python 3.10 / 3.11 / 3.12 on Ubuntu + Windows.
 
 ## License
 
-[MIT](LICENSE) &copy; 2026 Ilya Sidorov
+MIT — [Ilya Sidorov](https://github.com/fozzfut)

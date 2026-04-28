@@ -45,7 +45,9 @@ claude mcp add fix-swarm    -- fix-swarm serve --transport stdio
 claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
 ```
 
-#### Cursor / Windsurf / Cline (SSE)
+#### Cursor / Windsurf / Cline (SSE) — *untested but should work*
+
+> Swarm Suite is built and tested on Claude Code. The other MCP-compatible clients listed below speak the same protocol and *should* work with the same servers, but those paths are not yet covered by our test matrix — expect rough edges and please file an issue if you hit one.
 
 Start each server on its own port, then add to MCP config:
 
@@ -65,6 +67,10 @@ Start each server on its own port, then add to MCP config:
 ---
 
 ## Getting Started
+
+> **Before you launch.** Each pipeline stage spawns multiple specialised agents in parallel — Stage 3 review uses up to 13 experts, Stage 1 architecture up to 10 plus debate participants, Stage 0b spec up to 14. Token usage and rate-limit consumption scale accordingly. See [README § A note on cost](README.md#a-note-on-cost) for the levers (scope tightly, skip optional stages, lite mode) before running on a large codebase.
+
+> **Naming the suite.** When using natural language (any language your AI client speaks, not only English), prefix your request with `swarm` / `swarm-suite` or use a `/swarm-*` slash command — that's what disambiguates from Claude Code's own `/review` or other MCP servers you may have installed. The navigator skill cannot override your AI client's other capabilities.
 
 ```
 kb_guide("/path/to/project")
