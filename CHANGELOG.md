@@ -17,6 +17,55 @@ Suite follows semver per package:
 
 ## [Unreleased]
 
+(new entries since the 2026-04-28 release land here)
+
+---
+
+## [2026-04-28] — "Idea -> Production" pipeline release
+
+End-to-end Python pipeline: multi-agent architecture debates, multi-expert
+code review, fix-with-consensus, generate-verify-retry loops, the 13-format
+debate library, the AgentRearrange-style flow DSL, task-conditioned skill
+composition, hardening + release-prep stages, and the AI-driven navigator
+skill. Built and tested on Claude Code; other MCP clients (Cursor /
+Windsurf / Cline) speak the same protocol and should work, but those
+paths are not yet covered by our test matrix.
+
+### Versions published in this release
+
+| Package           | Version | Bump from previous |
+|-------------------|---------|--------------------|
+| `swarmsuite-core` | `0.2.0` | minor (was `0.1.0`) |
+| `swarm-kb`        | `0.4.0` | minor (was `0.3.0`) |
+| `arch-swarm-ai`   | `0.3.1` | patch (was `0.3.0`) |
+| `review-swarm`    | `0.4.1` | patch (was `0.4.0`) |
+| `fix-swarm-ai`    | `0.3.1` | patch (was `0.3.0`) |
+| `doc-swarm-ai`    | `0.2.1` | patch (was `0.2.0`) |
+| `spec-swarm-ai`   | `0.2.1` | patch (was `0.2.0`) |
+
+### Release-prep fixes (post version-bump)
+
+These landed after the version bump in `eddd946`; they're part of this
+release and do not warrant a further patch bump.
+
+- `swarm-core/io`: retry `os.replace` with backoff on Windows
+  `PermissionError` (Windows can briefly hold a file handle from antivirus
+  / indexing) — `a2fcecc`.
+- Dogfood code-review pass: **41 findings closed across 7 packages**
+  (HIGH + MEDIUM + LOW), all 709 tests pass, `check_imports` clean —
+  `684869a`.
+- Hardening infra: bump default check timeout `300s -> 600s`; exclude
+  `experts/` + `tests/` from secrets-scan (huge YAML corpus + intentional
+  test fixtures) — `634bda9`.
+- Closed 10 deferred wontfix findings + 2 hardening-infra bugs surfaced
+  during the dogfood pass — `4b2cb6c`.
+- Docs: end-to-end user-facing rewrite of main README (1067 -> 286 lines,
+  multica-style) + all 7 package READMEs aligned to a consistent shape;
+  GUIDE.md picked up the "tested-on-Claude-Code-only" disclaimer and a
+  cost callout — `0a4099c`.
+
+### Substance of the release (the [Unreleased] thrust before the bump)
+
 Major thrust since the last published versions: porting 12 features from
 [`kyegomez/swarms`](https://github.com/kyegomez/swarms) into the suite,
 hardening it for enterprise use, and adding an AI-driven user-guidance
@@ -184,19 +233,18 @@ layer.
 
 ## Published versions on PyPI (frozen at the time of last release)
 
-These were the versions at the start of the [Unreleased] thrust above.
-The next publish run will bump per the changes accumulated under
-[Unreleased].
+Versions as of the 2026-04-28 release. The next publish run will bump
+per the changes accumulated under [Unreleased].
 
 | Package           | Last published version |
 |-------------------|------------------------|
-| `swarmsuite-core` | `0.1.0`                |
-| `swarm-kb`        | `0.3.0`                |
-| `arch-swarm-ai`   | `0.3.0`                |
-| `review-swarm`    | `0.4.0`                |
-| `fix-swarm-ai`    | `0.3.0`                |
-| `doc-swarm-ai`    | `0.2.0`                |
-| `spec-swarm-ai`   | `0.2.0`                |
+| `swarmsuite-core` | `0.2.0`                |
+| `swarm-kb`        | `0.4.0`                |
+| `arch-swarm-ai`   | `0.3.1`                |
+| `review-swarm`    | `0.4.1`                |
+| `fix-swarm-ai`    | `0.3.1`                |
+| `doc-swarm-ai`    | `0.2.1`                |
+| `spec-swarm-ai`   | `0.2.1`                |
 
 For each package's per-version detail prior to this aggregate file,
 see `packages/<name>/CHANGELOG.md` (where present) and the project's
