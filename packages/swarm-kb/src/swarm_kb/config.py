@@ -39,7 +39,8 @@ _DEFAULT_CONFIG: dict = {
 }
 
 TOOL_NAMES = ("review", "fix", "doc", "arch", "spec",
-              "idea", "plan", "harden", "release")
+              "idea", "plan", "harden", "release",
+              "runner")  # closed-source overnight runtime (private repo)
 
 
 @dataclass
