@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from swarm_core.ids import generate_id
 from swarm_core.timeutil import now_iso
@@ -18,6 +18,11 @@ class FindingWriter:
     """Write findings into a tool session's findings.jsonl.
 
     Writes to ~/.swarm-kb/sessions/<tool>/<session_id>/findings.jsonl
+
+    ``on_write`` is an optional callback invoked once per posted finding
+    (after the JSONL append). Failures are caught and logged so the
+    durable JSONL write is unaffected. Used to wire the vector index
+    without coupling this writer to the embedder. See adr-15bde0ae.
     """
 
     def __init__(
@@ -25,6 +30,7 @@ class FindingWriter:
         tool: str,
         session_id: str,
         config: SuiteConfig | None = None,
+        on_write: Callable[[dict], None] | None = None,
     ) -> None:
         if config is None:
             config = SuiteConfig.load()
@@ -33,6 +39,19 @@ class FindingWriter:
         self._session_dir = config.tool_sessions_path(tool) / session_id
         self._findings_path = self._session_dir / "findings.jsonl"
         self._lock = threading.Lock()
+        self._on_write = on_write
+
+    def _emit(self, finding: dict[str, Any]) -> None:
+        """Best-effort: invoke ``on_write`` outside the JSONL lock."""
+        if self._on_write is None:
+            return
+        try:
+            self._on_write(finding)
+        except Exception as exc:  # noqa: BLE001 -- intentional swallow
+            _log.warning(
+                "on_write hook failed for finding %s: %s",
+                finding.get("id"), exc,
+            )
 
     def post(self, finding: dict[str, Any]) -> str:
         """Append a finding. Assigns ID if missing. Returns finding ID."""
@@ -56,6 +75,7 @@ class FindingWriter:
             "Finding %s posted to %s/%s",
             finding["id"], self._tool, self._session_id,
         )
+        self._emit(finding)
         return finding["id"]
 
     def post_batch(self, findings: list[dict[str, Any]]) -> list[str]:
@@ -85,4 +105,6 @@ class FindingWriter:
             "Batch posted %d findings to %s/%s",
             len(ids), self._tool, self._session_id,
         )
+        for entry in entries:
+            self._emit(entry)
         return ids

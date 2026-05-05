@@ -93,5 +93,57 @@ def migrate():
         click.echo("No sessions to migrate.")
 
 
+@main.command(name="vector-rebuild")
+@click.option(
+    "--scope",
+    default="all",
+    help="all | findings | decisions | tool:<name>",
+)
+def vector_rebuild(scope: str):
+    """Rebuild the semantic vector index from existing JSONL files.
+
+    Idempotent: entries whose text hash matches the indexed version
+    are skipped (metadata still refreshed). Use after enabling the
+    embedding provider for the first time, after editing JSONL by
+    hand, or when changing the embedding model.
+    """
+    setup_logging("kb")
+
+    config = SuiteConfig.load()
+
+    from .vector_index import VectorIndex, make_embedder
+
+    embedder = make_embedder({
+        "provider": config.embedding.provider,
+        "model": config.embedding.model,
+    })
+    if embedder is None:
+        click.echo(
+            "Embedding provider not configured. Edit "
+            f"{config.config_file}:\n"
+            "  embedding:\n"
+            "    provider: local\n"
+            "    model: intfloat/multilingual-e5-small\n"
+            "and `pip install swarm-kb[embed-local]`.",
+            err=True,
+        )
+        raise click.Abort()
+
+    vector_idx = VectorIndex(config.vector_index_path, embedder=embedder)
+    try:
+        stats = vector_idx.rebuild_from_jsonl(config, scope=scope)
+    finally:
+        vector_idx.close()
+
+    click.echo(f"Rebuild scope: {scope}")
+    click.echo(f"  indexed: {stats.indexed}")
+    click.echo(f"  skipped: {stats.skipped}")
+    click.echo(f"  errors:  {stats.errors}")
+    if stats.by_type:
+        click.echo("  by_type:")
+        for k, v in stats.by_type.items():
+            click.echo(f"    {k}: {v}")
+
+
 if __name__ == "__main__":
     main()

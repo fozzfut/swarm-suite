@@ -32,6 +32,12 @@ _DEFAULT_CONFIG: dict = {
             ".rb", ".ex", ".exs", ".swift", ".php",
         ],
     },
+    "embedding": {
+        # Empty provider disables semantic indexing.
+        # Set to "local" + install `swarm-kb[embed-local]` to enable.
+        "provider": "",
+        "model": "intfloat/multilingual-e5-small",
+    },
     "review": {},
     "fix": {},
     "doc": {},
@@ -52,11 +58,20 @@ class CodeMapConfig:
 
 
 @dataclass
+class EmbeddingConfig:
+    """Configuration for the optional vector memory layer (adr-15bde0ae)."""
+
+    provider: str = ""  # "" disables; "local" uses sentence-transformers
+    model: str = "intfloat/multilingual-e5-small"
+
+
+@dataclass
 class SuiteConfig:
     """Central configuration for the Swarm knowledge base."""
 
     storage_root: str = _DEFAULT_ROOT
     code_map: CodeMapConfig = field(default_factory=CodeMapConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     _tool_configs: dict[str, dict] = field(default_factory=dict)
     _raw: dict = field(default_factory=dict)
 
@@ -88,6 +103,11 @@ class SuiteConfig:
     @property
     def pipelines_path(self) -> Path:
         return self.kb_root / "pipelines"
+
+    @property
+    def vector_index_path(self) -> Path:
+        """Path to the sqlite + sqlite-vec materialized index file."""
+        return self.kb_root / "index" / "kb.db"
 
     @property
     def config_file(self) -> Path:
@@ -126,6 +146,12 @@ class SuiteConfig:
             source_exts=cm_raw.get("source_exts", list(_DEFAULT_CONFIG["code_map"]["source_exts"])),
         )
 
+        emb_raw = raw.get("embedding", {}) or {}
+        emb = EmbeddingConfig(
+            provider=str(emb_raw.get("provider") or ""),
+            model=str(emb_raw.get("model") or _DEFAULT_CONFIG["embedding"]["model"]),
+        )
+
         tool_cfgs = {}
         for t in TOOL_NAMES:
             if t in raw and isinstance(raw[t], dict):
@@ -134,6 +160,7 @@ class SuiteConfig:
         return cls(
             storage_root=raw.get("storage_root", _DEFAULT_ROOT),
             code_map=cm,
+            embedding=emb,
             _tool_configs=tool_cfgs,
             _raw=raw,
         )
@@ -147,6 +174,10 @@ class SuiteConfig:
                 "skip_dirs": self.code_map.skip_dirs,
                 "max_file_size_mb": self.code_map.max_file_size_mb,
                 "source_exts": self.code_map.source_exts,
+            },
+            "embedding": {
+                "provider": self.embedding.provider,
+                "model": self.embedding.model,
             },
         }
         for t in TOOL_NAMES:

@@ -25,6 +25,7 @@ dependencies = [
     "click>=8.0,<9",
     "swarmsuite-core>=0.1.0",
     "portalocker>=2.7,<4",
+    "sqlite-vec>=0.1.5,<0.2",
 ]
 
 [project.urls]
@@ -36,6 +37,8 @@ swarm-kb = "swarm_kb.cli:main"
 [project.optional-dependencies]
 pdf = ["pymupdf>=1.20"]
 pdf-tables = ["pdfplumber>=0.9"]
+# Semantic search / vector memory (adr-15bde0ae). Pulls torch (~700 MB).
+embed-local = ["sentence-transformers>=2.7,<5"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

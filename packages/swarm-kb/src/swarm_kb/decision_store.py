@@ -10,6 +10,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 _log = logging.getLogger("swarm_kb.decision_store")
 
@@ -73,13 +74,35 @@ class Decision:
 
 
 class DecisionStore:
-    """Append-only decision store with in-memory query support."""
+    """Append-only decision store with in-memory query support.
 
-    def __init__(self, path: Path) -> None:
+    ``on_write`` is an optional callback invoked after a decision is
+    appended or its status updated. Failures are logged, never raised,
+    so the durable JSONL write is unaffected. Used to wire the vector
+    index. See adr-15bde0ae.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        on_write: Callable[[dict], None] | None = None,
+    ) -> None:
         self._path = Path(path)
         self._entries: list[Decision] = []
         self._lock = threading.Lock()
+        self._on_write = on_write
         self._load()
+
+    def _emit(self, decision: Decision) -> None:
+        if self._on_write is None:
+            return
+        try:
+            self._on_write(decision.to_dict())
+        except Exception as exc:  # noqa: BLE001
+            _log.warning(
+                "on_write hook failed for decision %s: %s",
+                decision.id, exc,
+            )
 
     def _load(self) -> None:
         """Load existing entries from disk."""
@@ -151,6 +174,7 @@ class DecisionStore:
             self._atomic_write()
 
         _log.info("Decision %s: %s (%s)", decision.id, decision.title, decision.status)
+        self._emit(decision)
         return decision
 
     def query(
@@ -186,23 +210,23 @@ class DecisionStore:
         self, decision_id: str, new_status: str, superseded_by: str = ""
     ) -> bool:
         """Update a decision's status. Rewrites the JSONL file atomically."""
+        updated_decision: Decision | None = None
         with self._lock:
-            found = False
             for d in self._entries:
                 if d.id == decision_id:
                     d.status = new_status
                     if superseded_by:
                         d.superseded_by = superseded_by
-                    found = True
+                    updated_decision = d
                     break
 
-            if not found:
+            if updated_decision is None:
                 return False
 
-            # Rewrite file with updated entries atomically
             self._atomic_write()
 
         _log.info("Decision %s status -> %s", decision_id, new_status)
+        self._emit(updated_decision)
         return True
 
     def count(self) -> int:

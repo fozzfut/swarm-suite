@@ -22,6 +22,13 @@ from .quality_gate import (
     load_thresholds, save_thresholds,
 )
 from .session_meta import count_sessions, list_sessions
+from .vector_index import (
+    VectorIndex,
+    make_decision_indexer,
+    make_embedder,
+    make_finding_indexer,
+    start_warmup_thread,
+)
 from .xref import XRefLog
 
 # New tool surfaces -- see docs/decisions/2026-04-26-stage-*.md
@@ -57,29 +64,54 @@ def create_mcp_server():
         verification_store: VerificationStore
         pgve_store: PgveStore
         flow_store: FlowStore
+        # Optional: None when embedding.provider is unset or
+        # sentence-transformers not installed (adr-15bde0ae).
+        vector_index: Optional[VectorIndex]
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
         config = bootstrap()
         engine = DebateEngine(config.debates_path / "active")
         pipe_mgr = PipelineManager(config.pipelines_path)
-        dec_store = DecisionStore(config.decisions_path / "decisions.jsonl")
+
+        # Vector memory layer (opt-in via config.embedding.provider).
+        embedder = make_embedder({
+            "provider": config.embedding.provider,
+            "model": config.embedding.model,
+        })
+        vector_idx: Optional[VectorIndex] = None
+        if embedder is not None:
+            vector_idx = VectorIndex(config.vector_index_path, embedder=embedder)
+            start_warmup_thread(embedder)
+        dec_on_write = (
+            make_decision_indexer(vector_idx) if vector_idx is not None else None
+        )
+
+        dec_store = DecisionStore(
+            config.decisions_path / "decisions.jsonl",
+            on_write=dec_on_write,
+        )
         dbt_store = DebateStore(config.debates_path / "debates.jsonl")
         judge_eng = JudgingEngine(config.kb_root / "judgings" / "active")
         verify_store = VerificationStore(config.kb_root / "verifications" / "active")
         pgve_store = PgveStore(config.kb_root / "pgve" / "active")
         flow_store = FlowStore(config.kb_root / "flows" / "active")
-        yield _LifespanState(
-            config=config,
-            debate_engine=engine,
-            pipeline_manager=pipe_mgr,
-            decision_store=dec_store,
-            debate_store=dbt_store,
-            judging_engine=judge_eng,
-            verification_store=verify_store,
-            pgve_store=pgve_store,
-            flow_store=flow_store,
-        )
+        try:
+            yield _LifespanState(
+                config=config,
+                debate_engine=engine,
+                pipeline_manager=pipe_mgr,
+                decision_store=dec_store,
+                debate_store=dbt_store,
+                judging_engine=judge_eng,
+                verification_store=verify_store,
+                pgve_store=pgve_store,
+                flow_store=flow_store,
+                vector_index=vector_idx,
+            )
+        finally:
+            if vector_idx is not None:
+                vector_idx.close()
 
     def _get_config(ctx: Optional[Context]) -> SuiteConfig:
         assert ctx is not None, "MCP Context not injected"
@@ -116,6 +148,10 @@ def create_mcp_server():
     def _get_flow_store(ctx: Optional[Context]) -> FlowStore:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.flow_store
+
+    def _get_vector_index(ctx: Optional[Context]) -> Optional[VectorIndex]:
+        assert ctx is not None, "MCP Context not injected"
+        return ctx.request_context.lifespan_context.vector_index
 
     mcp = FastMCP("SwarmKB", lifespan=lifespan)
 
@@ -353,6 +389,106 @@ def create_mcp_server():
 
         return json.dumps(all_results)
 
+    # ── kb_semantic_search ───────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_semantic_search",
+        description=(
+            "Search findings + decisions semantically. mode: vector (default, "
+            "needs embedding.provider=local + `pip install swarm-kb[embed-local]`), "
+            "bm25 (FTS5 lexical, no extra deps), hybrid (0.6·vec + 0.3·bm25 + "
+            "0.1·entity_boost). Filter by entity_type (finding|decision), tool, "
+            "session_id, persona, file, severity, status, project_path, tags "
+            "(comma-separated). k caps results; score_threshold filters weak "
+            "matches (0.0..1.0)."
+        ),
+    )
+    def _kb_semantic_search(
+        query: str,
+        k: int = 10,
+        mode: str = "vector",
+        entity_type: str = "",
+        tool: str = "",
+        session_id: str = "",
+        persona: str = "",
+        file: str = "",
+        severity: str = "",
+        status: str = "",
+        project_path: str = "",
+        tags: str = "",
+        score_threshold: float = 0.0,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        vector_idx = _get_vector_index(ctx)
+        if vector_idx is None:
+            return json.dumps({
+                "error": (
+                    "Vector index not initialised. Either set "
+                    "embedding.provider: local in ~/.swarm-kb/config.yaml "
+                    "and `pip install swarm-kb[embed-local]` (for vector / "
+                    "hybrid search), or restart the server with the index "
+                    "enabled (BM25 also requires the index file to exist)."
+                ),
+                "results": [],
+            })
+
+        filters: dict = {}
+        for col, val in (
+            ("entity_type", entity_type), ("tool", tool),
+            ("session_id", session_id), ("persona", persona),
+            ("file", file), ("severity", severity),
+            ("status", status), ("project_path", project_path),
+        ):
+            if val:
+                filters[col] = val
+        if tags.strip():
+            filters["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+
+        try:
+            results = vector_idx.search(
+                query, k=k, mode=mode, filters=filters,
+                score_threshold=score_threshold,
+            )
+        except (RuntimeError, ValueError) as exc:
+            return json.dumps({"error": str(exc), "results": []})
+
+        return json.dumps({
+            "mode": mode,
+            "results": [r.to_dict() for r in results],
+            "count": len(results),
+        })
+
+    # ── kb_vector_rebuild ────────────────────────────────────────────
+
+    @mcp.tool(
+        name="kb_vector_rebuild",
+        description=(
+            "Rebuild the vector index from existing JSONL source-of-truth "
+            "files. Idempotent (entries with unchanged text are skipped). "
+            "scope: all|findings|decisions|tool:<name>. Use when changing "
+            "the embedding model or after manual JSONL edits."
+        ),
+    )
+    def _kb_vector_rebuild(
+        scope: str = "all",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        config = _get_config(ctx)
+        vector_idx = _get_vector_index(ctx)
+        if vector_idx is None:
+            return json.dumps({
+                "error": (
+                    "Embedding provider not configured. Set "
+                    "embedding.provider: local in ~/.swarm-kb/config.yaml "
+                    "and `pip install swarm-kb[embed-local]`."
+                ),
+            })
+        try:
+            stats = vector_idx.rebuild_from_jsonl(config, scope=scope)
+        except Exception as exc:  # noqa: BLE001 -- surface to MCP client
+            return json.dumps({"error": f"Rebuild failed: {exc}"})
+        return json.dumps({"scope": scope, **stats.to_dict()})
+
     # ── kb_post_finding ──────────────────────────────────────────────
 
     @mcp.tool(
@@ -371,7 +507,12 @@ def create_mcp_server():
         except json.JSONDecodeError as exc:
             return json.dumps({"error": f"Invalid JSON in finding: {exc}"})
 
-        writer = FindingWriter(tool, session_id, config)
+        vector_idx = _get_vector_index(ctx)
+        on_write = (
+            make_finding_indexer(vector_idx, tool, session_id)
+            if vector_idx is not None else None
+        )
+        writer = FindingWriter(tool, session_id, config, on_write=on_write)
         finding_id = writer.post(finding_data)
 
         # Return the posted finding with assigned ID
