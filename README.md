@@ -2,10 +2,10 @@
 
 # Swarm Suite
 
-**Your AI coding assistant, but with a whole engineering team behind it.**
+**An AI engineering team for software that talks to physical hardware.**
 
-Architects, reviewers, fixers, doc writers, hardening engineers — 53 specialised AI experts<br/>
-that take a Python project from **idea to a tagged release**, with you in the driver's seat.
+Embedded firmware, lab automation, SCADA, motor control, instrument drivers — 53 specialised AI experts<br/>
+that turn datasheets, register maps, and protocol specs into reviewed, hardened, release-ready code.
 
 [![PyPI](https://img.shields.io/pypi/v/swarmsuite-core?label=swarmsuite-core)](https://pypi.org/project/swarmsuite-core/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -19,19 +19,24 @@ that take a Python project from **idea to a tagged release**, with you in the dr
 
 ## What is Swarm Suite?
 
-You're using Claude Code, Cursor, or another AI coding assistant. It writes code. It even fixes bugs. But shipping a real, production-grade Python project still takes you — running architecture reviews in your head, hunting for bugs across files, regenerating docs by hand, doing the release dance.
+Software that controls physical hardware lives in a world general-purpose AI coding assistants don't understand: register maps, pin conflicts, bus timing, power budgets, safety standards. A Cursor or Aider can write a JS function; ask it whether your SPI clock violates the datasheet's t_setup constraint and you get a hallucinated answer.
 
-**Swarm Suite gives that work to a team of specialised agents.** They're not a single super-prompt. They're 53 distinct experts (security, performance, threading, SOLID violations, embedded protocols, …) that claim files in parallel, debate disagreements with formal voting, and refuse to ship anything that isn't tested, reviewed, and clean.
+**Swarm Suite is built for that boundary.** The pipeline starts with a *datasheet*, not a feature spec. 14 hardware-domain experts extract registers, pins, protocols, timing, and power specs into a structured knowledge base; 39 software-side experts then review and fix code *against those facts* — not against a generic "best practices" prompt. When experts disagree, they open a formal debate and resolve to an **ADR** (Architecture Decision Record) so the *why* of every hardware-software trade-off is auditable.
 
-You stay in the driver's seat. There's a user gate between every stage of the pipeline — nothing auto-progresses, nothing auto-publishes. You can also just **talk to it in plain language** — name the suite (or use a `/swarm-*` slash command) and then describe what you want in any language your AI client understands ("swarm-suite, review the auth module", "swarm — пофиксь баги", "swarm-suite, ready to release?"). The navigator skill figures out which of the 84 tools to call, so you never have to. Naming the suite is what stops the request from being grabbed by another skill or MCP server you have installed.
+You stay in the driver's seat. There's a user gate between every stage of the pipeline — nothing auto-progresses, nothing auto-publishes. You can also just **talk to it in plain language** — name the suite (or use a `/swarm-*` slash command) and describe what you want in any language your AI client understands ("swarm-suite, review the SPI driver", "swarm — пофиксь баги", "swarm-suite, ready to release?"). The navigator skill figures out which of the 84 tools to call, so you never have to. Naming the suite is what stops the request from being grabbed by another skill or MCP server you have installed.
+
+Works on plain Python / TypeScript / Go projects too — skip Stage 0b spec and the suite behaves like a generic 53-expert review-and-fix platform. But the unique value is the hardware-aware path; that's why the suite exists.
 
 Built and tested on **Claude Code**. Should work on any MCP-compatible client (**Cursor**, **Windsurf**, **Cline**, …) — same MCP servers, same tools — but those paths are not yet covered by our test matrix; expect rough edges and please file an issue if you hit one.
 
+> **Coverage today:** spec-side (datasheets → registers/pins/protocols/timing) is fully language-agnostic. Code-side reviewers *read* 18 languages via tree-sitter (C/C++/Rust/Go/Java/TS/etc.). The `run_tests` auto-detector is YAML-driven (`fix-swarm/stacks/*.yaml`) and ships with **Python, Node, Go, Rust, C/C++ (cmake), C (make), .NET** built-in — drop a YAML to add a new stack (Zig, Nim, cocotb HDL, …) without touching code. Per-file syntax check (`check_syntax`) remains Python-only; non-Python stacks rely on the test-command's compiler stage to surface syntax errors.
+
 ## Features
 
-- **Full lifecycle, not just code-gen** — Idea → Architecture → Plan → Review → Fix → Verify → Doc → Hardening → Release. Each stage has its own experts and its own quality gate.
-- **53 specialised experts** — `security-surface`, `performance`, `threading-safety`, `simplicity`, `data-modeling`, `mcu-peripherals`, … One agent doing everything is a generalist; this is a team.
-- **Multi-agent debate, not single-shot prompts** — when experts disagree, they open a formal debate (13 supported formats: open, with-judge, trial, mediation, council, …) and resolve to an **ADR** (Architecture Decision Record — a short document that captures the chosen option, the alternatives considered, and the rationale, so future agents and humans can audit *why* the decision was made).
+- **Datasheet → release pipeline** — Spec (registers, pins, protocols, timing) → Architecture → Plan → Review → Fix → Verify → Doc → Hardening → Release. The Spec stage is what generic AI coding tools don't have.
+- **Hardware-aware reviewers** — register-map mismatches, pin-direction conflicts, bus-timing violations, power-budget overruns are findings the suite *can detect*, because the spec-stage gave it the facts to compare against.
+- **53 specialised experts** — 14 spec-side (`mcu-peripherals`, `industrial-protocols`, `safety-requirements`, `motor-control`, `power-management`, …) and 39 software-side (`security-surface`, `threading-safety`, `simplicity`, `error-handling`, …). One agent doing everything is a generalist; this is a team.
+- **Multi-agent debate, not single-shot prompts** — when experts disagree, they open a formal debate (13 supported formats: open, with-judge, trial, mediation, council, …) and resolve to an **ADR** (Architecture Decision Record — a short document capturing the chosen option, alternatives considered, and rationale, so future agents and humans can audit *why* the trade-off was made).
 - **SOLID + DRY enforced by default** — every expert auto-loads the SOLID+DRY skill. Fixes that move the code *away* from those principles are rejected; reviews flag violations as design findings.
 - **You stay in control** — gates between every stage. No auto-merge, no auto-publish. Release stage prepares the artifact and stops.
 - **Plain-language driver** — the navigator skill turns "пофиксь баги" or "ready to ship?" into the right sequence of MCP calls, in whichever language your AI client speaks. The 84 tools are an implementation detail.
@@ -42,12 +47,12 @@ Built and tested on **Claude Code**. Should work on any MCP-compatible client (*
 ## Install
 
 ```bash
-# Universal Python tooling (recommended)
-pip install swarmsuite-core swarm-kb arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
+# Full suite (datasheet → release path)
+pip install swarmsuite-core swarm-kb spec-swarm-ai arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
+pip install spec-swarm-ai[pdf]      # PDF datasheet ingestion
 
-# Embedded / industrial projects: add the hardware spec analyzer
-pip install spec-swarm-ai           # CAN/CANopen/EtherCAT/PROFINET/Modbus/OPC UA/...
-pip install spec-swarm-ai[pdf]      # + datasheet PDF ingestion
+# Pure-software project (no hardware) — skip spec-swarm-ai
+pip install swarmsuite-core swarm-kb arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
 
 # Monorepo dev install (editable, dependency-ordered)
 git clone https://github.com/fozzfut/swarm-suite
@@ -65,11 +70,11 @@ To verify the install: `python scripts/verify_e2e.py --quick` (47 end-to-end che
 
 ```bash
 claude mcp add swarm-kb     -- swarm-kb serve --transport stdio
+claude mcp add spec-swarm   -- spec-swarm serve --transport stdio
 claude mcp add arch-swarm   -- arch-swarm serve --transport stdio
 claude mcp add review-swarm -- review-swarm serve --transport stdio
 claude mcp add fix-swarm    -- fix-swarm serve --transport stdio
 claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
-claude mcp add spec-swarm   -- spec-swarm serve --transport stdio   # embedded only
 ```
 
 ### Cursor / Windsurf / Cline (SSE)
@@ -100,16 +105,17 @@ Restart it once after running the `mcp add` commands so the servers are picked u
 Slash commands like `/swarm-review` are unambiguous — they always route here. They're the **safest way to invoke the suite**:
 
 ```
-/swarm-review packages/auth
+/swarm-review src/spi_driver.c
 ```
 
 You can also use plain language (any language your AI client speaks), but **mention "swarm" or "swarm-suite" by name** so it doesn't collide with other skills or MCP servers you may have installed (Claude Code's own `/review`, other code-review MCPs, etc.):
 
 ```
-You: запусти swarm-suite review на packages/auth
+You: загрузи в swarm-suite datasheet/STM32F407.pdf, потом review на src/spi_driver.c
 
-AI:  Starting a swarm-suite code review on packages/auth. 13 experts will
-     claim files in parallel, then a cross-check phase reconciles findings.
+AI:  Starting Stage 0b spec analysis on STM32F407. 14 hardware experts will
+     extract registers, pins, protocols, and timing. Then 13 review experts
+     will check src/spi_driver.c against the extracted constraints in parallel.
 ```
 
 Without that explicit mention, a request like *"review this code"* may trigger a different tool entirely. The navigator skill is loaded by swarm-suite's MCP servers, but it has no way to override your AI client's other capabilities — naming the suite is what disambiguates.
@@ -173,7 +179,7 @@ Ten stages from idea to release. Optional stages are blue. Every solid arrow cro
 flowchart LR
     Start([Project])
     Idea["0a Idea<br/><i>optional</i>"]
-    Spec["0b Spec<br/><i>embedded only</i>"]
+    Spec["0b Spec<br/><i>datasheets</i>"]
     Arch["1 Architecture"]
     Plan["2 Plan<br/><i>optional</i>"]
     Review["3 Review"]
@@ -197,7 +203,7 @@ flowchart LR
 | Stage | What happens |
 |-------|--------------|
 | **0a Idea** _(optional, greenfield)_ | One-question-at-a-time brainstorming → `design.md` |
-| **0b Spec** _(embedded only)_ | Datasheet ingestion → registers, pins, protocols, conflict report |
+| **0b Spec** _(when there's hardware to talk to)_ | Datasheet ingestion → registers, pins, protocols, conflict report |
 | **1 Architecture** | Project scan + multi-agent debates → ADRs |
 | **2 Plan** _(optional, recommended for greenfield)_ | TDD-grade implementation plan, tasks of 2–5 minutes each |
 | **3 Review** | 13 experts claim files in parallel, post findings, cross-check |
@@ -217,11 +223,11 @@ For the full per-stage flow with every internal MCP call see [docs/architecture/
 |---------|---------|------|
 | **swarm-core** | Shared foundation: models, expert registry, session lifecycle, coordination primitives, MCP scaffolding | `swarmsuite-core` |
 | **swarm-kb** | Shared knowledge base: findings, decisions, debates, judgings, verifications, pipelines, code maps | `swarm-kb` |
+| **spec-swarm** | Hardware spec analyzer — 14 experts (MCU peripherals, industrial protocols, safety, motor control, power, sensors, timing, …). Datasheet → registers / pins / protocols / timing. | `spec-swarm-ai` |
 | **arch-swarm** | Architecture debates — 10 experts (simplicity, modularity, scalability, …) | `arch-swarm-ai` |
 | **review-swarm** | Code review — 13 experts (security, performance, threading, type-safety, …) | `review-swarm` |
 | **fix-swarm** | Fix proposer + applier — 8 experts; refuses fixes that move away from SOLID+DRY | `fix-swarm-ai` |
 | **doc-swarm** | Docs maintainer — 8 experts (API ref, README, ADR, changelog, …) | `doc-swarm-ai` |
-| **spec-swarm** _(optional)_ | Hardware spec analyzer — 14 experts (MCU, fieldbus, safety, …) | `spec-swarm-ai` |
 
 For the full list of all 53 expert profiles see [GUIDE.md § Expert Profiles](GUIDE.md#expert-profiles).
 

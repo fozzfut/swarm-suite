@@ -2,11 +2,11 @@
 
 > **Part of [Swarm Suite](https://github.com/fozzfut/swarm-suite).** Most users install the whole suite and drive it through the [main README](../../README.md) and `/swarm-*` slash commands — they never read this file. This README documents the package itself for contributors and standalone users.
 
-> **Optional, embedded only.** Skip this package entirely if you're not writing firmware or instrument software. The other six Swarm Suite packages run without it.
+> **The cornerstone of Swarm Suite's positioning** — software that talks to physical hardware. The other six packages run without it (pure-software projects skip Stage 0b), but spec-swarm is what differentiates the suite from generic AI coding tools.
 
-Hardware **specification analyzer** for embedded software development. Parses datasheets, reference manuals, and hardware documentation to extract structured data — register maps, pin configurations, protocol parameters (CAN/CANopen/EtherCAT/PROFINET/Modbus/OPC UA/…), timing constraints, power specifications, memory layouts. Makes this information available to AI agents via MCP tools **before any code exists**.
+Hardware **specification analyzer** for embedded and instrument software. Parses datasheets, reference manuals, and hardware documentation to extract structured data — register maps, pin configurations, protocol parameters (CAN/CANopen/EtherCAT/PROFINET/Modbus/OPC UA/IO-Link/PROFIsafe/…), timing constraints, power specifications, memory layouts. Makes this information available to AI agents via MCP tools **before any code exists**.
 
-This is **Stage 0b** of the Swarm Suite pipeline: datasheets → registers, pins, protocols → conflict report (pin collisions, bus overload, power budget) → architectural constraints exported to arch-swarm.
+This is **Stage 0b** of the Swarm Suite pipeline: datasheets → registers, pins, protocols → conflict report (pin collisions, bus overload, power budget violations) → architectural constraints exported to arch-swarm. The downstream review/fix experts then check code *against these extracted facts*, not against generic best-practices.
 
 ## Install
 

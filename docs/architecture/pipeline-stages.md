@@ -22,7 +22,7 @@ The brainstorming pattern from superpowers (one question per turn,
 2-3 design alternatives, explicit user approval before proceeding)
 is the playbook.
 
-## Stage 0b: Spec (embedded only) -- SpecSwarm
+## Stage 0b: Spec (when there's hardware to talk to) -- SpecSwarm
 
 **Inputs:** datasheets, reference manuals, requirements docs.
 **Outputs:** registers, pins, protocols, timing, power budget;

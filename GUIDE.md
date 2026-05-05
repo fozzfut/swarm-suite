@@ -2,9 +2,13 @@
 
 ## What is Swarm Suite
 
-Swarm Suite is a set of **7 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`) -- 133+ MCP tools and 53 expert profiles -- for AI-assisted Python project development from **idea to production**.
+Swarm Suite is an **AI engineering team for software that talks to physical hardware** — embedded firmware, lab automation, SCADA, motor control, instrument drivers. It's a set of **7 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`) — 133+ MCP tools and 53 expert profiles — that take a project from **datasheet to tagged release**.
 
-AI agents (Claude Code, Cursor, Windsurf, Cline) call these tools to capture ideas, analyze hardware specifications, design architecture, plan implementation, review code, apply fixes, regenerate docs, harden for release, and ship -- with **SOLID + DRY** enforced at every stage.
+The unique angle vs. generic AI coding assistants (Cursor, Aider, …): the pipeline starts with a *datasheet*, not a feature spec. spec-swarm extracts registers, pins, protocols, timing, and power facts; downstream reviewers and fixers check code *against those extracted facts*. Cursor doesn't know your SPI clock violates the datasheet; spec-swarm + review-swarm together can.
+
+Works on plain software projects too — skip Stage 0b spec and the suite behaves like a generic 53-expert review-and-fix platform — but the unique value is the hardware-aware path.
+
+AI agents (Claude Code, Cursor, Windsurf, Cline) call these tools to capture ideas, analyze hardware specifications, design architecture, plan implementation, review code, apply fixes, regenerate docs, harden for release, and ship — with **SOLID + DRY** enforced at every stage.
 
 No tool contains AI. They provide infrastructure: storage, coordination primitives, debate engine, quality gates, expert prompt registry, CLAUDE.md keeper. The AI agent does the thinking.
 
@@ -81,10 +85,10 @@ This detects your project type (Python/Node/Go/Rust/.NET/embedded) and shows the
 ### Start a pipeline
 
 ```
-# For embedded/hardware projects (starts with spec analysis)
+# Default: hardware-aware (datasheet → registers/pins/protocols → architecture → review …)
 kb_start_pipeline("/path/to/project", include_spec=True)
 
-# For software projects (starts with architecture analysis)
+# Pure-software project (no datasheet, skip Stage 0b)
 kb_start_pipeline("/path/to/project")
 ```
 

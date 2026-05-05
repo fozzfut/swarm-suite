@@ -37,7 +37,7 @@ swarm-kb serve --port 8788               # MCP server (SSE for Cursor / Windsurf
 ├── review/sessions/      # review-swarm sessions
 ├── fix/sessions/         # fix-swarm sessions
 ├── doc/sessions/         # doc-swarm sessions
-├── spec/sessions/        # spec-swarm sessions (embedded only)
+├── spec/sessions/        # spec-swarm sessions (datasheet analyses)
 ├── idea/sessions/        # Stage 0a: Idea sessions
 ├── plan/sessions/        # Stage 2: Plan sessions
 ├── harden/sessions/      # Stage 7: Hardening sessions
@@ -66,28 +66,24 @@ If you upgraded from pre-suite versions, run `swarm-kb status` to confirm the mi
 
 ## Suite overview
 
-Universal Python tooling (run by default):
+Default lineup — software that talks to physical hardware (datasheet → release):
 
 | Tool | Package | Purpose |
 |------|---------|---------|
 | **swarm-core** | `swarmsuite-core` | Shared foundation — runtime dep of everything below |
 | **swarm-kb** | `swarm-kb` | This package — KB + coordination + Idea/Plan/Hardening/Release |
+| **spec-swarm** | `spec-swarm-ai` | Hardware spec analyzer (datasheets, registers, fieldbuses) — **the niche differentiator** |
 | **arch-swarm** | `arch-swarm-ai` | Architecture analysis & multi-agent debate |
-| **review-swarm** | `review-swarm` | Multi-expert code review |
+| **review-swarm** | `review-swarm` | Multi-expert code review (against datasheet facts when spec-swarm is loaded) |
 | **fix-swarm** | `fix-swarm-ai` | Fix proposal + consensus + apply |
 | **doc-swarm** | `doc-swarm-ai` | Documentation generation + verification |
 
-Optional add-on for embedded / industrial projects:
-
-| Tool | Package | Purpose |
-|------|---------|---------|
-| **spec-swarm** | `spec-swarm-ai` | Hardware spec analyzer (datasheets, registers, fieldbuses) |
+Pure-software project (no hardware)? Skip `spec-swarm-ai`; the rest of the suite still works as a generic 53-expert review-and-fix platform.
 
 Install the full suite:
 
 ```bash
-pip install swarmsuite-core swarm-kb arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
-pip install spec-swarm-ai     # embedded only
+pip install swarmsuite-core swarm-kb spec-swarm-ai arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
 ```
 
 ## License
