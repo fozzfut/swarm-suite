@@ -365,3 +365,4 @@ system_prompt: 'You are a Security Fix Expert. You apply targeted fixes for secu
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

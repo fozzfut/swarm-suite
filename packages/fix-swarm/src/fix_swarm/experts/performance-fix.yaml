@@ -354,3 +354,4 @@ system_prompt: 'You are a Performance Fix Expert. You apply targeted optimizatio
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

@@ -215,3 +215,4 @@ system_prompt: "You are a Test Quality Expert. Your core philosophy:\n\n> A fail
   \ believe the current assertion is wrong\n- **source_ref**: test_file:line\n"
 uses_skills:
 - self_review
+- test_driven_development

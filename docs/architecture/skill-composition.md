@@ -35,8 +35,11 @@ runtime assembles.
 |-------|-----------|-----|
 | `solid_dry` | yes | Mission of the suite -- every expert enforces it |
 | `karpathy_guidelines` | yes | Behavioral discipline applies to every AI agent |
+| `context_engineering` | yes | Every reasoning step has a context decision; lean prompts beat exhaustive ones |
 | `self_review` | no (opt-in) | Heavy checklist; lite-mode tools should skip it |
 | `systematic_debugging` | no (opt-in) | Only fix-swarm experts; review-swarm doesn't propose patches |
+| `incremental_implementation` | no (opt-in) | Only fix-swarm experts (every expert proposes a patch) |
+| `test_driven_development` | no (opt-in) | Only `test-fix` and `test-quality` -- TDD is their methodology |
 | `brainstorming` | no (opt-in) | Only arch-swarm `tradeoff-mediator` and the Idea-stage orchestrator |
 | `writing_plans` | no (opt-in) | Only the Plan-stage orchestrator |
 
@@ -117,12 +120,15 @@ prompt the suite produces.
 
 ## Skills as layered discipline
 
-The five skills shipped form three layers:
+The shipped skills form three layers:
 
 - **Behavioral** -- how the AI should reason while working.
   - `karpathy_guidelines` (universal)
+  - `context_engineering` (universal) -- adapted from addyosmani/agent-skills
 - **Methodological** -- how to approach a particular kind of work.
   - `systematic_debugging` (fix-swarm experts)
+  - `incremental_implementation` (fix-swarm experts) -- adapted from addyosmani/agent-skills
+  - `test_driven_development` (`test-fix`, `test-quality`) -- adapted from addyosmani/agent-skills
   - `brainstorming` (Idea stage, arch debates)
   - `writing_plans` (Plan stage)
 - **Output discipline** -- what every published artifact must satisfy.

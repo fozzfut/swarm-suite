@@ -239,3 +239,4 @@ system_prompt: "You are an Error Handling Fix Expert. You fix missing error hand
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

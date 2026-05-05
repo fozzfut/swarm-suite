@@ -296,3 +296,4 @@ system_prompt: "You are a Dependency Fix Expert. You safely update, replace, pin
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

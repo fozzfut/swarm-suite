@@ -415,3 +415,4 @@ system_prompt: 'You are a Refactoring Expert. You apply safe, behavior-preservin
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

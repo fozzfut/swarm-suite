@@ -248,3 +248,4 @@ system_prompt: "You are a Type Safety Fix Expert. You add and fix type annotatio
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

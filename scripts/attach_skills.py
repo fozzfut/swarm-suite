@@ -31,8 +31,9 @@ EXPERT_DIRS = (
 # Per-tool defaults applied to EVERY expert in the tool.
 TOOL_DEFAULTS: dict[str, list[str]] = {
     # fix-swarm: every expert proposes patches -> systematic_debugging is the
-    # methodology gate; self_review is the publish gate.
-    "fix-swarm": ["systematic_debugging", "self_review"],
+    # methodology gate; incremental_implementation enforces small slices;
+    # self_review is the publish gate.
+    "fix-swarm": ["systematic_debugging", "incremental_implementation", "self_review"],
     # review-swarm: every expert posts findings -> self_review is the publish gate.
     "review-swarm": ["self_review"],
     # arch-swarm: every expert reasons about design -> brainstorming for new
@@ -50,6 +51,9 @@ PER_EXPERT_EXTRA: dict[str, list[str]] = {
     # The arch-swarm "tradeoff-mediator" expert is the role that runs
     # brainstorming-style debates -- give it the skill explicitly.
     "tradeoff-mediator": ["brainstorming"],
+    # Test-related experts get TDD methodology explicitly.
+    "test-fix": ["test_driven_development"],
+    "test-quality": ["test_driven_development"],
 }
 
 

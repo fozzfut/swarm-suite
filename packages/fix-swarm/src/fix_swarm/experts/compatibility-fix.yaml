@@ -226,3 +226,4 @@ system_prompt: "You are a Compatibility Fix Expert. You fix code to work correct
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation

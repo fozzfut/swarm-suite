@@ -257,3 +257,5 @@ system_prompt: "You are a Test Fix Expert. You fix broken tests, add missing ass
 uses_skills:
 - systematic_debugging
 - self_review
+- incremental_implementation
+- test_driven_development
