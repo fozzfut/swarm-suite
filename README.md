@@ -47,11 +47,12 @@ Built and tested on **Claude Code**. Should work on any MCP-compatible client (*
 ## Install
 
 ```bash
-# Full suite (datasheet → release path)
-pip install swarmsuite-core swarm-kb spec-swarm-ai arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
+# Full suite (datasheet → release → operate)
+pip install swarmsuite-core swarm-kb spec-swarm-ai arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai monitor-swarm-ai
 pip install spec-swarm-ai[pdf]      # PDF datasheet ingestion
+pip install swarm-kb[embed-local]   # opt-in semantic memory (sentence-transformers)
 
-# Pure-software project (no hardware) — skip spec-swarm-ai
+# Pure-software project (no hardware) — skip spec-swarm-ai + monitor-swarm-ai
 pip install swarmsuite-core swarm-kb arch-swarm-ai review-swarm fix-swarm-ai doc-swarm-ai
 
 # Monorepo dev install (editable, dependency-ordered)
@@ -69,12 +70,13 @@ To verify the install: `python scripts/verify_e2e.py --quick` (47 end-to-end che
 ### Claude Code
 
 ```bash
-claude mcp add swarm-kb     -- swarm-kb serve --transport stdio
-claude mcp add spec-swarm   -- spec-swarm serve --transport stdio
-claude mcp add arch-swarm   -- arch-swarm serve --transport stdio
-claude mcp add review-swarm -- review-swarm serve --transport stdio
-claude mcp add fix-swarm    -- fix-swarm serve --transport stdio
-claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
+claude mcp add swarm-kb      -- swarm-kb serve --transport stdio
+claude mcp add spec-swarm    -- spec-swarm serve --transport stdio
+claude mcp add arch-swarm    -- arch-swarm serve --transport stdio
+claude mcp add review-swarm  -- review-swarm serve --transport stdio
+claude mcp add fix-swarm     -- fix-swarm serve --transport stdio
+claude mcp add doc-swarm     -- doc-swarm serve --transport stdio
+claude mcp add monitor-swarm -- monitor-swarm serve --transport stdio
 ```
 
 ### Cursor / Windsurf / Cline (SSE)
@@ -188,14 +190,15 @@ flowchart LR
     Doc["6 Doc<br/><i>optional</i>"]
     Hard["7 Hardening"]
     Release["8 Release"]
+    Operate["9 Operate<br/><i>monitor-swarm</i>"]
     End([Ready])
 
-    Start --> Idea --> Spec --> Arch --> Plan --> Review --> Fix --> Verify --> Doc --> Hard --> Release --> End
+    Start --> Idea --> Spec --> Arch --> Plan --> Review --> Fix --> Verify --> Doc --> Hard --> Release --> Operate --> End
 
     classDef optional fill:#e1f5ff,stroke:#1976d2,color:#0d47a1
     classDef required fill:#f3f3f3,stroke:#424242,color:#212121
     classDef terminal fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
-    class Idea,Spec,Plan,Doc optional
+    class Idea,Spec,Plan,Doc,Operate optional
     class Arch,Review,Fix,Verify,Hard,Release required
     class Start,End terminal
 ```
@@ -212,6 +215,7 @@ flowchart LR
 | **6 Doc** _(optional, run once near release)_ | Verify stale docs, regenerate API reference |
 | **7 Hardening** | mypy / coverage / pip-audit / secret scan / observability checks |
 | **8 Release** | Version bump (Conventional Commits) + changelog + dist build. **Never publishes.** |
+| **9 Operate** _(when there are runtime traces)_ | Parse logs / Saleae CSVs → cross-ref vs spec timing → violation findings. The deployed-instrument feedback loop. |
 
 For the full per-stage flow with every internal MCP call see [docs/architecture/pipeline-stages.md](docs/architecture/pipeline-stages.md). For the user-facing command reference see [GUIDE.md](GUIDE.md).
 
@@ -228,6 +232,7 @@ For the full per-stage flow with every internal MCP call see [docs/architecture/
 | **review-swarm** | Code review — 13 experts (security, performance, threading, type-safety, …) | `review-swarm` |
 | **fix-swarm** | Fix proposer + applier — 8 experts; refuses fixes that move away from SOLID+DRY | `fix-swarm-ai` |
 | **doc-swarm** | Docs maintainer — 8 experts (API ref, README, ADR, changelog, …) | `doc-swarm-ai` |
+| **monitor-swarm** | Trace analyzer — parses runtime logs / Saleae CSVs, cross-references vs spec timing constraints, emits violation findings. The post-release loop. | `monitor-swarm-ai` |
 
 For the full list of all 53 expert profiles see [GUIDE.md § Expert Profiles](GUIDE.md#expert-profiles).
 

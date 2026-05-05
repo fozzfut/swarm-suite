@@ -46,6 +46,7 @@ _DEFAULT_CONFIG: dict = {
 
 TOOL_NAMES = ("review", "fix", "doc", "arch", "spec",
               "idea", "plan", "harden", "release",
+              "monitor",  # trace analyzer (monitor-swarm)
               "runner")  # closed-source overnight runtime (private repo)
 
 
