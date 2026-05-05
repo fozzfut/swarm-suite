@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -35,6 +36,23 @@ from .parsers import parse_saleae_csv, parse_text_log
 
 _log = logging.getLogger("monitor_swarm.server")
 
+# Session ids must match this — alphanumeric + hyphen + underscore, ≤ 64 chars.
+# Path-traversal guard: a caller passing "../../etc" in session_id MUST be
+# rejected before the path is ever constructed. Symlink-escape would still
+# be possible past this guard, but the common attack vector is closed.
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _validate_session_id(session_id: str) -> str | None:
+    if not session_id:
+        return "session_id is required"
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        return (
+            "session_id must match [A-Za-z0-9_-]{1,64} "
+            "(no path separators, dots, or other special characters)"
+        )
+    return None
+
 
 def _ok(payload: dict) -> str:
     return json.dumps({"ok": True, **payload})
@@ -52,6 +70,9 @@ def _detect_parser(trace_path: str) -> str:
 
 
 def _ensure_session_dir(config: SuiteConfig, session_id: str) -> Path:
+    err = _validate_session_id(session_id)
+    if err is not None:
+        raise ValueError(err)
     d = config.tool_sessions_path("monitor") / session_id
     d.mkdir(parents=True, exist_ok=True)
     meta_path = d / "meta.json"
@@ -158,6 +179,9 @@ def create_mcp_server():
         persisted_session: str = ""
         if persist_findings and findings:
             sid = session_id or f"mon-{generate_id('s', length=4)}"
+            err = _validate_session_id(sid)
+            if err is not None:
+                return _err(err)
             _ensure_session_dir(config, sid)
             writer = FindingWriter("monitor", sid, config)
             for f in findings:
@@ -269,10 +293,18 @@ def create_mcp_server():
         session_id: str,
         ctx: Optional[Context] = None,
     ) -> str:
-        if not session_id:
-            return _err("session_id is required")
+        err = _validate_session_id(session_id)
+        if err is not None:
+            return _err(err)
         config = _get_config(ctx)
-        session_dir = config.tool_sessions_path("monitor") / session_id
+        monitor_root = config.tool_sessions_path("monitor").resolve()
+        session_dir = (monitor_root / session_id).resolve()
+        # Defence in depth — the validator above already rejects path-separator
+        # characters, but an attacker could still attempt symlink escapes.
+        try:
+            session_dir.relative_to(monitor_root)
+        except ValueError:
+            return _err(f"Session resolves outside monitor root: {session_id}")
         if not session_dir.is_dir():
             return _err(f"Session not found: {session_id}")
         meta_path = session_dir / "meta.json"

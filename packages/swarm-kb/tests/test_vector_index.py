@@ -162,6 +162,11 @@ def test_delete(tmp_path: Path) -> None:
 
 @needs_sqlite_vec
 def test_search_filter_by_entity_type(tmp_path: Path) -> None:
+    """Filter must EXCLUDE the wrong entity type, not just include the right one.
+
+    Plant matching content under both types. Without the filter, BOTH must
+    surface. With the filter, ONLY the requested type — proving exclusion.
+    """
     vi = _import_vector()
     idx = vi.VectorIndex(tmp_path / "kb.db", embedder=MockEmbedder())
     try:
@@ -172,13 +177,28 @@ def test_search_filter_by_entity_type(tmp_path: Path) -> None:
         )
         idx.upsert(
             entity_id="d-1", entity_type="decision",
-            text="Use external crystal for SPI bus",
+            text="SPI clock decision: use external crystal",
             metadata={"status": "accepted"},
         )
 
-        only_findings = idx.search("SPI", filters={"entity_type": "finding"})
+        # Without filter, both entities must surface (so the filter is the
+        # variable being tested, not the underlying retrieval).
+        all_results = idx.search("SPI clock")
+        all_ids = {r.entity_id for r in all_results}
+        assert "f-1" in all_ids and "d-1" in all_ids
+
+        # entity_type=finding → only f-1; d-1 must NOT appear.
+        only_findings = idx.search("SPI clock", filters={"entity_type": "finding"})
+        f_ids = {r.entity_id for r in only_findings}
+        assert "f-1" in f_ids
+        assert "d-1" not in f_ids
         assert all(r.entity_type == "finding" for r in only_findings)
-        only_decisions = idx.search("SPI", filters={"entity_type": "decision"})
+
+        # And the symmetric case.
+        only_decisions = idx.search("SPI clock", filters={"entity_type": "decision"})
+        d_ids = {r.entity_id for r in only_decisions}
+        assert "d-1" in d_ids
+        assert "f-1" not in d_ids
         assert all(r.entity_type == "decision" for r in only_decisions)
     finally:
         idx.close()
@@ -249,6 +269,15 @@ def test_search_bm25_respects_filters(tmp_path: Path) -> None:
 
 @needs_sqlite_vec
 def test_search_hybrid_merges_vec_and_bm25(tmp_path: Path) -> None:
+    """Hybrid score must be a *blend* of vec and bm25, not equal to either.
+
+    With the documented weighting (0.6·vec + 0.3·bm25 + 0.1·boost), the
+    hybrid score for a hit that scores X under vector and Y under BM25
+    must equal 0.6·X + 0.3·Y (when no entity_boost applies). If the
+    implementation accidentally returned vec-only or bm25-only, this
+    test would fail.
+    """
+    import pytest as _pytest
     vi = _import_vector()
     idx = vi.VectorIndex(tmp_path / "kb.db", embedder=MockEmbedder())
     try:
@@ -258,12 +287,26 @@ def test_search_hybrid_merges_vec_and_bm25(tmp_path: Path) -> None:
         idx.upsert(entity_id="f-b", entity_type="finding",
                    text="ADC sample rate too high",
                    metadata={"file": "src/adc.c"})
-        results = idx.search("SPI clock", mode="hybrid")
-        # Hybrid produces results; BM25 portion matches the SPI finding
-        ids = [r.entity_id for r in results]
-        assert "f-a" in ids
+
+        vec_only = {r.entity_id: r.score for r in idx.search("SPI clock", mode="vector")}
+        bm25_only = {r.entity_id: r.score for r in idx.search("SPI clock", mode="bm25")}
+        hybrid = {r.entity_id: r.score for r in idx.search("SPI clock", mode="hybrid")}
+
+        assert "f-a" in hybrid  # the keyword match must surface
+        # Both backends contributed something for f-a.
+        assert vec_only.get("f-a", 0.0) > 0.0
+        assert bm25_only.get("f-a", 0.0) > 0.0
+
+        # Verify the merge formula: 0.6·vec + 0.3·bm25 + 0·boost (no file/tag overlap
+        # in this query because filters dict is empty).
+        expected = (
+            0.6 * vec_only.get("f-a", 0.0)
+            + 0.3 * bm25_only.get("f-a", 0.0)
+        )
+        assert hybrid["f-a"] == _pytest.approx(expected, abs=1e-6)
+
         # Scores in [0, 1]
-        assert all(0.0 <= r.score <= 1.0 for r in results)
+        assert all(0.0 <= s <= 1.0 for s in hybrid.values())
     finally:
         idx.close()
 

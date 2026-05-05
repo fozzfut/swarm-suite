@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import sqlite3
 import struct
 import threading
@@ -22,12 +21,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from swarm_core.logging_setup import get_logger
 from swarm_core.timeutil import now_iso
 
 from ._filelock import cross_process_lock
 from .config import SuiteConfig, TOOL_NAMES
 
-_log = logging.getLogger("swarm_kb.vector_index")
+_log = get_logger("kb.vector_index")
 
 EMBEDDING_DIM = 384  # multilingual-e5-small
 DEFAULT_MODEL = "intfloat/multilingual-e5-small"

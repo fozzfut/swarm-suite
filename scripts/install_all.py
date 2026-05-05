@@ -24,6 +24,7 @@ INSTALL_ORDER = (
     "review-swarm",
     "fix-swarm",
     "doc-swarm",
+    "monitor-swarm",
 )
 
 

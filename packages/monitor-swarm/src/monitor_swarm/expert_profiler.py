@@ -23,11 +23,37 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 _log = logging.getLogger("monitor_swarm.expert_profiler")
 _BUILTIN_DIR = Path(__file__).parent / "experts"
+
+
+# ReDoS guard for relevance_signals.patterns loaded from YAML. Builtin YAMLs
+# are curated, but ``custom_dirs`` lets users drop their own. A pattern with
+# nested quantifiers run against every source file would hang the suggester.
+_MAX_PATTERN_LEN = 200
+_REDOS_HEURISTIC = re.compile(
+    r"\([^)]*[+*]\)\s*[+*]"      # (X+)+ etc.
+    r"|"
+    r"(\.[+*]){2,}",             # .*.* / .+.+ / etc.
+)
+
+
+def _is_pattern_safe(pat: str) -> bool:
+    if not isinstance(pat, str) or not pat:
+        return False
+    if len(pat) > _MAX_PATTERN_LEN:
+        return False
+    if _REDOS_HEURISTIC.search(pat):
+        return False
+    try:
+        re.compile(pat)
+    except re.error:
+        return False
+    return True
 
 
 class ExpertProfiler:
@@ -111,7 +137,17 @@ class ExpertProfiler:
             exclude_patterns = prof.get("exclude_patterns") or []
             signals = prof.get("relevance_signals") or {}
             imports = signals.get("imports") or []
-            patterns = signals.get("patterns") or []
+            # Filter out unsafe regexes — defence in depth for custom_dirs YAMLs.
+            raw_patterns = signals.get("patterns") or []
+            patterns: list[str] = []
+            for pat in raw_patterns:
+                if _is_pattern_safe(str(pat)):
+                    patterns.append(str(pat))
+                else:
+                    _log.warning(
+                        "Dropping unsafe relevance pattern %r in expert %s",
+                        pat, slug,
+                    )
 
             file_hits = 0
             signal_hits = 0

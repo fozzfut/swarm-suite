@@ -82,3 +82,31 @@ def test_overflow_warning_on_many_unparseable(tmp_path: Path) -> None:
     _, warnings = parse_text_log(log)
     # First 10 lines listed plus a summary
     assert any("more lines unparseable" in w for w in warnings)
+
+
+# ─── ReDoS guard ────────────────────────────────────────────────────────────
+
+
+def test_redos_pattern_rejected(tmp_path: Path) -> None:
+    """User-supplied log_pattern with nested quantifiers is rejected
+    BEFORE compilation — protects against catastrophic-backtracking hangs."""
+    log = _write(tmp_path / "trace.log", "[1.0] [INFO] ok: x\n")
+    # Classic ReDoS shape: (a+)+
+    events, warnings = parse_text_log(log, log_pattern=r"^(a+)+b$")
+    assert events == []
+    assert any("ReDoS" in w or "nested quantifier" in w for w in warnings)
+
+
+def test_oversized_pattern_rejected(tmp_path: Path) -> None:
+    log = _write(tmp_path / "trace.log", "[1.0] [INFO] ok: x\n")
+    events, warnings = parse_text_log(log, log_pattern="x" * 600)
+    assert events == []
+    assert any("too long" in w.lower() for w in warnings)
+
+
+def test_invalid_regex_rejected_gracefully(tmp_path: Path) -> None:
+    """A non-ReDoS but syntactically-broken regex returns a warning, not raises."""
+    log = _write(tmp_path / "trace.log", "[1.0] [INFO] ok: x\n")
+    events, warnings = parse_text_log(log, log_pattern=r"(unclosed")
+    assert events == []
+    assert any("not a valid regex" in w for w in warnings)

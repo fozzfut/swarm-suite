@@ -2,7 +2,7 @@
 
 ## What is Swarm Suite
 
-Swarm Suite is an **AI engineering team for software that talks to physical hardware** — embedded firmware, lab automation, SCADA, motor control, instrument drivers. It's a set of **7 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`) — 133+ MCP tools and 53 expert profiles — that take a project from **datasheet to tagged release**.
+Swarm Suite is an **AI engineering team for software that talks to physical hardware** — embedded firmware, lab automation, SCADA, motor control, instrument drivers. It's a set of **8 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`, `monitor-swarm`) — 130+ MCP tools and 57 expert profiles — that take a project from **datasheet to tagged release** and onward through deployed-instrument observability.
 
 The unique angle vs. generic AI coding assistants (Cursor, Aider, …): the pipeline starts with a *datasheet*, not a feature spec. spec-swarm extracts registers, pins, protocols, timing, and power facts; downstream reviewers and fixers check code *against those extracted facts*. Cursor doesn't know your SPI clock violates the datasheet; spec-swarm + review-swarm together can.
 
@@ -47,6 +47,7 @@ claude mcp add arch-swarm   -- arch-swarm serve --transport stdio
 claude mcp add review-swarm -- review-swarm serve --transport stdio
 claude mcp add fix-swarm    -- fix-swarm serve --transport stdio
 claude mcp add doc-swarm    -- doc-swarm serve --transport stdio
+claude mcp add monitor-swarm -- monitor-swarm serve --transport stdio
 ```
 
 #### Cursor / Windsurf / Cline (SSE) — *untested but should work*
@@ -63,7 +64,8 @@ Start each server on its own port, then add to MCP config:
     "arch-swarm":   { "url": "http://localhost:8768/sse" },
     "review-swarm": { "url": "http://localhost:8765/sse" },
     "fix-swarm":    { "url": "http://localhost:8767/sse" },
-    "doc-swarm":    { "url": "http://localhost:8766/sse" }
+    "doc-swarm":    { "url": "http://localhost:8766/sse" },
+    "monitor-swarm":{ "url": "http://localhost:8770/sse" }
   }
 }
 ```

@@ -33,14 +33,17 @@ _BUILTIN_DIR = Path(__file__).parent / "stacks"
 
 @dataclass
 class StackAdapter:
-    """A single language/build-system adapter."""
+    """A single language/build-system adapter.
+
+    YAML files MAY carry additional documentation fields (``description``,
+    ``file_extensions``) — the loader silently ignores them. Add the fields
+    here only when code actually consumes them.
+    """
 
     name: str
     detect_files: list[str] = field(default_factory=list)
     detect_globs: list[str] = field(default_factory=list)
     test_command: str = ""
-    file_extensions: list[str] = field(default_factory=list)
-    description: str = ""
 
     def matches(self, base_dir: Path) -> bool:
         for f in self.detect_files:
@@ -86,8 +89,6 @@ class StackRegistry:
                 detect_files=[str(x) for x in (data.get("detect_files") or [])],
                 detect_globs=[str(x) for x in (data.get("detect_globs") or [])],
                 test_command=str(data.get("test_command") or ""),
-                file_extensions=[str(x) for x in (data.get("file_extensions") or [])],
-                description=str(data.get("description") or ""),
             )
             # Custom dirs override builtin by name.
             self._adapters[adapter.name] = adapter

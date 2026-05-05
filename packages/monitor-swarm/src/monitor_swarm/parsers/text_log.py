@@ -39,6 +39,38 @@ DEFAULT_LOG_PATTERN = re.compile(
 )
 
 
+# ReDoS guard: user-supplied log_pattern is run against every line of an
+# arbitrarily-large trace file. Catastrophic backtracking on a hostile or
+# careless pattern can hang the MCP server. Python's `re` has no native
+# timeout, so we validate at compile time:
+#   1. cap pattern length (long patterns are rarely intended)
+#   2. reject classic nested-quantifier shapes like (X+)+ / (X*)* / (X+)*
+#   3. reject consecutive greedy dot-stars / dot-pluses
+_MAX_LOG_PATTERN_LEN = 500
+_REDOS_HEURISTIC = re.compile(
+    r"\([^)]*[+*]\)\s*[+*]"      # (X+)+, (X*)*, (X+)*, (X*)+, ...
+    r"|"
+    r"(\.[+*]){2,}",             # .* .+ .* ... two or more consecutive
+)
+
+
+def _validate_log_pattern(pattern: str) -> str | None:
+    """Return None if pattern is safe; otherwise an error message."""
+    if not isinstance(pattern, str):
+        return "log_pattern must be a string"
+    if len(pattern) > _MAX_LOG_PATTERN_LEN:
+        return (
+            f"log_pattern too long ({len(pattern)} > "
+            f"{_MAX_LOG_PATTERN_LEN} chars) — possible ReDoS, refusing to compile"
+        )
+    if _REDOS_HEURISTIC.search(pattern):
+        return (
+            "log_pattern contains nested quantifiers / consecutive .* (potential "
+            "ReDoS via catastrophic backtracking) — refusing to compile"
+        )
+    return None
+
+
 def _parse_timestamp(raw: str) -> tuple[float, bool]:
     """Return (timestamp_us, is_absolute_iso).
 
@@ -79,7 +111,13 @@ def parse_text_log(
     elif isinstance(log_pattern, re.Pattern):
         pattern = log_pattern
     else:
-        pattern = re.compile(log_pattern)
+        err = _validate_log_pattern(log_pattern)
+        if err is not None:
+            return [], [err]
+        try:
+            pattern = re.compile(log_pattern)
+        except re.error as exc:
+            return [], [f"log_pattern is not a valid regex: {exc}"]
 
     path = Path(trace_path)
     if not path.is_file():

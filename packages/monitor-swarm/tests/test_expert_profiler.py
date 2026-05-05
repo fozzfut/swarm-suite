@@ -40,8 +40,9 @@ def test_load_unknown_slug_raises() -> None:
 
 
 def test_suggest_experts_on_c_project_scores_logging_high(tmp_path: Path) -> None:
-    """A C project that uses printf-style logging should score
-    logging-instrumentation higher than 0."""
+    """A logging-heavy C project should rank logging-instrumentation HIGHER
+    than experts whose signals don't appear in the source — proving the
+    profiler is doing relevance ranking, not just inclusion."""
     src = tmp_path / "src"
     src.mkdir()
     (src / "main.c").write_text(
@@ -55,9 +56,18 @@ def test_suggest_experts_on_c_project_scores_logging_high(tmp_path: Path) -> Non
     )
     ranked = ExpertProfiler().suggest_experts(tmp_path)
     by_slug = {r["slug"]: r for r in ranked}
+    # Absolute: logging-instrumentation matched at least one signal.
     assert by_slug["logging-instrumentation"]["score"] > 0
-    # telemetry-architect should also pick up SEGGER_RTT
+    # telemetry-architect should also pick up SEGGER_RTT.
     assert by_slug["telemetry-architect"]["score"] > 0
+    # Relative: an unrelated expert (trace-format-designer's signals are
+    # JSON / serde / structlog / etc., none of which appear in this C file)
+    # MUST score lower than logging-instrumentation. This is what makes
+    # `suggest_experts` actually useful as a ranking function.
+    assert (
+        by_slug["logging-instrumentation"]["score"]
+        > by_slug["trace-format-designer"]["score"]
+    )
 
 
 def test_suggest_experts_on_empty_project_returns_zero_scores(tmp_path: Path) -> None:
