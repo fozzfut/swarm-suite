@@ -10,7 +10,10 @@ Tools:
 - ``monitor_get_session`` — read findings + meta for a session
 """
 
-from __future__ import annotations
+"""(no `from __future__ import annotations` here -- FastMCP's
+`inspect.signature(func, eval_str=True)` tries to evaluate string
+annotations, and `Context` would not be in scope at the point that
+runs. Keeping annotations as live objects fixes server startup.)"""
 
 import json
 import logging
@@ -20,6 +23,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from mcp.server.fastmcp import Context, FastMCP
 
 from swarm_core.ids import generate_id
 from swarm_core.timeutil import now_iso
@@ -90,7 +95,6 @@ def _ensure_session_dir(config: SuiteConfig, session_id: str) -> Path:
 
 def create_mcp_server():
     """Create + configure the monitor-swarm MCP server."""
-    from mcp.server.fastmcp import Context, FastMCP
 
     @dataclass
     class _LifespanState:

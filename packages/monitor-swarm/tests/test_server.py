@@ -107,3 +107,25 @@ def test_constraint_with_no_bounds_is_ignored(tmp_path: Path) -> None:
           "unit": "us", "source": "X", "critical": False}],
     )
     assert findings == []
+
+
+def test_create_mcp_server_constructs_without_error() -> None:
+    """Catches the FastMCP-can't-resolve-Context regression: when the module
+    has `from __future__ import annotations` AND Context is imported only
+    inside `create_mcp_server`, FastMCP's `inspect.signature(eval_str=True)`
+    fails with NameError on the first @mcp.tool decorator. The earlier
+    test_server tests bypassed this by exercising the pipeline directly.
+    """
+    from monitor_swarm.server import create_mcp_server
+    mcp = create_mcp_server()
+    # FastMCP exposes a tool registry; we just need it to be non-empty.
+    # If we got here, every @mcp.tool decorator in server.py succeeded.
+    tools = getattr(mcp, "_tool_manager", None)
+    assert tools is not None, "FastMCP instance has no _tool_manager"
+    # Should have at least monitor_analyze_trace, monitor_list_sessions,
+    # monitor_get_session, monitor_list_experts, monitor_suggest_experts,
+    # monitor_get_expert.
+    listed = list(tools._tools.keys()) if hasattr(tools, "_tools") else []
+    assert any("monitor_analyze_trace" in name for name in listed), (
+        f"expected monitor_analyze_trace in tool list, got {listed}"
+    )
