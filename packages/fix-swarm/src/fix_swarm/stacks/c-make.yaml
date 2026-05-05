@@ -1,0 +1,16 @@
+name: c-make
+description: C / C++ projects with plain Make (legacy embedded; arm-none-eabi-gcc + custom Makefile)
+detect_files:
+  - Makefile
+  - makefile
+  - GNUmakefile
+test_command: "make test"
+file_extensions:
+  - .c
+  - .cc
+  - .cpp
+  - .cxx
+  - .h
+  - .hh
+  - .hpp
+  - .hxx

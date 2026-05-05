@@ -142,24 +142,21 @@ def run_tests(test_command: str = "", base_dir: str = ".", timeout: int = 300) -
 
 
 def _detect_test_command(base: Path) -> str:
-    """Auto-detect test command for a project."""
-    # Python
-    if (base / "pyproject.toml").exists() or (base / "pytest.ini").exists():
-        return f"{sys.executable} -m pytest --tb=short -q"
+    """Auto-detect test command for a project.
+
+    Delegates to :class:`StackRegistry` (see ``stacks/*.yaml``). To add a
+    new stack — say, Zig or Nim, or an HDL flow with cocotb — drop a
+    YAML file alongside the existing adapters; no code change required.
+    """
+    from .stack_registry import StackRegistry
+
+    cmd = StackRegistry().detect_test_command(base)
+    if cmd:
+        return cmd
+    # Last-resort fallback: a `tests/` or `test/` directory implies pytest
+    # even when no pyproject.toml is present (older Python projects).
     if (base / "tests").is_dir() or (base / "test").is_dir():
         return f"{sys.executable} -m pytest --tb=short -q"
-    # Node
-    if (base / "package.json").exists():
-        return "npm test --if-present"
-    # Go
-    if (base / "go.mod").exists():
-        return "go test ./... -short"
-    # Rust
-    if (base / "Cargo.toml").exists():
-        return "cargo test --quiet"
-    # .NET
-    if any(base.glob("*.csproj")) or any(base.glob("*.sln")):
-        return "dotnet test --verbosity minimal"
     return ""
 
 

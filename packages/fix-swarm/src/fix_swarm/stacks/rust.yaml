@@ -1,0 +1,11 @@
+name: rust
+description: Rust projects, including embedded crates with host-side tests (cargo test)
+detect_files:
+  - Cargo.toml
+test_command: "cargo test --quiet"
+file_extensions:
+  - .rs
+# For embedded targets that can only run via probe-rs / qemu, the user
+# should override test_command at the run_tests call site, e.g.
+#   cargo test --target thumbv7em-none-eabihf --features test-on-host
+# or a project-specific runner script.

@@ -1,0 +1,11 @@
+name: python
+description: Python projects (pytest)
+detect_files:
+  - pyproject.toml
+  - pytest.ini
+  - setup.py
+  - tox.ini
+test_command: "{python} -m pytest --tb=short -q"
+file_extensions:
+  - .py
+  - .pyi

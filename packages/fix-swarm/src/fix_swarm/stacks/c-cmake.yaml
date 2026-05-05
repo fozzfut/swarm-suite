@@ -1,0 +1,16 @@
+name: c-cmake
+description: C / C++ projects with CMake + ctest (typical for embedded firmware)
+detect_files:
+  - CMakeLists.txt
+# Convention: the build directory is `build/` and tests are CTest targets.
+# Auto-configure if missing, then build + run ctest.
+test_command: "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build && ctest --test-dir build --output-on-failure"
+file_extensions:
+  - .c
+  - .cc
+  - .cpp
+  - .cxx
+  - .h
+  - .hh
+  - .hpp
+  - .hxx

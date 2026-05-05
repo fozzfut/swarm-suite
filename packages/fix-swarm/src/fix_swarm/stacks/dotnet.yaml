@@ -1,0 +1,12 @@
+name: dotnet
+description: .NET projects (dotnet test)
+detect_globs:
+  - "*.csproj"
+  - "*.sln"
+  - "*.fsproj"
+  - "*.vbproj"
+test_command: "dotnet test --verbosity minimal"
+file_extensions:
+  - .cs
+  - .fs
+  - .vb

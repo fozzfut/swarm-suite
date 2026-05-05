@@ -1,0 +1,7 @@
+name: go
+description: Go projects (go test)
+detect_files:
+  - go.mod
+test_command: "go test ./... -short"
+file_extensions:
+  - .go

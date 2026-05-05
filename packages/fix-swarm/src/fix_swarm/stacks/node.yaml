@@ -1,0 +1,12 @@
+name: node
+description: Node.js projects (npm test)
+detect_files:
+  - package.json
+test_command: "npm test --if-present"
+file_extensions:
+  - .js
+  - .mjs
+  - .cjs
+  - .ts
+  - .tsx
+  - .jsx
