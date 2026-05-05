@@ -31,12 +31,24 @@ class FindingWriter:
         session_id: str,
         config: SuiteConfig | None = None,
         on_write: Callable[[dict], None] | None = None,
+        project_path: str = "",
     ) -> None:
+        """``project_path`` (Phase 5): when non-empty, sessions live under
+        kb_root/projects/<project_hash>/<tool>/sessions/<session_id>/
+        instead of the legacy global pool. The kb_post_finding MCP tool
+        threads it through from the lifespan's current project context.
+        """
         if config is None:
             config = SuiteConfig.load()
         self._tool = tool
         self._session_id = session_id
-        self._session_dir = config.tool_sessions_path(tool) / session_id
+        self._project_path = project_path
+        if project_path:
+            self._session_dir = (
+                config.project_tool_sessions_path(project_path, tool) / session_id
+            )
+        else:
+            self._session_dir = config.tool_sessions_path(tool) / session_id
         self._findings_path = self._session_dir / "findings.jsonl"
         self._lock = threading.Lock()
         self._on_write = on_write

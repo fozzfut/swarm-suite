@@ -23,11 +23,34 @@ def tool_sessions_path(tool: str, config: SuiteConfig | None = None) -> Path:
 
 
 def code_map_path(project_path: str | Path, config: SuiteConfig | None = None) -> Path:
-    """Return code-map directory for a given project (identified by path hash)."""
+    """Return code-map directory for a given project (identified by path hash).
+
+    Phase 5: under the new per-project layout, prefer
+    ``config.project_code_map_path(project_path)`` which lives inside the
+    project's own root. This legacy function still resolves to the global
+    `code-map/<hash>/` path for backwards compat during migration.
+    """
     if config is None:
         config = SuiteConfig()
     project_hash = project_hash_for(project_path)
     return config.code_map_path / project_hash
+
+
+def project_root(project_path: str | Path, config: SuiteConfig | None = None) -> Path:
+    """Free-standing wrapper for ``SuiteConfig.project_root``."""
+    if config is None:
+        config = SuiteConfig()
+    return config.project_root(project_path)
+
+
+def project_tool_sessions_path(
+    project_path: str | Path, tool: str,
+    config: SuiteConfig | None = None,
+) -> Path:
+    """Per-project session directory for a tool (Phase 5)."""
+    if config is None:
+        config = SuiteConfig()
+    return config.project_tool_sessions_path(project_path, tool)
 
 
 def project_hash_for(project_path: str | Path) -> str:

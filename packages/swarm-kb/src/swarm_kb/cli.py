@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import click
 
@@ -10,6 +11,8 @@ from swarm_core.logging_setup import setup_logging
 
 from . import __version__
 from .config import SuiteConfig
+
+_log = logging.getLogger("swarm_kb.migrate_per_project")
 
 
 @click.group()
@@ -143,6 +146,131 @@ def vector_rebuild(scope: str):
         click.echo("  by_type:")
         for k, v in stats.by_type.items():
             click.echo(f"    {k}: {v}")
+
+
+@main.command(name="migrate-to-per-project")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print what would happen, don't move anything.",
+)
+@click.option(
+    "--keep-legacy",
+    is_flag=True,
+    default=False,
+    help="Copy instead of move; legacy global paths stay in place.",
+)
+@click.option(
+    "--default-project",
+    default=None,
+    type=str,
+    help=(
+        "project_path used as the bucket for entries without a project_path "
+        "field. If omitted, unattributed entries are grouped under a "
+        "synthetic '_legacy_unattributed' project."
+    ),
+)
+@click.option(
+    "--finalize",
+    is_flag=True,
+    default=False,
+    help=(
+        "Delete legacy global paths after a successful migration. Run this "
+        "only after verifying the per-project layout looks correct."
+    ),
+)
+def migrate_to_per_project(
+    dry_run: bool,
+    keep_legacy: bool,
+    default_project: str | None,
+    finalize: bool,
+):
+    """Migrate legacy global swarm-kb storage to the per-project layout.
+
+    Phase 5 introduces per-project isolation under
+    ``~/.swarm-kb/projects/<project_hash>/`` so findings, decisions,
+    debates, pipelines, and the vector index don't leak across unrelated
+    projects. This command moves (or copies, with --keep-legacy) all
+    legacy global state into the new layout.
+
+    The legacy global vector index at ``index/kb.db`` is dropped --
+    rebuild per project afterwards with::
+
+        swarm-kb vector-rebuild --project /path/to/project
+    """
+    setup_logging("kb")
+
+    config = SuiteConfig.load()
+
+    from .migrate_per_project import cleanup_legacy, run_migration
+
+    if finalize:
+        deleted = cleanup_legacy(config, dry_run=dry_run)
+        prefix = "[dry-run] would delete" if dry_run else "Deleted"
+        if deleted:
+            click.echo(f"{prefix} {len(deleted)} legacy path(s):")
+            for p in deleted:
+                click.echo(f"  {p}")
+        else:
+            click.echo("No legacy paths to delete.")
+        return
+
+    result = run_migration(
+        config,
+        dry_run=dry_run,
+        keep_legacy=keep_legacy,
+        default_project=default_project,
+    )
+
+    if dry_run:
+        click.echo("[dry-run] no files were moved or written.")
+        click.echo()
+
+    click.echo("Migration summary:")
+    click.echo(
+        f"  sessions migrated:        {result.sessions_migrated}"
+        f" (across {len(result.sessions_by_project)} project(s))"
+    )
+    click.echo(f"  decisions migrated:       {result.decisions_migrated}")
+    click.echo(
+        f"  debates migrated:         {result.debates_migrated}"
+        f" ({result.debate_dirs_migrated} active debate dir(s))"
+    )
+    click.echo(f"  pipelines migrated:       {result.pipelines_migrated}")
+    click.echo(f"  code-maps migrated:       {result.code_maps_migrated}")
+    if result.vector_index_dropped:
+        if keep_legacy:
+            note = "renamed to .bak (run `swarm-kb vector-rebuild` per project)"
+        else:
+            note = "dropped (run `swarm-kb vector-rebuild` per project)"
+        click.echo(f"  legacy vector index:      {note}")
+    else:
+        click.echo("  legacy vector index:      (none found)")
+
+    if result.projects:
+        click.echo()
+        click.echo("Migrated projects:")
+        for project_hash, project_label in sorted(result.projects.items()):
+            short = project_hash[:8]
+            click.echo(f"  {short}  ->  {project_label}")
+
+    if result.skipped:
+        click.echo()
+        click.echo(f"Skipped {len(result.skipped)} item(s) (already migrated):")
+        for line in result.skipped[:10]:
+            click.echo(f"  {line}")
+        if len(result.skipped) > 10:
+            click.echo(f"  ... and {len(result.skipped) - 10} more")
+
+    click.echo()
+    click.echo("Next steps:")
+    click.echo("  1. Verify per-project layout: ls ~/.swarm-kb/projects/")
+    click.echo("  2. For each project, rebuild the vector index:")
+    click.echo("       swarm-kb vector-rebuild --project /path/to/project")
+    if not keep_legacy and not dry_run:
+        click.echo("  3. (Optional) After validation, delete legacy paths with:")
+        click.echo("       swarm-kb migrate-to-per-project --finalize")
 
 
 if __name__ == "__main__":

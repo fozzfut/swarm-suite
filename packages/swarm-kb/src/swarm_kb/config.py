@@ -82,6 +82,11 @@ class SuiteConfig:
     def kb_root(self) -> Path:
         return Path(self.storage_root).expanduser().resolve()
 
+    # ── Legacy global paths (Phase 5 backwards-compat) ─────────────────
+    # All `*_path` accessors below return GLOBAL paths under kb_root.
+    # New code SHOULD prefer `project_*` variants (per-project layout).
+    # See docs/architecture/per-project-storage.md (Phase 5 ADR).
+
     def tool_sessions_path(self, tool: str) -> Path:
         return self.kb_root / tool / "sessions"
 
@@ -107,12 +112,61 @@ class SuiteConfig:
 
     @property
     def vector_index_path(self) -> Path:
-        """Path to the sqlite + sqlite-vec materialized index file."""
+        """Path to the GLOBAL sqlite + sqlite-vec materialized index file.
+
+        Deprecated for new code -- use ``project_vector_index_path`` to
+        get a per-project index that doesn't leak findings across
+        unrelated projects.
+        """
         return self.kb_root / "index" / "kb.db"
 
     @property
     def config_file(self) -> Path:
         return self.kb_root / "config.yaml"
+
+    # ── Per-project paths (Phase 5) ──────────────────────────────────
+    # The new layout lives under kb_root/projects/<project_hash>/ so that
+    # findings, decisions, debates, vector index, pipelines, etc. are
+    # cleanly isolated per project. project_hash_for() is in paths.py
+    # and produces a stable 16-char SHA-256 prefix from the resolved
+    # absolute project path.
+
+    @property
+    def projects_root(self) -> Path:
+        """Top-level container for per-project storage."""
+        return self.kb_root / "projects"
+
+    def project_root(self, project_path: str | Path) -> Path:
+        """Per-project storage root: kb_root/projects/<project_hash>/."""
+        from .paths import project_hash_for
+        return self.projects_root / project_hash_for(project_path)
+
+    def project_tool_sessions_path(
+        self, project_path: str | Path, tool: str,
+    ) -> Path:
+        return self.project_root(project_path) / tool / "sessions"
+
+    def project_decisions_path(self, project_path: str | Path) -> Path:
+        return self.project_root(project_path) / "decisions"
+
+    def project_debates_path(self, project_path: str | Path) -> Path:
+        return self.project_root(project_path) / "debates"
+
+    def project_pipelines_path(self, project_path: str | Path) -> Path:
+        return self.project_root(project_path) / "pipelines"
+
+    def project_code_map_path(self, project_path: str | Path) -> Path:
+        return self.project_root(project_path) / "code-map"
+
+    def project_xrefs_path(self, project_path: str | Path) -> Path:
+        return self.project_root(project_path) / "xrefs"
+
+    def project_vector_index_path(self, project_path: str | Path) -> Path:
+        return self.project_root(project_path) / "index" / "kb.db"
+
+    def project_meta_path(self, project_path: str | Path) -> Path:
+        """meta.json carrying original project_path, created_at, last_used_at."""
+        return self.project_root(project_path) / "meta.json"
 
     # -- Tool-specific config access ------------------------------------------
 
