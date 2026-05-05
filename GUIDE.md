@@ -2,7 +2,9 @@
 
 ## What is Swarm Suite
 
-Swarm Suite is an **AI engineering team for software that talks to physical hardware** — embedded firmware, lab automation, SCADA, motor control, instrument drivers. It's a set of **8 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`, `monitor-swarm`) — 130+ MCP tools and 57 expert profiles — that take a project from **datasheet to tagged release** and onward through deployed-instrument observability.
+Swarm Suite is an **AI engineering team for software that talks to physical hardware** — embedded firmware, lab automation, SCADA, motor control, instrument drivers. It's a set of **8 packages** (`swarm-core`, `swarm-kb`, `spec-swarm`, `arch-swarm`, `review-swarm`, `fix-swarm`, `doc-swarm`, `monitor-swarm`) — 140+ MCP tools and 57 expert profiles — that take a project from **datasheet to tagged release** and onward through deployed-instrument observability.
+
+> **Per-project storage (Phase 5):** as of this release, swarm-kb partitions storage per project under `~/.swarm-kb/projects/<project_hash>/`. Set `SWARM_KB_PROJECT=/path/to/project` to scope the MCP server to one project, or pass `project_path` on each tool call. Legacy global pool still works for backwards compat. Existing users: run `swarm-kb migrate-to-per-project` once. Full layout: [docs/architecture/per-project-storage.md](docs/architecture/per-project-storage.md).
 
 The unique angle vs. generic AI coding assistants (Cursor, Aider, …): the pipeline starts with a *datasheet*, not a feature spec. spec-swarm extracts registers, pins, protocols, timing, and power facts; downstream reviewers and fixers check code *against those extracted facts*. Cursor doesn't know your SPI clock violates the datasheet; spec-swarm + review-swarm together can.
 
