@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -54,12 +55,21 @@ def create_mcp_server():
     from .dsl import FlowStore
 
     @_dataclass
-    class _LifespanState:
-        config: SuiteConfig
-        debate_engine: DebateEngine
-        pipeline_manager: PipelineManager
+    class _ProjectState:
+        """Per-project resolved store collection.
+
+        Built lazily by ``_LifespanState.for_project``. When the keying
+        ``project_path`` is empty (legacy global mode), all paths fall
+        back to the SuiteConfig global accessors. When non-empty, every
+        path is resolved via the ``project_*_path`` family so the
+        artifacts live under ``kb_root/projects/<hash>/``.
+        """
+
+        project_path: str
         decision_store: DecisionStore
         debate_store: DebateStore
+        debate_engine: DebateEngine
+        pipeline_manager: PipelineManager
         judging_engine: JudgingEngine
         verification_store: VerificationStore
         pgve_store: PgveStore
@@ -68,90 +78,211 @@ def create_mcp_server():
         # sentence-transformers not installed (adr-15bde0ae).
         vector_index: Optional[VectorIndex]
 
-    @asynccontextmanager
-    async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
-        config = bootstrap()
-        engine = DebateEngine(config.debates_path / "active")
-        pipe_mgr = PipelineManager(config.pipelines_path)
+    @_dataclass
+    class _LifespanState:
+        """Server-wide context with a lazy per-project cache.
 
-        # Vector memory layer (opt-in via config.embedding.provider).
-        embedder = make_embedder({
-            "provider": config.embedding.provider,
-            "model": config.embedding.model,
-        })
-        vector_idx: Optional[VectorIndex] = None
-        if embedder is not None:
-            vector_idx = VectorIndex(config.vector_index_path, embedder=embedder)
-            start_warmup_thread(embedder)
-        dec_on_write = (
-            make_decision_indexer(vector_idx) if vector_idx is not None else None
-        )
+        ``default_project_path`` is read from the ``SWARM_KB_PROJECT``
+        environment variable at server start. Tools that take a
+        ``project_path`` argument resolve to that default when called
+        with the empty string (the back-compat path).
+        """
 
-        dec_store = DecisionStore(
-            config.decisions_path / "decisions.jsonl",
-            on_write=dec_on_write,
-        )
-        dbt_store = DebateStore(config.debates_path / "debates.jsonl")
-        judge_eng = JudgingEngine(config.kb_root / "judgings" / "active")
-        verify_store = VerificationStore(config.kb_root / "verifications" / "active")
-        pgve_store = PgveStore(config.kb_root / "pgve" / "active")
-        flow_store = FlowStore(config.kb_root / "flows" / "active")
-        try:
-            yield _LifespanState(
-                config=config,
-                debate_engine=engine,
-                pipeline_manager=pipe_mgr,
+        config: SuiteConfig
+        default_project_path: str
+        # Shared embedder (the model load is heavy -- one per server is
+        # plenty). Each per-project VectorIndex reuses this instance.
+        _embedder: object  # Embedder | None -- stringly-typed to avoid extra import
+        _project_cache: dict[str, "_ProjectState"]
+
+        def for_project(self, project_path: str) -> "_ProjectState":
+            """Lazy-build and cache a ``_ProjectState`` for ``project_path``.
+
+            ``project_path == ""`` means legacy global mode -- stores
+            live directly under ``kb_root/<area>/``. A non-empty path is
+            resolved through ``config.project_*_path`` so storage is
+            partitioned per project hash.
+            """
+            cached = self._project_cache.get(project_path)
+            if cached is not None:
+                return cached
+
+            cfg = self.config
+            if project_path:
+                decisions_jsonl = (
+                    cfg.project_decisions_path(project_path) / "decisions.jsonl"
+                )
+                debates_root = cfg.project_debates_path(project_path)
+                pipelines_root = cfg.project_pipelines_path(project_path)
+                proj_root = cfg.project_root(project_path)
+                judgings_root = proj_root / "judgings" / "active"
+                verifications_root = proj_root / "verifications" / "active"
+                pgve_root = proj_root / "pgve" / "active"
+                flows_root = proj_root / "flows" / "active"
+                index_path = cfg.project_vector_index_path(project_path)
+            else:
+                decisions_jsonl = cfg.decisions_path / "decisions.jsonl"
+                debates_root = cfg.debates_path
+                pipelines_root = cfg.pipelines_path
+                judgings_root = cfg.kb_root / "judgings" / "active"
+                verifications_root = cfg.kb_root / "verifications" / "active"
+                pgve_root = cfg.kb_root / "pgve" / "active"
+                flows_root = cfg.kb_root / "flows" / "active"
+                index_path = cfg.vector_index_path
+
+            vec_idx: Optional[VectorIndex] = None
+            if self._embedder is not None:
+                vec_idx = VectorIndex(index_path, embedder=self._embedder)
+
+            dec_on_write = (
+                make_decision_indexer(vec_idx) if vec_idx is not None else None
+            )
+
+            dec_store = DecisionStore(decisions_jsonl, on_write=dec_on_write)
+            dbt_store = DebateStore(debates_root / "debates.jsonl")
+            engine = DebateEngine(debates_root / "active")
+            pipe_mgr = PipelineManager(pipelines_root)
+            judge_eng = JudgingEngine(judgings_root)
+            verify_store = VerificationStore(verifications_root)
+            pgve_store = PgveStore(pgve_root)
+            flow_store = FlowStore(flows_root)
+
+            state = _ProjectState(
+                project_path=project_path,
                 decision_store=dec_store,
                 debate_store=dbt_store,
+                debate_engine=engine,
+                pipeline_manager=pipe_mgr,
                 judging_engine=judge_eng,
                 verification_store=verify_store,
                 pgve_store=pgve_store,
                 flow_store=flow_store,
-                vector_index=vector_idx,
+                vector_index=vec_idx,
             )
+            self._project_cache[project_path] = state
+            return state
+
+        def close_all(self) -> None:
+            """Close every cached project's resources.
+
+            Currently only the vector_index needs explicit close (sqlite
+            connection cleanup). Stores are file-backed and don't hold
+            handles between calls.
+            """
+            for proj in self._project_cache.values():
+                if proj.vector_index is not None:
+                    try:
+                        proj.vector_index.close()
+                    except Exception:  # noqa: BLE001 -- best-effort teardown
+                        _log.warning(
+                            "Failed to close vector index for project %r",
+                            proj.project_path,
+                        )
+
+    @asynccontextmanager
+    async def lifespan(server: FastMCP) -> AsyncIterator[_LifespanState]:
+        config = bootstrap()
+
+        # Vector memory layer (opt-in via config.embedding.provider).
+        # The embedder is shared across all per-project VectorIndex
+        # instances -- the model load is heavy and the index files
+        # themselves are what differ per project.
+        embedder = make_embedder({
+            "provider": config.embedding.provider,
+            "model": config.embedding.model,
+        })
+        if embedder is not None:
+            start_warmup_thread(embedder)
+
+        default_project = os.environ.get("SWARM_KB_PROJECT", "").strip()
+
+        state = _LifespanState(
+            config=config,
+            default_project_path=default_project,
+            _embedder=embedder,
+            _project_cache={},
+        )
+        # Pre-warm the default project's state so first-tool latency
+        # isn't paying the lazy-build cost.
+        state.for_project(default_project)
+        try:
+            yield state
         finally:
-            if vector_idx is not None:
-                vector_idx.close()
+            state.close_all()
 
     def _get_config(ctx: Optional[Context]) -> SuiteConfig:
         assert ctx is not None, "MCP Context not injected"
         return ctx.request_context.lifespan_context.config
 
-    def _get_debate_engine(ctx: Optional[Context]) -> DebateEngine:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.debate_engine
+    def _resolve_project(
+        ctx: Optional[Context],
+        project_path: str,
+    ) -> tuple["_LifespanState", str]:
+        """Return (lifespan_state, resolved_project_path).
 
-    def _get_pipeline_manager(ctx: Optional[Context]) -> PipelineManager:
+        Empty ``project_path`` -> the lifespan's default
+        (``SWARM_KB_PROJECT`` env or ``""``). Callers thread the
+        resolved value to per-project APIs that expect a non-empty
+        string when partitioning is desired.
+        """
         assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.pipeline_manager
+        state = ctx.request_context.lifespan_context
+        resolved = project_path or state.default_project_path
+        return state, resolved
 
-    def _get_decision_store(ctx: Optional[Context]) -> DecisionStore:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.decision_store
+    def _get_debate_engine(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> DebateEngine:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).debate_engine
 
-    def _get_debate_store(ctx: Optional[Context]) -> DebateStore:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.debate_store
+    def _get_pipeline_manager(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> PipelineManager:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).pipeline_manager
 
-    def _get_judging_engine(ctx: Optional[Context]) -> JudgingEngine:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.judging_engine
+    def _get_decision_store(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> DecisionStore:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).decision_store
 
-    def _get_verification_store(ctx: Optional[Context]) -> VerificationStore:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.verification_store
+    def _get_debate_store(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> DebateStore:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).debate_store
 
-    def _get_pgve_store(ctx: Optional[Context]) -> PgveStore:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.pgve_store
+    def _get_judging_engine(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> JudgingEngine:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).judging_engine
 
-    def _get_flow_store(ctx: Optional[Context]) -> FlowStore:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.flow_store
+    def _get_verification_store(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> VerificationStore:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).verification_store
 
-    def _get_vector_index(ctx: Optional[Context]) -> Optional[VectorIndex]:
-        assert ctx is not None, "MCP Context not injected"
-        return ctx.request_context.lifespan_context.vector_index
+    def _get_pgve_store(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> PgveStore:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).pgve_store
+
+    def _get_flow_store(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> FlowStore:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).flow_store
+
+    def _get_vector_index(
+        ctx: Optional[Context], project_path: str = "",
+    ) -> Optional[VectorIndex]:
+        state, resolved = _resolve_project(ctx, project_path)
+        return state.for_project(resolved).vector_index
 
     mcp = FastMCP("SwarmKB", lifespan=lifespan)
 
@@ -160,23 +291,69 @@ def create_mcp_server():
     @mcp.tool(
         name="kb_status",
         description=(
-            "Get Swarm KB status: session counts per tool, "
+            "Get Swarm KB status: global session counts per tool, "
             "cross-reference count, decision count, debate count, "
-            "storage root path."
+            "storage root path. Also reports detected per-project "
+            "directories (project_hash -> session counts) so callers "
+            "can see which projects have data on disk. The decision/"
+            "debate/pipeline counts are scoped to the current project "
+            "context (resolved via SWARM_KB_PROJECT env or the "
+            "``project_path`` arg, defaulting to the legacy global pool)."
         ),
     )
-    def _kb_status(ctx: Optional[Context] = None) -> str:
+    def _kb_status(
+        project_path: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
         config = _get_config(ctx)
         counts = count_sessions(config)
         xref_log = XRefLog(config.xrefs_path)
-        decision_store = _get_decision_store(ctx)
-        debate_store = _get_debate_store(ctx)
-        engine = _get_debate_engine(ctx)
-        pipe_mgr = _get_pipeline_manager(ctx)
+        decision_store = _get_decision_store(ctx, project_path)
+        debate_store = _get_debate_store(ctx, project_path)
+        engine = _get_debate_engine(ctx, project_path)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         pipelines = pipe_mgr.list_all()
         active_pipelines = [p for p in pipelines if p.stages.get(p.current_stage) and p.stages[p.current_stage].status == "active"]
+
+        # ── Per-project session enumeration ─────────────────────────
+        # Walk kb_root/projects/<hash>/<tool>/sessions to surface what
+        # data is partitioned per-project. We only count sessions for
+        # the standard TOOL_NAMES; unknown directories are ignored.
+        projects_block: dict[str, dict] = {}
+        projects_root = config.projects_root
+        if projects_root.exists():
+            for proj_dir in sorted(projects_root.iterdir()):
+                if not proj_dir.is_dir():
+                    continue
+                proj_counts: dict[str, int] = {}
+                for tool_name in TOOL_NAMES:
+                    sessions_dir = proj_dir / tool_name / "sessions"
+                    if sessions_dir.exists():
+                        proj_counts[tool_name] = sum(
+                            1 for e in sessions_dir.iterdir() if e.is_dir()
+                        )
+                    else:
+                        proj_counts[tool_name] = 0
+                meta_path = proj_dir / "meta.json"
+                meta_info: dict = {}
+                if meta_path.exists():
+                    try:
+                        meta_info = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except (json.JSONDecodeError, OSError):
+                        meta_info = {}
+                projects_block[proj_dir.name] = {
+                    "sessions": proj_counts,
+                    "total_sessions": sum(proj_counts.values()),
+                    "meta": meta_info,
+                }
+
+        state = ctx.request_context.lifespan_context if ctx else None
+        default_project = state.default_project_path if state else ""
+
         return json.dumps({
             "kb_root": str(config.kb_root),
+            "default_project_path": default_project,
+            "current_project_path": project_path or default_project,
             "sessions": counts,
             "total_sessions": sum(counts.values()),
             "xrefs": xref_log.count(),
@@ -185,6 +362,7 @@ def create_mcp_server():
             "active_debates": engine.count(status="open"),
             "pipeline_count": len(pipelines),
             "active_pipelines": len(active_pipelines),
+            "projects": projects_block,
         }, indent=2)
 
     # ── kb_scan_project ──────────────────────────────────────────────
@@ -346,7 +524,12 @@ def create_mcp_server():
         description=(
             "Search findings across sessions. "
             "Filter by tool (default: all tools), file, severity, "
-            "status, min_confidence."
+            "status, min_confidence. When ``project_path`` is set, "
+            "the search is restricted to that project's per-project "
+            "session pool ONLY (it does NOT also scan the legacy "
+            "global pool). Empty ``project_path`` falls back to the "
+            "lifespan's default project (SWARM_KB_PROJECT env), or "
+            "the legacy global pool when no default is configured."
         ),
     )
     def _kb_search_findings(
@@ -355,9 +538,11 @@ def create_mcp_server():
         severity: str = "",
         status: str = "",
         min_confidence: float = 0.0,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         config = _get_config(ctx)
+        _, resolved_project = _resolve_project(ctx, project_path)
 
         # Determine which tools to search
         if tool:
@@ -367,7 +552,12 @@ def create_mcp_server():
 
         all_results: list[dict] = []
         for t in tools_to_search:
-            sessions_dir = config.tool_sessions_path(t)
+            if resolved_project:
+                sessions_dir = config.project_tool_sessions_path(
+                    resolved_project, t,
+                )
+            else:
+                sessions_dir = config.tool_sessions_path(t)
             if not sessions_dir.exists():
                 continue
             for entry in sorted(sessions_dir.iterdir()):
@@ -398,9 +588,13 @@ def create_mcp_server():
             "needs embedding.provider=local + `pip install swarm-kb[embed-local]`), "
             "bm25 (FTS5 lexical, no extra deps), hybrid (0.6·vec + 0.3·bm25 + "
             "0.1·entity_boost). Filter by entity_type (finding|decision), tool, "
-            "session_id, persona, file, severity, status, project_path, tags "
-            "(comma-separated). k caps results; score_threshold filters weak "
-            "matches (0.0..1.0)."
+            "session_id, persona, file, severity, status, tags "
+            "(comma-separated). ``project_path`` selects WHICH index to query: "
+            "non-empty -> the project's per-project sqlite index; empty -> the "
+            "lifespan default (SWARM_KB_PROJECT env or the legacy global "
+            "index). It is NOT used as a row filter -- per-project indices "
+            "already only contain that project's rows. k caps results; "
+            "score_threshold filters weak matches (0.0..1.0)."
         ),
     )
     def _kb_semantic_search(
@@ -419,7 +613,7 @@ def create_mcp_server():
         score_threshold: float = 0.0,
         ctx: Optional[Context] = None,
     ) -> str:
-        vector_idx = _get_vector_index(ctx)
+        vector_idx = _get_vector_index(ctx, project_path)
         if vector_idx is None:
             return json.dumps({
                 "error": (
@@ -432,12 +626,17 @@ def create_mcp_server():
                 "results": [],
             })
 
+        # NOTE: ``project_path`` is intentionally NOT added to filters --
+        # with per-project indices it already partitions WHICH index we
+        # opened. Keeping it as a filter on the global index path is
+        # also a no-op when callers pass the same value the index was
+        # built from, so dropping it preserves global-mode behaviour.
         filters: dict = {}
         for col, val in (
             ("entity_type", entity_type), ("tool", tool),
             ("session_id", session_id), ("persona", persona),
             ("file", file), ("severity", severity),
-            ("status", status), ("project_path", project_path),
+            ("status", status),
         ):
             if val:
                 filters[col] = val
@@ -466,15 +665,19 @@ def create_mcp_server():
             "Rebuild the vector index from existing JSONL source-of-truth "
             "files. Idempotent (entries with unchanged text are skipped). "
             "scope: all|findings|decisions|tool:<name>. Use when changing "
-            "the embedding model or after manual JSONL edits."
+            "the embedding model or after manual JSONL edits. "
+            "``project_path`` selects which index to rebuild: non-empty "
+            "-> that project's per-project index; empty -> the lifespan "
+            "default (SWARM_KB_PROJECT env or the legacy global index)."
         ),
     )
     def _kb_vector_rebuild(
         scope: str = "all",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         config = _get_config(ctx)
-        vector_idx = _get_vector_index(ctx)
+        vector_idx = _get_vector_index(ctx, project_path)
         if vector_idx is None:
             return json.dumps({
                 "error": (
@@ -493,26 +696,38 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_post_finding",
-        description="Post a finding from any tool into shared KB storage.",
+        description=(
+            "Post a finding from any tool into shared KB storage. "
+            "Empty ``project_path`` falls back to the lifespan default "
+            "(SWARM_KB_PROJECT env), or the legacy global session pool "
+            "when no default is configured. Non-empty routes both the "
+            "JSONL append AND the vector indexing into the project's "
+            "per-project storage tree."
+        ),
     )
     def _kb_post_finding(
         tool: str,
         session_id: str,
         finding: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         config = _get_config(ctx)
+        _, resolved_project = _resolve_project(ctx, project_path)
         try:
             finding_data = json.loads(finding)
         except json.JSONDecodeError as exc:
             return json.dumps({"error": f"Invalid JSON in finding: {exc}"})
 
-        vector_idx = _get_vector_index(ctx)
+        vector_idx = _get_vector_index(ctx, project_path)
         on_write = (
             make_finding_indexer(vector_idx, tool, session_id)
             if vector_idx is not None else None
         )
-        writer = FindingWriter(tool, session_id, config, on_write=on_write)
+        writer = FindingWriter(
+            tool, session_id, config,
+            on_write=on_write, project_path=resolved_project,
+        )
         finding_id = writer.post(finding_data)
 
         # Return the posted finding with assigned ID
@@ -523,7 +738,13 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_post_decision",
-        description="Record an architectural decision (ADR).",
+        description=(
+            "Record an architectural decision (ADR). The ``project_path`` "
+            "parameter both (a) selects which DecisionStore writes the "
+            "record (per-project vs legacy global) AND (b) is stored on "
+            "the record itself for back-compat queries. Empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_post_decision(
         title: str,
@@ -538,7 +759,7 @@ def create_mcp_server():
         tags: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_decision_store(ctx)
+        store = _get_decision_store(ctx, project_path)
 
         # Parse comma-separated strings into lists
         consequences_list: list[str] = []
@@ -573,7 +794,13 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_get_decisions",
-        description="Query architectural decisions.",
+        description=(
+            "Query architectural decisions. ``project_path`` selects "
+            "which DecisionStore to query (per-project vs legacy "
+            "global) AND filters records by their stored project_path "
+            "field. Empty falls back to the lifespan default "
+            "(SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_get_decisions(
         status: str = "",
@@ -582,7 +809,7 @@ def create_mcp_server():
         project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_decision_store(ctx)
+        store = _get_decision_store(ctx, project_path)
         decisions = store.query(
             status=status,
             source_tool=source_tool,
@@ -595,15 +822,20 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_update_decision_status",
-        description="Update a decision's status.",
+        description=(
+            "Update a decision's status. ``project_path`` selects which "
+            "DecisionStore to look in. Empty falls back to the lifespan "
+            "default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_update_decision_status(
         decision_id: str,
         new_status: str,
         superseded_by: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_decision_store(ctx)
+        store = _get_decision_store(ctx, project_path)
         updated = store.update_status(decision_id, new_status, superseded_by=superseded_by)
         if updated:
             decision = store.get_by_id(decision_id)
@@ -617,7 +849,12 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_post_debate",
-        description="Record a debate result in shared KB.",
+        description=(
+            "Record a debate result in shared KB. ``project_path`` "
+            "selects which DebateStore writes the record (per-project "
+            "vs legacy global) AND is stored on the record. Empty "
+            "falls back to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_post_debate(
         topic: str,
@@ -633,7 +870,7 @@ def create_mcp_server():
         tags: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_debate_store(ctx)
+        store = _get_debate_store(ctx, project_path)
 
         # Parse JSON strings into structured data
         proposals_list: list[dict] = []
@@ -676,7 +913,12 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_get_debates",
-        description="Query debates.",
+        description=(
+            "Query debates. ``project_path`` selects which DebateStore "
+            "to query AND filters records by their stored project_path "
+            "field. Empty falls back to the lifespan default "
+            "(SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_get_debates(
         status: str = "",
@@ -685,7 +927,7 @@ def create_mcp_server():
         tag: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_debate_store(ctx)
+        store = _get_debate_store(ctx, project_path)
         debates = store.query(
             status=status,
             source_tool=source_tool,
@@ -698,7 +940,13 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_start_debate",
-        description="Start a new debate. Any tool can initiate.",
+        description=(
+            "Start a new debate. Any tool can initiate. ``project_path`` "
+            "selects which DebateEngine instance handles the debate "
+            "(per-project vs legacy global) AND is stamped on the "
+            "debate record. Empty falls back to the lifespan default "
+            "(SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_start_debate(
         topic: str,
@@ -709,7 +957,7 @@ def create_mcp_server():
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
             debate = engine.start_debate(
                 topic=topic,
                 context=context,
@@ -725,7 +973,11 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_propose",
-        description="Submit a proposal to an open debate.",
+        description=(
+            "Submit a proposal to an open debate. ``project_path`` "
+            "selects which DebateEngine to look in. Empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_propose(
         debate_id: str,
@@ -735,10 +987,11 @@ def create_mcp_server():
         pros: str = "",
         cons: str = "",
         trade_offs: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
 
             pros_list: list[str] = []
             if pros:
@@ -780,7 +1033,11 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_critique",
-        description="Critique an existing proposal in a debate.",
+        description=(
+            "Critique an existing proposal in a debate. ``project_path`` "
+            "selects which DebateEngine to look in. Empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_critique(
         debate_id: str,
@@ -789,10 +1046,11 @@ def create_mcp_server():
         verdict: str,
         reasoning: str,
         suggested_changes: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
 
             changes_list: list[str] = []
             if suggested_changes:
@@ -819,17 +1077,22 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_vote",
-        description="Vote on a proposal in a debate.",
+        description=(
+            "Vote on a proposal in a debate. ``project_path`` selects "
+            "which DebateEngine to look in. Empty falls back to the "
+            "lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_vote(
         debate_id: str,
         agent: str,
         proposal_id: str,
         support: bool = True,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
             engine.vote(
                 debate_id=debate_id,
                 agent=agent,
@@ -854,21 +1117,25 @@ def create_mcp_server():
         name="kb_resolve_debate",
         description=(
             "Resolve a debate: tally votes, pick winner, generate decision. "
-            "Also auto-posts the decision to the DecisionStore."
+            "Also auto-posts the decision to the DecisionStore. "
+            "``project_path`` selects which DebateEngine + DecisionStore "
+            "to use. Empty falls back to the lifespan default "
+            "(SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_resolve_debate(
         debate_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
             result = engine.resolve(debate_id)
 
             # Auto-post the decision to DecisionStore
             decision_data = result.get("decision", {})
             if decision_data and decision_data.get("status") == "accepted":
-                dec_store = _get_decision_store(ctx)
+                dec_store = _get_decision_store(ctx, project_path)
                 debate = engine.get_debate(debate_id)
                 dec_record = dec_store.append(
                     title=decision_data.get("title", ""),
@@ -893,15 +1160,18 @@ def create_mcp_server():
     @mcp.tool(
         name="kb_get_debate",
         description=(
-            "Get full debate state including proposals, critiques, votes."
+            "Get full debate state including proposals, critiques, votes. "
+            "``project_path`` selects which DebateEngine to look in. "
+            "Empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_get_debate(
         debate_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
             debate = engine.get_debate(debate_id)
             if debate is None:
                 raise ValueError(f"Debate {debate_id!r} not found")
@@ -915,14 +1185,19 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_get_transcript",
-        description="Get markdown transcript of a debate.",
+        description=(
+            "Get markdown transcript of a debate. ``project_path`` "
+            "selects which DebateEngine to look in. Empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_get_transcript(
         debate_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
             transcript = engine.get_transcript(debate_id)
             return transcript
         except ValueError:
@@ -934,14 +1209,19 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_cancel_debate",
-        description="Cancel an open debate.",
+        description=(
+            "Cancel an open debate. ``project_path`` selects which "
+            "DebateEngine to look in. Empty falls back to the lifespan "
+            "default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_cancel_debate(
         debate_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         try:
-            engine = _get_debate_engine(ctx)
+            engine = _get_debate_engine(ctx, project_path)
             engine.cancel(debate_id)
             return json.dumps({"status": "cancelled", "debate_id": debate_id})
         except ValueError:
@@ -956,7 +1236,10 @@ def create_mcp_server():
         description=(
             "Start a new analysis pipeline for a project. "
             "Set include_spec=True for embedded/hardware projects "
-            "to begin with datasheet/spec analysis before architecture."
+            "to begin with datasheet/spec analysis before architecture. "
+            "The ``project_path`` argument routes to that project's "
+            "PipelineManager (per-project storage) when partitioning is "
+            "in effect."
         ),
     )
     def _kb_start_pipeline(
@@ -964,7 +1247,7 @@ def create_mcp_server():
         include_spec: bool = False,
         ctx: Optional[Context] = None,
     ) -> str:
-        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         pipe = pipe_mgr.start(project_path)
 
         # If not embedded/hardware project, skip spec stage
@@ -992,14 +1275,17 @@ def create_mcp_server():
         name="kb_pipeline_status",
         description=(
             "Get current pipeline status: which stage, "
-            "what's been done, what's next."
+            "what's been done, what's next. ``project_path`` selects "
+            "which PipelineManager to look in. Empty falls back to "
+            "the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_pipeline_status(
         pipeline_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         pipe = pipe_mgr.get(pipeline_id)
         if pipe is None:
             return json.dumps({"error": f"Pipeline {pipeline_id} not found"})
@@ -1036,17 +1322,20 @@ def create_mcp_server():
             "User gate: advance pipeline to the next stage. "
             "Call after reviewing current stage results. "
             "Stage gates: idea/plan/harden require their session content "
-            "to be finalized; pass force=True to override."
+            "to be finalized; pass force=True to override. "
+            "``project_path`` selects which PipelineManager to look in. "
+            "Empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_advance_pipeline(
         pipeline_id: str,
         notes: str = "",
         force: bool = False,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
         from .stage_gates import check_stage_gate
-        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         config = _get_config(ctx)
         pipe = pipe_mgr.get(pipeline_id)
         if pipe is None:
@@ -1069,15 +1358,18 @@ def create_mcp_server():
         name="kb_skip_stage",
         description=(
             "Skip to a specific pipeline stage "
-            "(e.g., skip arch and go straight to review)."
+            "(e.g., skip arch and go straight to review). "
+            "``project_path`` selects which PipelineManager to look in. "
+            "Empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_skip_stage(
         pipeline_id: str,
         stage: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         result = pipe_mgr.skip_to(pipeline_id, stage)
         return json.dumps(result, indent=2)
 
@@ -1087,7 +1379,9 @@ def create_mcp_server():
         name="kb_update_stage",
         description=(
             "Update current stage stats: link session IDs, "
-            "record approved/dismissed finding counts."
+            "record approved/dismissed finding counts. "
+            "``project_path`` selects which PipelineManager to look in. "
+            "Empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_update_stage(
@@ -1095,9 +1389,10 @@ def create_mcp_server():
         session_id: str = "",
         approved: int = 0,
         dismissed: int = 0,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         result = pipe_mgr.update_stage_stats(
             pipeline_id, session_id=session_id,
             approved=approved, dismissed=dismissed,
@@ -1108,10 +1403,17 @@ def create_mcp_server():
 
     @mcp.tool(
         name="kb_list_pipelines",
-        description="List all pipelines.",
+        description=(
+            "List all pipelines. ``project_path`` selects which "
+            "PipelineManager to look in. Empty falls back to the "
+            "lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
-    def _kb_list_pipelines(ctx: Optional[Context] = None) -> str:
-        pipe_mgr = _get_pipeline_manager(ctx)
+    def _kb_list_pipelines(
+        project_path: str = "",
+        ctx: Optional[Context] = None,
+    ) -> str:
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         pipelines = pipe_mgr.list_all()
         return json.dumps([p.to_dict() for p in pipelines], indent=2)
 
@@ -1127,7 +1429,9 @@ def create_mcp_server():
     )
     def _kb_guide(project_path: str = ".", ctx: Optional[Context] = None) -> str:
         config = _get_config(ctx)
-        pipe_mgr = _get_pipeline_manager(ctx)
+        # Pipelines for kb_guide are always per-project once partitioning
+        # is in effect -- the guide is inherently project-scoped.
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         pp = Path(project_path).resolve()
 
         # ── Detect project type ──────────────────────────────────────
@@ -1901,11 +2205,12 @@ No automatic progression. You control the pace.
 
     @mcp.tool(
         name="kb_rewind_pipeline",
-        description="Rewind a pipeline to an earlier stage. Used when discoveries in stage N invalidate decisions from stage M < N (e.g. Review finds the ADR was wrong). Reason is recorded in the target stage's notes.",
+        description="Rewind a pipeline to an earlier stage. Used when discoveries in stage N invalidate decisions from stage M < N (e.g. Review finds the ADR was wrong). Reason is recorded in the target stage's notes. ``project_path`` selects which PipelineManager to look in; empty falls back to the lifespan default (SWARM_KB_PROJECT env).",
     )
     def _kb_rewind(pipeline_id: str, stage: str, reason: str = "",
+                   project_path: str = "",
                    ctx: Optional[Context] = None) -> str:
-        pipe_mgr = _get_pipeline_manager(ctx)
+        pipe_mgr = _get_pipeline_manager(ctx, project_path)
         return json.dumps(pipe_mgr.rewind(pipeline_id, stage, reason=reason), indent=2)
 
     # ════════════════════════════════════════════════════════════════════
@@ -2118,7 +2423,11 @@ No automatic progression. You control the pace.
             "Open a CouncilAsAJudge session over a subject. N judges "
             "will each judge ONE dimension and submit a verdict + "
             "rationale. Default dimensions: accuracy, helpfulness, "
-            "harmlessness, coherence, conciseness, instruction_adherence."
+            "harmlessness, coherence, conciseness, instruction_adherence. "
+            "``project_path`` routes the judging into the project's "
+            "per-project JudgingEngine (and is also stored on the "
+            "record). Empty falls back to the lifespan default "
+            "(SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_start_judging(
@@ -2131,7 +2440,7 @@ No automatic progression. You control the pace.
         source_session: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        engine = _get_judging_engine(ctx)
+        engine = _get_judging_engine(ctx, project_path)
         dims = [d.strip() for d in dimensions.split(",") if d.strip()] or None
         j = engine.start(
             subject=subject,
@@ -2150,7 +2459,9 @@ No automatic progression. You control the pace.
             "One judge submits a verdict + rationale for ONE dimension "
             "of an open judging. Verdict in {pass, fail, mixed, "
             "abstain}. Re-judging the same dimension by the same judge "
-            "overwrites the prior submission."
+            "overwrites the prior submission. ``project_path`` selects "
+            "which JudgingEngine to look in; empty falls back to the "
+            "lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_judge_dimension(
@@ -2160,9 +2471,10 @@ No automatic progression. You control the pace.
         verdict: str,
         rationale: str,
         suggested_changes: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        engine = _get_judging_engine(ctx)
+        engine = _get_judging_engine(ctx, project_path)
         changes = [c.strip() for c in suggested_changes.split("\n") if c.strip()]
         jid = engine.judge(
             judging_id,
@@ -2185,7 +2497,9 @@ No automatic progression. You control the pace.
             "Synthesise per-dimension judgments into a single verdict "
             "(pass/fail/mixed) with a summary rationale. The aggregator "
             "is the agent calling this tool -- the verdict and summary "
-            "are its synthesis, not auto-derived."
+            "are its synthesis, not auto-derived. ``project_path`` "
+            "selects which JudgingEngine to look in; empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_resolve_judging(
@@ -2194,9 +2508,10 @@ No automatic progression. You control the pace.
         summary: str,
         synthesised_by: str = "",
         follow_ups: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        engine = _get_judging_engine(ctx)
+        engine = _get_judging_engine(ctx, project_path)
         ups = [u.strip() for u in follow_ups.split("\n") if u.strip()]
         synth = engine.synthesise(
             judging_id,
@@ -2211,14 +2526,17 @@ No automatic progression. You control the pace.
         name="kb_get_judging",
         description=(
             "Read a judging by ID: subject, dimensions, all judgments "
-            "so far, synthesis (or null), status."
+            "so far, synthesis (or null), status. ``project_path`` "
+            "selects which JudgingEngine to look in; empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_get_judging(
         judging_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        engine = _get_judging_engine(ctx)
+        engine = _get_judging_engine(ctx, project_path)
         j = engine.get(judging_id)
         if j is None:
             raise ValueError(f"Judging {judging_id!r} not found")
@@ -2228,15 +2546,18 @@ No automatic progression. You control the pace.
         name="kb_list_judgings",
         description=(
             "List judgings across the suite. Filter by status "
-            "(open/resolved/cancelled) and source_tool."
+            "(open/resolved/cancelled) and source_tool. ``project_path`` "
+            "selects which JudgingEngine to look in; empty falls back "
+            "to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_list_judgings(
         status: str = "",
         source_tool: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        engine = _get_judging_engine(ctx)
+        engine = _get_judging_engine(ctx, project_path)
         items = engine.list_all(status=status, source_tool=source_tool)
         return json.dumps([j.to_dict() for j in items], indent=2)
 
@@ -2251,7 +2572,10 @@ No automatic progression. You control the pace.
             "feeds evidence (test diff, regression scan, quality-gate "
             "result, optional judgings) via kb_add_verification_evidence, "
             "then synthesises a verdict via kb_finalise_verification. The "
-            "verdict gates advancement into the doc stage."
+            "verdict gates advancement into the doc stage. ``project_path`` "
+            "routes the report into the project's per-project store and "
+            "is also stored on the record. Empty falls back to the "
+            "lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_start_verification(
@@ -2260,7 +2584,7 @@ No automatic progression. You control the pace.
         project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_verification_store(ctx)
+        store = _get_verification_store(ctx, project_path)
         report = store.start(
             fix_session=fix_session,
             review_session=review_session,
@@ -2273,7 +2597,9 @@ No automatic progression. You control the pace.
         description=(
             "Attach one piece of evidence (test_diff, regression_scan, "
             "quality_gate, judging, manual_note) to an open verification. "
-            "`data` is a JSON-encoded dict whose shape depends on `kind`."
+            "`data` is a JSON-encoded dict whose shape depends on `kind`. "
+            "``project_path`` selects which VerificationStore to look "
+            "in; empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_add_verification_evidence(
@@ -2283,9 +2609,10 @@ No automatic progression. You control the pace.
         data: str = "",
         source_tool: str = "",
         source_session: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_verification_store(ctx)
+        store = _get_verification_store(ctx, project_path)
         data_dict = json.loads(data) if data else {}
         ev_id = store.add_evidence(
             report_id,
@@ -2302,7 +2629,9 @@ No automatic progression. You control the pace.
         description=(
             "Synthesise the evidence into a verdict (pass/fail/partial). "
             "blocking_issues and follow_ups are newline-separated. After "
-            "this call, the report is read-only."
+            "this call, the report is read-only. ``project_path`` "
+            "selects which VerificationStore to look in; empty falls "
+            "back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_finalise_verification(
@@ -2312,9 +2641,10 @@ No automatic progression. You control the pace.
         blocking_issues: str = "",
         follow_ups: str = "",
         synthesised_by: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_verification_store(ctx)
+        store = _get_verification_store(ctx, project_path)
         block = [b.strip() for b in blocking_issues.split("\n") if b.strip()]
         ups = [u.strip() for u in follow_ups.split("\n") if u.strip()]
         verdict = store.finalise(
@@ -2329,13 +2659,18 @@ No automatic progression. You control the pace.
 
     @mcp.tool(
         name="kb_get_verification",
-        description="Read a verification report by ID: evidence list + verdict + status.",
+        description=(
+            "Read a verification report by ID: evidence list + verdict + status. "
+            "``project_path`` selects which VerificationStore to look in; "
+            "empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_get_verification(
         report_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_verification_store(ctx)
+        store = _get_verification_store(ctx, project_path)
         r = store.get(report_id)
         if r is None:
             raise ValueError(f"Verification {report_id!r} not found")
@@ -2345,15 +2680,18 @@ No automatic progression. You control the pace.
         name="kb_list_verifications",
         description=(
             "List verifications. Filter by status (open/finalised/cancelled) "
-            "or fix_session."
+            "or fix_session. ``project_path`` selects which "
+            "VerificationStore to look in; empty falls back to the "
+            "lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_list_verifications(
         status: str = "",
         fix_session: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_verification_store(ctx)
+        store = _get_verification_store(ctx, project_path)
         items = store.list_all(status=status, fix_session=fix_session)
         return json.dumps([r.to_dict() for r in items], indent=2)
 
@@ -2369,7 +2707,10 @@ No automatic progression. You control the pace.
             "evaluator scores it via kb_evaluate_candidate. While the "
             "verdict is 'revise', generator submits another candidate "
             "carrying the previous feedback. Stops on 'accepted' or "
-            "when the candidate budget is exhausted."
+            "when the candidate budget is exhausted. ``project_path`` "
+            "routes the session into the project's per-project "
+            "PgveStore and is also stored on the record. Empty falls "
+            "back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_start_pgve(
@@ -2380,7 +2721,7 @@ No automatic progression. You control the pace.
         source_session: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_pgve_store(ctx)
+        store = _get_pgve_store(ctx, project_path)
         s = store.start(
             task_spec=task_spec,
             max_candidates=max_candidates,
@@ -2396,7 +2737,9 @@ No automatic progression. You control the pace.
             "Generator submits a candidate for the latest open pgve "
             "session. The candidate auto-carries the previous "
             "evaluation's feedback in its `previous_feedback` field so "
-            "downstream agents can read it without re-querying JSONL."
+            "downstream agents can read it without re-querying JSONL. "
+            "``project_path`` selects which PgveStore to look in; "
+            "empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_submit_candidate(
@@ -2404,9 +2747,10 @@ No automatic progression. You control the pace.
         generator: str,
         content: str,
         payload: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_pgve_store(ctx)
+        store = _get_pgve_store(ctx, project_path)
         payload_dict = json.loads(payload) if payload else {}
         cand = store.submit_candidate(
             session_id,
@@ -2423,7 +2767,9 @@ No automatic progression. You control the pace.
             "Verdict in {accepted, revise, rejected}. accepted -> "
             "session finalises with this candidate as winner; revise -> "
             "generator is expected to retry with the feedback; "
-            "rejected -> the planner should produce a fresh task spec."
+            "rejected -> the planner should produce a fresh task spec. "
+            "``project_path`` selects which PgveStore to look in; "
+            "empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_evaluate_candidate(
@@ -2432,9 +2778,10 @@ No automatic progression. You control the pace.
         verdict: str,
         feedback: str,
         score: float = -1.0,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_pgve_store(ctx)
+        store = _get_pgve_store(ctx, project_path)
         ev = store.evaluate(
             session_id,
             evaluator=evaluator,
@@ -2453,13 +2800,18 @@ No automatic progression. You control the pace.
 
     @mcp.tool(
         name="kb_get_pgve",
-        description="Read a pgve session by ID: candidates + evaluations + status.",
+        description=(
+            "Read a pgve session by ID: candidates + evaluations + status. "
+            "``project_path`` selects which PgveStore to look in; empty "
+            "falls back to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_get_pgve(
         session_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_pgve_store(ctx)
+        store = _get_pgve_store(ctx, project_path)
         s = store.get(session_id)
         if s is None:
             raise ValueError(f"PgveSession {session_id!r} not found")
@@ -2469,15 +2821,18 @@ No automatic progression. You control the pace.
         name="kb_list_pgve",
         description=(
             "List pgve sessions. Filter by status "
-            "(open/accepted/exhausted/rejected/cancelled) or source_tool."
+            "(open/accepted/exhausted/rejected/cancelled) or source_tool. "
+            "``project_path`` selects which PgveStore to look in; empty "
+            "falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_list_pgve(
         status: str = "",
         source_tool: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_pgve_store(ctx)
+        store = _get_pgve_store(ctx, project_path)
         items = store.list_all(status=status, source_tool=source_tool)
         return json.dumps([s.to_dict() for s in items], indent=2)
 
@@ -2517,7 +2872,10 @@ No automatic progression. You control the pace.
             "Open a flow execution from a DSL string. Returns the flow "
             "id and the first set of pending steps. The AI client "
             "dispatches each pending atom (and surfaces gates as human "
-            "prompts), then reports completion via kb_mark_step_done."
+            "prompts), then reports completion via kb_mark_step_done. "
+            "``project_path`` routes the flow into the project's "
+            "per-project FlowStore. Empty falls back to the lifespan "
+            "default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_start_flow(
@@ -2528,7 +2886,7 @@ No automatic progression. You control the pace.
         source_session: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_flow_store(ctx)
+        store = _get_flow_store(ctx, project_path)
         names = {n.strip() for n in known_names.split("\n") if n.strip()}
         flow = store.start(
             source=source,
@@ -2548,14 +2906,17 @@ No automatic progression. You control the pace.
             "Read the pending steps of a flow. Each pending step is "
             "either an atom (the client should invoke the tool of that "
             "name) or a gate (the client should surface a human prompt). "
-            "Empty list = flow finished."
+            "Empty list = flow finished. ``project_path`` selects which "
+            "FlowStore to look in; empty falls back to the lifespan "
+            "default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_get_next_steps(
         flow_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_flow_store(ctx)
+        store = _get_flow_store(ctx, project_path)
         flow = store.get(flow_id)
         if flow is None:
             raise ValueError(f"Flow {flow_id!r} not found")
@@ -2570,16 +2931,19 @@ No automatic progression. You control the pace.
         description=(
             "Mark one step of a flow as completed and advance the "
             "cursor. Idempotent on (flow_id, step_id). When the last "
-            "step completes, status flips to 'completed' automatically."
+            "step completes, status flips to 'completed' automatically. "
+            "``project_path`` selects which FlowStore to look in; empty "
+            "falls back to the lifespan default (SWARM_KB_PROJECT env)."
         ),
     )
     def _kb_mark_step_done(
         flow_id: str,
         step_id: str,
         outputs: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_flow_store(ctx)
+        store = _get_flow_store(ctx, project_path)
         outputs_dict = json.loads(outputs) if outputs else {}
         rec = store.mark_done(flow_id, step_id, outputs_dict)
         flow = store.get(flow_id)
@@ -2591,13 +2955,18 @@ No automatic progression. You control the pace.
 
     @mcp.tool(
         name="kb_get_flow",
-        description="Read a flow execution by ID: AST, completed steps, status.",
+        description=(
+            "Read a flow execution by ID: AST, completed steps, status. "
+            "``project_path`` selects which FlowStore to look in; empty "
+            "falls back to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_get_flow(
         flow_id: str,
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_flow_store(ctx)
+        store = _get_flow_store(ctx, project_path)
         flow = store.get(flow_id)
         if flow is None:
             raise ValueError(f"Flow {flow_id!r} not found")
@@ -2605,14 +2974,19 @@ No automatic progression. You control the pace.
 
     @mcp.tool(
         name="kb_list_flows",
-        description="List flow executions. Filter by status (open/completed/cancelled) or source_tool.",
+        description=(
+            "List flow executions. Filter by status (open/completed/cancelled) "
+            "or source_tool. ``project_path`` selects which FlowStore to "
+            "look in; empty falls back to the lifespan default (SWARM_KB_PROJECT env)."
+        ),
     )
     def _kb_list_flows(
         status: str = "",
         source_tool: str = "",
+        project_path: str = "",
         ctx: Optional[Context] = None,
     ) -> str:
-        store = _get_flow_store(ctx)
+        store = _get_flow_store(ctx, project_path)
         items = store.list_all(status=status, source_tool=source_tool)
         return json.dumps([f.to_dict() for f in items], indent=2)
 
@@ -2640,16 +3014,18 @@ No automatic progression. You control the pace.
         ctx: Optional[Context] = None,
     ) -> str:
         cfg = _get_config(ctx)
+        # The navigator always uses ``project_path`` for store routing
+        # too -- the caller already passes the project they care about.
         snap = _navigator_state(
             project_path,
             config=cfg,
-            pipeline_manager=_get_pipeline_manager(ctx),
-            decision_store=_get_decision_store(ctx),
-            judging_engine=_get_judging_engine(ctx),
-            verification_store=_get_verification_store(ctx),
-            pgve_store=_get_pgve_store(ctx),
-            flow_store=_get_flow_store(ctx),
-            debate_engine=_get_debate_engine(ctx),
+            pipeline_manager=_get_pipeline_manager(ctx, project_path),
+            decision_store=_get_decision_store(ctx, project_path),
+            judging_engine=_get_judging_engine(ctx, project_path),
+            verification_store=_get_verification_store(ctx, project_path),
+            pgve_store=_get_pgve_store(ctx, project_path),
+            flow_store=_get_flow_store(ctx, project_path),
+            debate_engine=_get_debate_engine(ctx, project_path),
         )
         return json.dumps(snap, indent=2, ensure_ascii=False)
 
