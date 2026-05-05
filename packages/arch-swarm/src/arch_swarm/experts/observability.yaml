@@ -790,3 +790,4 @@ system_prompt: 'You are an Observability Architecture Expert. You evaluate loggi
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

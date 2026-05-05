@@ -226,3 +226,4 @@ system_prompt: 'You are a Concurrency Safety Expert. You find race conditions, d
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

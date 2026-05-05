@@ -335,3 +335,4 @@ system_prompt: 'You are a Logging Patterns Expert. You find sensitive data expos
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

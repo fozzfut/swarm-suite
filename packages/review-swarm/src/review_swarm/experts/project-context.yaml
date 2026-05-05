@@ -327,3 +327,4 @@ system_prompt: "You are a Project Context Expert specializing in CLAUDE.md-style
   \ in future reviews)\n7. Missing entries for new modules (incomplete but not misleading)\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

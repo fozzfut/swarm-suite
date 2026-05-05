@@ -553,3 +553,4 @@ system_prompt: 'You are a Scalability Critic. You stress-test architectural desi
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

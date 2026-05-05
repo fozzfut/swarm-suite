@@ -485,3 +485,4 @@ system_prompt: "You are a Dependency Architecture Expert. You evaluate dependenc
   \n- Defend against phantom dependencies: \"If it's not in the manifest, it doesn't exist\"\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

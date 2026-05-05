@@ -317,3 +317,4 @@ system_prompt: "You are a Modularity Expert. Your goal is well-defined module bo
   \ than under-modularization\n  for small projects\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

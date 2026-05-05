@@ -330,3 +330,4 @@ system_prompt: "You are a Reuse Finder. You hunt for duplication, identify share
   If we have a shared utility, USE it everywhere or DELETE it\"\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

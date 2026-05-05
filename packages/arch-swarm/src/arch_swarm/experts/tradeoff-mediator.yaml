@@ -324,3 +324,4 @@ system_prompt: "You are a Trade-off Mediator. You synthesize competing architect
 uses_skills:
 - self_review
 - brainstorming
+- retrieval_augmented_reasoning

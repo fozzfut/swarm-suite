@@ -732,3 +732,4 @@ system_prompt: 'You are a Data Modeling Expert. You evaluate schema design, norm
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

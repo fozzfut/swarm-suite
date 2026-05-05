@@ -259,3 +259,4 @@ uses_skills:
 - self_review
 - incremental_implementation
 - test_driven_development
+- retrieval_augmented_reasoning

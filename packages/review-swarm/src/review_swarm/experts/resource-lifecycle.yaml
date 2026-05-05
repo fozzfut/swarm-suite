@@ -205,3 +205,4 @@ system_prompt: 'You are a Resource Lifecycle Expert. You find resource leaks: un
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

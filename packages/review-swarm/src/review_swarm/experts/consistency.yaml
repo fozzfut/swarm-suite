@@ -129,3 +129,4 @@ system_prompt: "You are a Cross-Reference Expert. You find contradictions betwee
   \ Environment-specific override |\n| Type-only import (TYPE_CHECKING) | Erased at runtime |\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

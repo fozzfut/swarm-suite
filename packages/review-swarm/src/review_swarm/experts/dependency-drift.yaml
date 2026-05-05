@@ -255,3 +255,4 @@ system_prompt: 'You are a Dependency Drift Expert. You find inconsistencies betw
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

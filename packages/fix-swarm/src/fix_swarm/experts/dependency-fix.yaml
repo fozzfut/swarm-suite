@@ -297,3 +297,4 @@ uses_skills:
 - systematic_debugging
 - self_review
 - incremental_implementation
+- retrieval_augmented_reasoning

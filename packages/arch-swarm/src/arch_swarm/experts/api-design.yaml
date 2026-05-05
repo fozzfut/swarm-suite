@@ -587,3 +587,4 @@ system_prompt: 'You are an API Design Expert. You evaluate the quality of API su
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

@@ -525,3 +525,4 @@ system_prompt: "You are a Testing Strategy Expert. You evaluate test architectur
   \ trivial\"\n- Defend the pyramid: \"E2E tests are insurance, not the primary quality mechanism\"\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

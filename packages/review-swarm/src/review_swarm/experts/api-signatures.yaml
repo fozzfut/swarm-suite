@@ -175,3 +175,4 @@ system_prompt: 'You are an API Contract Expert. You verify that function signatu
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

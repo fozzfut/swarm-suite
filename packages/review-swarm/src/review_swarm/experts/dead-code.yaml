@@ -181,3 +181,4 @@ system_prompt: 'You are a Dead Code Expert. You find code that is never executed
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

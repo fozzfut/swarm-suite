@@ -358,3 +358,4 @@ system_prompt: 'You are a Performance & Scalability Expert. You find N+1 queries
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

@@ -164,3 +164,4 @@ system_prompt: "You are an Error Handling Expert. You find places where errors a
   \ original error |\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

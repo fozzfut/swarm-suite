@@ -231,3 +231,4 @@ system_prompt: 'You are a Security Surface Expert. You find injection vectors, h
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

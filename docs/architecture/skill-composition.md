@@ -37,9 +37,10 @@ runtime assembles.
 | `karpathy_guidelines` | yes | Behavioral discipline applies to every AI agent |
 | `context_engineering` | yes | Every reasoning step has a context decision; lean prompts beat exhaustive ones |
 | `self_review` | no (opt-in) | Heavy checklist; lite-mode tools should skip it |
-| `systematic_debugging` | no (opt-in) | Only fix-swarm experts; review-swarm doesn't propose patches |
-| `incremental_implementation` | no (opt-in) | Only fix-swarm experts (every expert proposes a patch) |
-| `test_driven_development` | no (opt-in) | Only `test-fix` and `test-quality` -- TDD is their methodology |
+| `systematic_debugging` | no (opt-in) | fix-swarm experts; review-swarm doesn't propose patches |
+| `incremental_implementation` | no (opt-in) | fix-swarm experts (every expert proposes a patch) |
+| `test_driven_development` | no (opt-in) | `test-fix` and `test-quality` -- TDD is their methodology |
+| `retrieval_augmented_reasoning` | no (opt-in) | arch / review / fix / monitor experts -- recall similar past entries via `kb_semantic_search` before publishing |
 | `brainstorming` | no (opt-in) | Only arch-swarm `tradeoff-mediator` and the Idea-stage orchestrator |
 | `writing_plans` | no (opt-in) | Only the Plan-stage orchestrator |
 
@@ -129,6 +130,7 @@ The shipped skills form three layers:
   - `systematic_debugging` (fix-swarm experts)
   - `incremental_implementation` (fix-swarm experts) -- adapted from addyosmani/agent-skills
   - `test_driven_development` (`test-fix`, `test-quality`) -- adapted from addyosmani/agent-skills
+  - `retrieval_augmented_reasoning` (arch / review / fix / monitor experts) -- in-context learning over the KB via `kb_semantic_search`
   - `brainstorming` (Idea stage, arch debates)
   - `writing_plans` (Plan stage)
 - **Output discipline** -- what every published artifact must satisfy.

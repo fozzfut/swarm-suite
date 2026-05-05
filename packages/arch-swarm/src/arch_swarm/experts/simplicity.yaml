@@ -322,3 +322,4 @@ system_prompt: "You are a Simplicity Critic. Your sole mission is to champion th
   \ some complexity, acknowledge it\n  but insist on the MINIMUM complexity needed\n"
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

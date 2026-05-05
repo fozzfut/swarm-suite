@@ -26,24 +26,35 @@ EXPERT_DIRS = (
     REPO_ROOT / "packages/fix-swarm/src/fix_swarm/experts",
     REPO_ROOT / "packages/spec-swarm/src/spec_swarm/experts",
     REPO_ROOT / "packages/doc-swarm/src/doc_swarm/experts",
+    REPO_ROOT / "packages/monitor-swarm/src/monitor_swarm/experts",
 )
 
 # Per-tool defaults applied to EVERY expert in the tool.
 TOOL_DEFAULTS: dict[str, list[str]] = {
     # fix-swarm: every expert proposes patches -> systematic_debugging is the
     # methodology gate; incremental_implementation enforces small slices;
+    # retrieval_augmented_reasoning recalls similar past fixes;
     # self_review is the publish gate.
-    "fix-swarm": ["systematic_debugging", "incremental_implementation", "self_review"],
-    # review-swarm: every expert posts findings -> self_review is the publish gate.
-    "review-swarm": ["self_review"],
-    # arch-swarm: every expert reasons about design -> brainstorming for new
-    # debates, self_review for proposals.
-    "arch-swarm": ["self_review"],
+    "fix-swarm": [
+        "systematic_debugging",
+        "incremental_implementation",
+        "retrieval_augmented_reasoning",
+        "self_review",
+    ],
+    # review-swarm: every expert posts findings -> retrieve similar past
+    # findings before adding a new one; self_review is the publish gate.
+    "review-swarm": ["retrieval_augmented_reasoning", "self_review"],
+    # arch-swarm: every expert reasons about design -> retrieve similar past
+    # decisions; self_review for proposals.
+    "arch-swarm": ["retrieval_augmented_reasoning", "self_review"],
     # spec-swarm: every expert extracts/verifies hardware facts -> self_review
     # before posting register/pin claims.
     "spec-swarm": ["self_review"],
     # doc-swarm: every expert produces text -> self_review before publishing.
     "doc-swarm": ["self_review"],
+    # monitor-swarm: every expert produces a finding or proposes an ADR ->
+    # retrieve similar past timing/logging findings; self_review on publish.
+    "monitor-swarm": ["retrieval_augmented_reasoning", "self_review"],
 }
 
 # Per-expert overrides (slug -> additional skill slugs).

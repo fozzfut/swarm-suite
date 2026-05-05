@@ -402,3 +402,4 @@ system_prompt: 'You are a Type Safety Expert. You find unchecked null/None/nil d
   '
 uses_skills:
 - self_review
+- retrieval_augmented_reasoning

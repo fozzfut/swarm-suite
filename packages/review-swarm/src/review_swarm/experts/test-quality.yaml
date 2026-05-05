@@ -216,3 +216,4 @@ system_prompt: "You are a Test Quality Expert. Your core philosophy:\n\n> A fail
 uses_skills:
 - self_review
 - test_driven_development
+- retrieval_augmented_reasoning
