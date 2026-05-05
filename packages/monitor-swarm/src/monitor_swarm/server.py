@@ -29,6 +29,7 @@ from swarm_kb.finding_writer import FindingWriter
 from swarm_kb.session_meta import list_sessions
 
 from .detectors import detect_timing_violations, extract_timing_measurements
+from .expert_profiler import ExpertProfiler
 from .models import TraceAnalysisResult
 from .parsers import parse_saleae_csv, parse_text_log
 
@@ -180,6 +181,83 @@ def create_mcp_server():
         except Exception as exc:  # noqa: BLE001
             return _err(f"Cannot list monitor sessions: {exc}")
         return _ok({"sessions": sessions})
+
+    # ── monitor_list_experts ───────────────────────────────────────────
+
+    @mcp.tool(
+        name="monitor_list_experts",
+        description=(
+            "List monitor-swarm expert profiles. v0.2 ships four: "
+            "timing-analyst (post-trace interpretation), "
+            "logging-instrumentation (pre-trace source review: blind "
+            "paths, hot-path noise, missing context), telemetry-architect "
+            "(channel + throughput design), trace-format-designer "
+            "(timestamp / structure / correlation IDs / parseability)."
+        ),
+    )
+    def _monitor_list_experts(ctx: Optional[Context] = None) -> str:
+        profiler = ExpertProfiler()
+        profiles = profiler.list_profiles()
+        return _ok({
+            "experts": [
+                {
+                    "slug": p.get("slug", ""),
+                    "name": p.get("name", ""),
+                    "description": p.get("description", ""),
+                    "uses_skills": list(p.get("uses_skills") or []),
+                }
+                for p in profiles
+            ],
+        })
+
+    # ── monitor_suggest_experts ────────────────────────────────────────
+
+    @mcp.tool(
+        name="monitor_suggest_experts",
+        description=(
+            "Suggest monitor-swarm experts ranked by relevance to a "
+            "project. Scans up to 200 source files for each expert's "
+            "file_patterns + relevance_signals (imports, regex). Returns "
+            "experts ordered by score; the orchestrator should usually "
+            "engage the top 2-4 for a logging review."
+        ),
+    )
+    def _monitor_suggest_experts(
+        project_path: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        if not project_path:
+            return _err("project_path is required")
+        profiler = ExpertProfiler()
+        try:
+            ranked = profiler.suggest_experts(project_path)
+        except Exception as exc:  # noqa: BLE001
+            return _err(f"suggest_experts failed: {exc}")
+        return _ok({"experts": ranked})
+
+    # ── monitor_get_expert ─────────────────────────────────────────────
+
+    @mcp.tool(
+        name="monitor_get_expert",
+        description=(
+            "Return the full expert profile (system_prompt, file_patterns, "
+            "relevance_signals, uses_skills) for one slug. The system_prompt "
+            "is what the AI agent should adopt when running this expert; "
+            "compose with declared skills via the standard pipeline."
+        ),
+    )
+    def _monitor_get_expert(
+        slug: str,
+        ctx: Optional[Context] = None,
+    ) -> str:
+        if not slug:
+            return _err("slug is required")
+        profiler = ExpertProfiler()
+        try:
+            profile = profiler.load_profile(slug)
+        except FileNotFoundError as exc:
+            return _err(str(exc))
+        return _ok({"expert": profile})
 
     # ── monitor_get_session ────────────────────────────────────────────
 

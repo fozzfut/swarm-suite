@@ -68,11 +68,23 @@ Parameter names are matched leniently — `t_conv` in the spec matches `conv`, `
 
 monitor-swarm depends only on `swarm-core` + `swarm-kb` — never on `spec-swarm` directly. Spec data is passed in by the caller (the AI agent runs `spec_get_timing` first and forwards the result), keeping the existing layering rules intact. See `docs/architecture/layering.md`.
 
-## Expert profile (1)
+## Expert profiles (4)
 
-| Slug | Specialisation |
-|------|----------------|
-| `timing-analyst` | Interprets timing-violation findings, ranks by severity, generates root-cause hypotheses (ISR priorities, DMA config, clock-tree, blocking calls), recommends next diagnostic step. Does NOT propose fixes — that's fix-swarm's job. |
+monitor-swarm closes the *full* loop on instrument-software debugging. **Two halves:**
+
+* **Pre-trace (source-code review)** — review and improve the project's logging code BEFORE running it. Wrong logging guarantees wrong monitoring. Three experts focused on this.
+* **Post-trace (runtime analysis)** — analyse captured traces against extracted spec constraints. The original v0 capability.
+
+| Slug | Half | Specialisation |
+|------|------|----------------|
+| `logging-instrumentation` | pre-trace | Reviews source for blind paths (ISR/error-handler/state-transition with no log), hot-path noise, wrong verbosity, missing context, sensitive data in logs, duplicated noise. Proposes specific patches. |
+| `telemetry-architect` | pre-trace | Channel choice (RTT/UART/ITM/syslog/USB CDC/defmt+RTT/syslog/Prometheus), buffer sizing, throughput budgeting, build-time vs runtime verbosity control, failure mode under saturation. Captures structural decisions as ADRs. |
+| `trace-format-designer` | pre-trace | Timestamp source + resolution, structure (text vs key=value vs JSON vs defmt), correlation IDs, parseability for the default monitor-swarm regex, forward-compatible field additions. |
+| `timing-analyst` | post-trace | Interprets timing-violation findings, ranks by severity, generates root-cause hypotheses (ISR priorities, DMA config, clock-tree, blocking calls), recommends next diagnostic step. Does NOT propose fixes — that's fix-swarm's job. |
+
+Each expert auto-loads `context_engineering` + `self_review` (and `incremental_implementation` for the one that proposes patches).
+
+The MCP tools `monitor_list_experts`, `monitor_suggest_experts`, and `monitor_get_expert` let the AI agent discover and engage them. `monitor_suggest_experts(project_path)` ranks by relevance (file pattern + import / regex signal hits in source), so a C-firmware project with `SEGGER_RTT` and `printf` in ISRs will surface logging-instrumentation + telemetry-architect at the top.
 
 ## Cost
 
